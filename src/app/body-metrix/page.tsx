@@ -257,7 +257,7 @@ export default function BodyMetrix() {
               </div>
 
               {/* Measurements Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                 {[
                   { label: 'Weight (kg)', value: weight, setValue: setWeight, step: 0.1 },
                   { label: 'Arms (cm)', value: arms, setValue: setArms, step: 0.5 },
@@ -267,11 +267,11 @@ export default function BodyMetrix() {
                 ].map(field => (
                   <div key={field.label}>
                     <label className="block text-sm text-white/60 mb-2">{field.label}</label>
-                    <div className="flex items-stretch gap-2">
+                    <div className="flex items-stretch gap-3">
                       <button
                         type="button"
                         onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') - field.step) * 10) / 10))}
-                        className="px-4 py-3 rounded-xl text-xl font-bold transition-colors border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 active:bg-red-500/30"
+                        className="shrink-0 w-12 py-3 rounded-xl text-xl font-bold transition-colors border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 active:bg-red-500/30"
                       >−</button>
                       <input
                         type="text"
@@ -279,13 +279,13 @@ export default function BodyMetrix() {
                         value={field.value}
                         onChange={e => field.setValue(e.target.value)}
                         placeholder="0"
-                        className="glass-input w-full px-2 py-3 text-center"
+                        className="glass-input min-w-0 flex-1 px-3 py-3 text-center text-lg font-semibold"
                         required
                       />
                       <button
                         type="button"
                         onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') + field.step) * 10) / 10))}
-                        className="px-4 py-3 rounded-xl text-xl font-bold transition-colors border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 active:bg-green-500/30"
+                        className="shrink-0 w-12 py-3 rounded-xl text-xl font-bold transition-colors border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 active:bg-green-500/30"
                       >+</button>
                     </div>
                   </div>

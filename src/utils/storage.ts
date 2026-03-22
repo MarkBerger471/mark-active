@@ -112,76 +112,6 @@ export function getLastSessionForWorkout(workoutName: string): TrainingSession |
 export function getPresetWorkouts(): Workout[] {
   return [
     {
-      name: 'Back + Biceps',
-      exercises: [
-        { name: 'Pull downs', targetReps: '15-17', sets: [
-          { weight: 50, isWarmup: true }, { weight: 70, isWarmup: true },
-          { weight: 80, isWarmup: false }, { weight: 85, isWarmup: false }, { weight: 85, isWarmup: false },
-        ]},
-        { name: 'Lat pull down', targetReps: '6-8', sets: [
-          { weight: 55, isWarmup: true },
-          { weight: 80, isWarmup: false }, { weight: 80, isWarmup: false }, { weight: 85, isWarmup: false },
-        ]},
-        { name: 'V-grip cable row', targetReps: '6-8', sets: [
-          { weight: 40, isWarmup: true },
-          { weight: 60, isWarmup: false }, { weight: 60, isWarmup: false }, { weight: 65, isWarmup: false },
-        ]},
-        { name: 'Low row machine', targetReps: '6-8', sets: [
-          { weight: 90, isWarmup: true },
-          { weight: 100, isWarmup: false }, { weight: 120, isWarmup: false }, { weight: 120, isWarmup: false },
-        ]},
-        { name: 'Pullover cable machine', targetReps: '8-10', sets: [
-          { weight: 20, isWarmup: true },
-          { weight: 32.5, isWarmup: false }, { weight: 32.5, isWarmup: false }, { weight: 30, isWarmup: false },
-        ]},
-        { name: 'Biceps curl dumbbells', targetReps: '8-10', sets: [
-          { weight: 12, isWarmup: true },
-          { weight: 20, isWarmup: false }, { weight: 20, isWarmup: false }, { weight: 20, isWarmup: false },
-        ]},
-        { name: 'Biceps curl cable (straight bar)', targetReps: '8-10', sets: [
-          { weight: 15, isWarmup: true },
-          { weight: 25, isWarmup: false }, { weight: 25, isWarmup: false }, { weight: 25, isWarmup: false },
-        ]},
-      ],
-    },
-    {
-      name: 'Chest + Triceps',
-      exercises: [
-        { name: 'Pec fly machine', targetReps: '6-8', sets: [
-          { weight: 40, isWarmup: true }, { weight: 50, isWarmup: true },
-          { weight: 60, isWarmup: false }, { weight: 70, isWarmup: false }, { weight: 80, isWarmup: false },
-        ]},
-        { name: 'Chest press machine (horizontal handles)', targetReps: '6-8', sets: [
-          { weight: 60, isWarmup: true },
-          { weight: 80, isWarmup: false }, { weight: 100, isWarmup: false }, { weight: 100, isWarmup: false },
-        ]},
-        { name: 'Incline bench press barbell', targetReps: '6-8', sets: [
-          { weight: 60, isWarmup: true },
-          { weight: 80, isWarmup: false }, { weight: 80, isWarmup: false }, { weight: 80, isWarmup: false },
-        ]},
-        { name: 'Cable fly', targetReps: '8-10', sets: [
-          { weight: 10, isWarmup: true },
-          { weight: 15, isWarmup: false }, { weight: 15, isWarmup: false }, { weight: 15, isWarmup: false },
-        ]},
-        { name: 'Chest press machine (neutral grip)', targetReps: '6-8', sets: [
-          { weight: 30, isWarmup: true },
-          { weight: 50, isWarmup: false }, { weight: 60, isWarmup: false }, { weight: 60, isWarmup: false }, { weight: 60, isWarmup: false },
-        ]},
-        { name: 'Triceps single arm curl', targetReps: '8-10', sets: [
-          { weight: 10, isWarmup: true },
-          { weight: 14, isWarmup: false }, { weight: 16, isWarmup: false }, { weight: 16, isWarmup: false },
-        ]},
-        { name: 'Triceps curl cable (rope)', targetReps: '8-10', sets: [
-          { weight: 20, isWarmup: true },
-          { weight: 30, isWarmup: false }, { weight: 30, isWarmup: false }, { weight: 30, isWarmup: false },
-        ]},
-        { name: 'Triceps curl cable single arm', targetReps: '12-15', sets: [
-          { weight: 5, isWarmup: true },
-          { weight: 7.5, isWarmup: false }, { weight: 7.5, isWarmup: false }, { weight: 7.5, isWarmup: false },
-        ]},
-      ],
-    },
-    {
       name: 'Shoulders',
       exercises: [
         { name: 'Lateral raises dumbbells (seated)', targetReps: '6-8', sets: [
@@ -254,6 +184,76 @@ export function getPresetWorkouts(): Workout[] {
         { name: 'Calve raises', targetReps: '15-20', sets: [
           { weight: 100, isWarmup: true },
           { weight: 200, isWarmup: false }, { weight: 240, isWarmup: false }, { weight: 240, isWarmup: false }, { weight: 280, isWarmup: false },
+        ]},
+      ],
+    },
+    {
+      name: 'Chest + Triceps',
+      exercises: [
+        { name: 'Pec fly machine', targetReps: '6-8', sets: [
+          { weight: 40, isWarmup: true }, { weight: 50, isWarmup: true },
+          { weight: 60, isWarmup: false }, { weight: 70, isWarmup: false }, { weight: 80, isWarmup: false },
+        ]},
+        { name: 'Chest press machine (horizontal handles)', targetReps: '6-8', sets: [
+          { weight: 60, isWarmup: true },
+          { weight: 80, isWarmup: false }, { weight: 100, isWarmup: false }, { weight: 100, isWarmup: false },
+        ]},
+        { name: 'Incline bench press barbell', targetReps: '6-8', sets: [
+          { weight: 60, isWarmup: true },
+          { weight: 80, isWarmup: false }, { weight: 80, isWarmup: false }, { weight: 80, isWarmup: false },
+        ]},
+        { name: 'Cable fly', targetReps: '8-10', sets: [
+          { weight: 10, isWarmup: true },
+          { weight: 15, isWarmup: false }, { weight: 15, isWarmup: false }, { weight: 15, isWarmup: false },
+        ]},
+        { name: 'Chest press machine (neutral grip)', targetReps: '6-8', sets: [
+          { weight: 30, isWarmup: true },
+          { weight: 50, isWarmup: false }, { weight: 60, isWarmup: false }, { weight: 60, isWarmup: false }, { weight: 60, isWarmup: false },
+        ]},
+        { name: 'Triceps single arm curl', targetReps: '8-10', sets: [
+          { weight: 10, isWarmup: true },
+          { weight: 14, isWarmup: false }, { weight: 16, isWarmup: false }, { weight: 16, isWarmup: false },
+        ]},
+        { name: 'Triceps curl cable (rope)', targetReps: '8-10', sets: [
+          { weight: 20, isWarmup: true },
+          { weight: 30, isWarmup: false }, { weight: 30, isWarmup: false }, { weight: 30, isWarmup: false },
+        ]},
+        { name: 'Triceps curl cable single arm', targetReps: '12-15', sets: [
+          { weight: 5, isWarmup: true },
+          { weight: 7.5, isWarmup: false }, { weight: 7.5, isWarmup: false }, { weight: 7.5, isWarmup: false },
+        ]},
+      ],
+    },
+    {
+      name: 'Back + Biceps',
+      exercises: [
+        { name: 'Pull downs', targetReps: '15-17', sets: [
+          { weight: 50, isWarmup: true }, { weight: 70, isWarmup: true },
+          { weight: 80, isWarmup: false }, { weight: 85, isWarmup: false }, { weight: 85, isWarmup: false },
+        ]},
+        { name: 'Lat pull down', targetReps: '6-8', sets: [
+          { weight: 55, isWarmup: true },
+          { weight: 80, isWarmup: false }, { weight: 80, isWarmup: false }, { weight: 85, isWarmup: false },
+        ]},
+        { name: 'V-grip cable row', targetReps: '6-8', sets: [
+          { weight: 40, isWarmup: true },
+          { weight: 60, isWarmup: false }, { weight: 60, isWarmup: false }, { weight: 65, isWarmup: false },
+        ]},
+        { name: 'Low row machine', targetReps: '6-8', sets: [
+          { weight: 90, isWarmup: true },
+          { weight: 100, isWarmup: false }, { weight: 120, isWarmup: false }, { weight: 120, isWarmup: false },
+        ]},
+        { name: 'Pullover cable machine', targetReps: '8-10', sets: [
+          { weight: 20, isWarmup: true },
+          { weight: 32.5, isWarmup: false }, { weight: 32.5, isWarmup: false }, { weight: 30, isWarmup: false },
+        ]},
+        { name: 'Biceps curl dumbbells', targetReps: '8-10', sets: [
+          { weight: 12, isWarmup: true },
+          { weight: 20, isWarmup: false }, { weight: 20, isWarmup: false }, { weight: 20, isWarmup: false },
+        ]},
+        { name: 'Biceps curl cable (straight bar)', targetReps: '8-10', sets: [
+          { weight: 15, isWarmup: true },
+          { weight: 25, isWarmup: false }, { weight: 25, isWarmup: false }, { weight: 25, isWarmup: false },
         ]},
       ],
     },

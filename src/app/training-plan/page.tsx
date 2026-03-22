@@ -356,7 +356,6 @@ export default function TrainingPlanPage() {
                                     onWeightChange={updateSetWeight}
                                     onRepsChange={updateSetReps}
                                     onToggleDone={toggleSetDone}
-                                    onRemove={removeSet}
                                     formatWeight={formatWeight}
                                   />
                                 );
@@ -380,7 +379,6 @@ export default function TrainingPlanPage() {
                                   onWeightChange={updateSetWeight}
                                   onRepsChange={updateSetReps}
                                   onToggleDone={toggleSetDone}
-                                  onRemove={removeSet}
                                   formatWeight={formatWeight}
                                 />
                               );
@@ -425,7 +423,7 @@ export default function TrainingPlanPage() {
 // Individual set row component
 function SetRow({
   set, setIdx, exIdx, isWarmup, targetReps,
-  onWeightChange, onRepsChange, onToggleDone, onRemove, formatWeight,
+  onWeightChange, onRepsChange, onToggleDone, formatWeight,
 }: {
   set: TrainingSet;
   setIdx: number;
@@ -435,23 +433,10 @@ function SetRow({
   onWeightChange: (exIdx: number, setIdx: number, weight: string) => void;
   onRepsChange: (exIdx: number, setIdx: number, reps: string) => void;
   onToggleDone: (exIdx: number, setIdx: number) => void;
-  onRemove: (exIdx: number, setIdx: number) => void;
   formatWeight: (w: number | string) => string;
 }) {
   return (
     <div className={`flex items-center gap-2 mb-2 ${set.done ? 'opacity-50' : ''}`}>
-      {/* Done checkbox */}
-      <button
-        onClick={() => onToggleDone(exIdx, setIdx)}
-        className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-all ${
-          set.done
-            ? 'bg-va-red border-va-red text-white'
-            : 'border-white/15 text-transparent hover:border-white/30'
-        }`}
-      >
-        ✓
-      </button>
-
       {/* Label */}
       <span className={`text-xs w-8 shrink-0 ${isWarmup ? 'text-yellow-500/60' : 'text-white/30'}`}>
         {isWarmup ? 'WU' : 'SET'}
@@ -481,12 +466,16 @@ function SetRow({
         />
       </div>
 
-      {/* Remove */}
+      {/* Done checkbox */}
       <button
-        onClick={() => onRemove(exIdx, setIdx)}
-        className="text-white/15 hover:text-red-400 text-xs shrink-0 w-6 text-center"
+        onClick={() => onToggleDone(exIdx, setIdx)}
+        className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-all ${
+          set.done
+            ? 'bg-green-600 border-green-600 text-white'
+            : 'border-white/15 text-transparent hover:border-white/30'
+        }`}
       >
-        ✕
+        ✓
       </button>
     </div>
   );
