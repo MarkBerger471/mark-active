@@ -111,10 +111,10 @@ export default function BodyMetrix() {
     setHunger(last?.hunger || '');
     setTiredness(last?.tiredness || '');
     setDigestion(last?.digestion || '');
-    setSleepHours(last?.sleepHours ?? 7.5);
-    setCardio(last?.cardio ?? 5);
-    setTrainings(last?.trainings ?? 5);
-    setFoodChanges(last?.foodChanges ?? 95);
+    setSleepHours(7.5);
+    setCardio(5);
+    setTrainings(5);
+    setFoodChanges(95);
     setPhotos({});
     if (bulkPhotoRef.current) bulkPhotoRef.current.value = '';
     if (singlePhotoRef.current) singlePhotoRef.current.value = '';
