@@ -235,7 +235,7 @@ export default function TrainingPlanPage() {
                   {[...sessions].reverse().slice(0, 10).map((s) => {
                     const isExpanded = expandedSession === s.id;
                     const prev = isExpanded ? getPreviousSession(s) : null;
-                    const doneExercises = s.exercises.filter(e => !e.skipped && e.sets.some(set => set.done));
+                    const doneExercises = s.exercises.filter(e => !e.skipped);
                     return (
                       <div key={s.id} className="glass-card overflow-hidden">
                         <div
@@ -279,18 +279,18 @@ export default function TrainingPlanPage() {
                               </thead>
                               <tbody>
                                 {doneExercises.map((ex, i) => {
-                                  const doneSets = ex.sets.filter(set => set.done && !set.isWarmup);
-                                  if (doneSets.length === 0) return null;
-                                  const maxWeight = Math.max(...doneSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0));
-                                  const totalReps = doneSets.reduce((sum, set) => sum + (set.reps || 0), 0);
-                                  const setCount = doneSets.length;
+                                  const workingSets = ex.sets.filter(set => !set.isWarmup);
+                                  if (workingSets.length === 0) return null;
+                                  const maxWeight = Math.max(...workingSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0));
+                                  const totalReps = workingSets.reduce((sum, set) => sum + (set.reps || 0), 0);
+                                  const setCount = workingSets.length;
 
                                   // Find previous session's same exercise
                                   const prevEx = prev?.exercises.find(pe => pe.name === ex.name);
-                                  const prevDoneSets = prevEx?.sets.filter(set => set.done && !set.isWarmup) || [];
-                                  const prevMaxWeight = prevDoneSets.length > 0 ? Math.max(...prevDoneSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0)) : undefined;
-                                  const prevTotalReps = prevDoneSets.length > 0 ? prevDoneSets.reduce((sum, set) => sum + (set.reps || 0), 0) : undefined;
-                                  const prevSetCount = prevDoneSets.length > 0 ? prevDoneSets.length : undefined;
+                                  const prevWorkingSets = prevEx?.sets.filter(set => !set.isWarmup) || [];
+                                  const prevMaxWeight = prevWorkingSets.length > 0 ? Math.max(...prevWorkingSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0)) : undefined;
+                                  const prevTotalReps = prevWorkingSets.length > 0 ? prevWorkingSets.reduce((sum, set) => sum + (set.reps || 0), 0) : undefined;
+                                  const prevSetCount = prevWorkingSets.length > 0 ? prevWorkingSets.length : undefined;
 
                                   return (
                                     <tr key={i} className="text-white/70 border-t border-white/5">
