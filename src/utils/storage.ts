@@ -1,5 +1,5 @@
 import { Measurement, TrainingDay, NutritionPlan, Workout, TrainingSession } from '@/types';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import {
   collection,
   doc,
@@ -13,6 +13,7 @@ import {
   limit,
   writeBatch,
 } from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 
 // Strip undefined values recursively — Firestore rejects undefined
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,17 +77,25 @@ export async function getMeasurements(): Promise<Measurement[]> {
 }
 
 export async function saveMeasurement(measurement: Measurement) {
-  // Strip base64 photos to avoid exceeding Firestore 1MB limit
   const toSave = { ...measurement };
+  // Upload base64 photos to Firebase Storage, store download URLs
   if (toSave.photos) {
-    const cleanPhotos: Record<string, string> = {};
-    for (const [key, val] of Object.entries(toSave.photos)) {
-      if (val && !val.startsWith('data:')) {
-        cleanPhotos[key] = val; // keep file path references
+    const uploadedPhotos: Record<string, string> = {};
+    for (const [angle, val] of Object.entries(toSave.photos)) {
+      if (!val) continue;
+      if (val.startsWith('data:')) {
+        try {
+          const storageRef = ref(storage, `photos/${toSave.date}/${angle}.jpg`);
+          await uploadString(storageRef, val, 'data_url');
+          uploadedPhotos[angle] = await getDownloadURL(storageRef);
+        } catch (e) {
+          console.error(`Photo upload failed for ${angle}:`, e);
+        }
+      } else {
+        uploadedPhotos[angle] = val; // already a URL
       }
-      // base64 photos are dropped — Firestore can't handle them
     }
-    toSave.photos = cleanPhotos;
+    toSave.photos = uploadedPhotos;
   }
   try {
     await setDoc(doc(db, 'measurements', toSave.date), stripUndefined(toSave));
