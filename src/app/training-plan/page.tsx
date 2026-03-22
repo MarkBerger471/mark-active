@@ -270,7 +270,7 @@ export default function TrainingPlanPage() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={saveWorkout}
+                onClick={() => { saveWorkout(); setTimeout(() => setView('select'), 500); }}
                 className={`btn-primary text-sm px-4 py-2 ${saved ? '!bg-green-700' : ''}`}
               >
                 {saved ? 'Saved' : 'Save'}
@@ -400,20 +400,6 @@ export default function TrainingPlanPage() {
             })}
           </div>
 
-          {/* Bottom save bar (mobile) */}
-          <div className="fixed bottom-16 md:bottom-0 left-0 right-0 md:left-64 p-4 z-40">
-            <div className="glass-strong rounded-2xl p-3 flex gap-3 max-w-3xl mx-auto">
-              <button onClick={finishWorkout} className="btn-secondary flex-1 py-3 text-sm">
-                Finish
-              </button>
-              <button
-                onClick={saveWorkout}
-                className={`btn-primary flex-1 py-3 text-sm ${saved ? '!bg-green-700' : ''}`}
-              >
-                {saved ? 'Saved ✓' : 'Save Workout'}
-              </button>
-            </div>
-          </div>
         </div>
       </main>
     </div>
