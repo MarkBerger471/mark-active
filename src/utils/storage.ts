@@ -87,11 +87,13 @@ export function getTrainingSessions(): TrainingSession[] {
 
 export function saveTrainingSession(session: TrainingSession) {
   const sessions = getTrainingSessions();
-  session.savedAt = new Date().toISOString();
   const existingIndex = sessions.findIndex(s => s.id === session.id);
   if (existingIndex >= 0) {
+    // Preserve original savedAt on edits
+    session.savedAt = sessions[existingIndex].savedAt || session.savedAt || new Date().toISOString();
     sessions[existingIndex] = session;
   } else {
+    session.savedAt = session.savedAt || new Date().toISOString();
     sessions.push(session);
   }
   localStorage.setItem(KEYS.TRAINING_SESSIONS, JSON.stringify(sessions));
