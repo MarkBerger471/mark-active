@@ -267,11 +267,11 @@ export default function BodyMetrix() {
                 ].map(field => (
                   <div key={field.label}>
                     <label className="block text-sm text-white/60 mb-2">{field.label}</label>
-                    <div className="flex items-stretch gap-0">
+                    <div className="flex items-stretch gap-2">
                       <button
                         type="button"
                         onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') - field.step) * 10) / 10))}
-                        className="glass-input px-4 py-3 rounded-r-none border-r-0 text-xl font-bold text-white/60 hover:text-white hover:bg-white/10 active:bg-white/15 transition-colors"
+                        className="px-4 py-3 rounded-xl text-xl font-bold transition-colors border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 active:bg-red-500/30"
                       >−</button>
                       <input
                         type="text"
@@ -279,13 +279,13 @@ export default function BodyMetrix() {
                         value={field.value}
                         onChange={e => field.setValue(e.target.value)}
                         placeholder="0"
-                        className="glass-input w-full px-2 py-3 text-center rounded-none border-x-0"
+                        className="glass-input w-full px-2 py-3 text-center"
                         required
                       />
                       <button
                         type="button"
                         onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') + field.step) * 10) / 10))}
-                        className="glass-input px-4 py-3 rounded-l-none border-l-0 text-xl font-bold text-white/60 hover:text-white hover:bg-white/10 active:bg-white/15 transition-colors"
+                        className="px-4 py-3 rounded-xl text-xl font-bold transition-colors border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 active:bg-green-500/30"
                       >+</button>
                     </div>
                   </div>
