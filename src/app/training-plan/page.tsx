@@ -435,33 +435,46 @@ function SetRow({
   onToggleDone: (exIdx: number, setIdx: number) => void;
   formatWeight: (w: number | string) => string;
 }) {
+  const weightNum = typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0;
+  const step = weightNum >= 40 ? 5 : 2.5;
+
   return (
-    <div className={`flex items-center gap-2 mb-2 ${set.done ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center gap-1.5 mb-2 ${set.done ? 'opacity-50' : ''}`}>
       {/* Label */}
-      <span className={`text-xs w-8 shrink-0 ${isWarmup ? 'text-yellow-500/60' : 'text-white/30'}`}>
+      <span className={`text-xs w-7 shrink-0 ${isWarmup ? 'text-yellow-500/60' : 'text-white/30'}`}>
         {isWarmup ? 'WU' : 'SET'}
       </span>
 
-      {/* Weight input */}
+      {/* Weight: - input + */}
+      <button
+        type="button"
+        onClick={() => onWeightChange(exIdx, setIdx, String(Math.round((weightNum - step) * 10) / 10))}
+        className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-red-500/30 bg-red-500/10 text-red-400 active:bg-red-500/30"
+      >−</button>
       <div className="flex-1">
         <input
           type="text"
           inputMode="decimal"
           value={formatWeight(set.weight)}
           onChange={(e) => onWeightChange(exIdx, setIdx, e.target.value)}
-          className="glass-input w-full px-3 py-2 text-sm text-center"
+          className="glass-input w-full px-2 py-2 text-sm text-center"
           placeholder="kg"
         />
       </div>
+      <button
+        type="button"
+        onClick={() => onWeightChange(exIdx, setIdx, String(Math.round((weightNum + step) * 10) / 10))}
+        className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-green-500/30 bg-green-500/10 text-green-400 active:bg-green-500/30"
+      >+</button>
 
       {/* Reps input */}
-      <div className="w-16">
+      <div className="w-14">
         <input
           type="text"
           inputMode="numeric"
           value={set.reps ?? ''}
           onChange={(e) => onRepsChange(exIdx, setIdx, e.target.value)}
-          className="glass-input w-full px-2 py-2 text-sm text-center"
+          className="glass-input w-full px-1 py-2 text-sm text-center"
           placeholder={targetReps}
         />
       </div>

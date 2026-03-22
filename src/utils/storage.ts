@@ -145,6 +145,9 @@ export function getPresetWorkouts(): Workout[] {
         { name: 'Abs (sit ups, flutter kicks)', targetReps: '15-20', notes: '3 sets each', sets: [
           { weight: 0, isWarmup: false }, { weight: 0, isWarmup: false }, { weight: 0, isWarmup: false },
         ]},
+        { name: 'Cardio', targetReps: '30 min', notes: 'Treadmill / bike / incline walk', sets: [
+          { weight: 0, isWarmup: false },
+        ]},
       ],
     },
     {
@@ -185,6 +188,9 @@ export function getPresetWorkouts(): Workout[] {
           { weight: 100, isWarmup: true },
           { weight: 200, isWarmup: false }, { weight: 240, isWarmup: false }, { weight: 240, isWarmup: false }, { weight: 280, isWarmup: false },
         ]},
+        { name: 'Cardio', targetReps: '30 min', notes: 'Treadmill / bike / incline walk', sets: [
+          { weight: 0, isWarmup: false },
+        ]},
       ],
     },
     {
@@ -222,6 +228,9 @@ export function getPresetWorkouts(): Workout[] {
           { weight: 5, isWarmup: true },
           { weight: 7.5, isWarmup: false }, { weight: 7.5, isWarmup: false }, { weight: 7.5, isWarmup: false },
         ]},
+        { name: 'Cardio', targetReps: '30 min', notes: 'Treadmill / bike / incline walk', sets: [
+          { weight: 0, isWarmup: false },
+        ]},
       ],
     },
     {
@@ -254,6 +263,9 @@ export function getPresetWorkouts(): Workout[] {
         { name: 'Biceps curl cable (straight bar)', targetReps: '8-10', sets: [
           { weight: 15, isWarmup: true },
           { weight: 25, isWarmup: false }, { weight: 25, isWarmup: false }, { weight: 25, isWarmup: false },
+        ]},
+        { name: 'Cardio', targetReps: '30 min', notes: 'Treadmill / bike / incline walk', sets: [
+          { weight: 0, isWarmup: false },
         ]},
       ],
     },

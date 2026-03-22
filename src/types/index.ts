@@ -5,6 +5,7 @@ export interface Measurement {
   waist: number;
   legs: number;
   weight: number;
+  bodyFat?: number;
   energy?: string;
   hunger?: string;
   tiredness?: string;

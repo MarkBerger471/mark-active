@@ -23,6 +23,7 @@ export default function BodyMetrix() {
   const [waist, setWaist] = useState('');
   const [legs, setLegs] = useState('');
   const [weight, setWeight] = useState('');
+  const [bodyFat, setBodyFat] = useState('');
   const [energy, setEnergy] = useState('');
   const [hunger, setHunger] = useState('');
   const [tiredness, setTiredness] = useState('');
@@ -33,10 +34,10 @@ export default function BodyMetrix() {
   const [foodChanges, setFoodChanges] = useState(100);
   const [photos, setPhotos] = useState<{ front?: string; sideLeft?: string; sideRight?: string; back?: string }>({});
 
-  const frontRef = useRef<HTMLInputElement>(null);
-  const sideLeftRef = useRef<HTMLInputElement>(null);
-  const sideRightRef = useRef<HTMLInputElement>(null);
-  const backRef = useRef<HTMLInputElement>(null);
+  const bulkPhotoRef = useRef<HTMLInputElement>(null);
+  const singlePhotoRef = useRef<HTMLInputElement>(null);
+  const [singlePhotoTarget, setSinglePhotoTarget] = useState<'front' | 'sideLeft' | 'back' | 'sideRight'>('front');
+  const [swapSource, setSwapSource] = useState<'front' | 'sideLeft' | 'back' | 'sideRight' | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -64,6 +65,36 @@ export default function BodyMetrix() {
     setPhotos(prev => ({ ...prev, [angle]: base64 }));
   };
 
+  const handleBulkUpload = async (files: FileList | null) => {
+    if (!files) return;
+    const order: ('front' | 'sideLeft' | 'back' | 'sideRight')[] = ['front', 'sideLeft', 'back', 'sideRight'];
+    const newPhotos: typeof photos = {};
+    for (let i = 0; i < Math.min(files.length, 4); i++) {
+      const base64 = await fileToBase64(files[i]);
+      newPhotos[order[i]] = base64;
+    }
+    setPhotos(prev => ({ ...prev, ...newPhotos }));
+  };
+
+  const handleSwap = (target: 'front' | 'sideLeft' | 'back' | 'sideRight') => {
+    if (!swapSource) {
+      setSwapSource(target);
+      return;
+    }
+    if (swapSource === target) {
+      setSwapSource(null);
+      return;
+    }
+    setPhotos(prev => {
+      const updated = { ...prev };
+      const temp = updated[swapSource];
+      updated[swapSource] = updated[target];
+      updated[target] = temp;
+      return updated;
+    });
+    setSwapSource(null);
+  };
+
   const prefillFromLast = () => {
     const all = getMeasurements();
     const last = all.length > 0 ? all[all.length - 1] : null;
@@ -73,6 +104,7 @@ export default function BodyMetrix() {
     setWaist(last ? String(last.waist) : '');
     setLegs(last ? String(last.legs) : '');
     setWeight(last ? String(last.weight) : '');
+    setBodyFat(last?.bodyFat != null ? String(last.bodyFat) : '');
     setEnergy(last?.energy || '');
     setHunger(last?.hunger || '');
     setTiredness(last?.tiredness || '');
@@ -82,10 +114,8 @@ export default function BodyMetrix() {
     setTrainings(last?.trainings ?? 5);
     setFoodChanges(last?.foodChanges ?? 100);
     setPhotos({});
-    if (frontRef.current) frontRef.current.value = '';
-    if (sideLeftRef.current) sideLeftRef.current.value = '';
-    if (sideRightRef.current) sideRightRef.current.value = '';
-    if (backRef.current) backRef.current.value = '';
+    if (bulkPhotoRef.current) bulkPhotoRef.current.value = '';
+    if (singlePhotoRef.current) singlePhotoRef.current.value = '';
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -97,6 +127,7 @@ export default function BodyMetrix() {
       waist: parseFloat(waist) || 0,
       legs: parseFloat(legs) || 0,
       weight: parseFloat(weight) || 0,
+      bodyFat: bodyFat ? parseFloat(bodyFat) : undefined,
       energy: energy || undefined,
       hunger: hunger || undefined,
       tiredness: tiredness || undefined,
@@ -113,9 +144,12 @@ export default function BodyMetrix() {
   };
 
   // Auto-calculate change vs previous measurement
-  const getChange = (current: Measurement, previous: Measurement | null, field: 'arms' | 'chest' | 'waist' | 'legs' | 'weight'): number | undefined => {
+  const getChange = (current: Measurement, previous: Measurement | null, field: 'arms' | 'chest' | 'waist' | 'legs' | 'weight' | 'bodyFat'): number | undefined => {
     if (!previous) return undefined;
-    const diff = Math.round((current[field] - previous[field]) * 10) / 10;
+    const curVal = current[field];
+    const prevVal = previous[field];
+    if (curVal == null || prevVal == null) return undefined;
+    const diff = Math.round((curVal - prevVal) * 10) / 10;
     return diff;
   };
 
@@ -210,11 +244,11 @@ export default function BodyMetrix() {
     );
   };
 
-  const photoAngles = [
-    { key: 'front' as const, label: 'Front', ref: frontRef },
-    { key: 'sideLeft' as const, label: 'Side Left', ref: sideLeftRef },
-    { key: 'back' as const, label: 'Back', ref: backRef },
-    { key: 'sideRight' as const, label: 'Side Right', ref: sideRightRef },
+  const photoAngles: { key: 'front' | 'sideLeft' | 'back' | 'sideRight'; label: string }[] = [
+    { key: 'front', label: 'Front' },
+    { key: 'sideLeft', label: 'Side Left' },
+    { key: 'back', label: 'Back' },
+    { key: 'sideRight', label: 'Side Right' },
   ];
 
   return (
@@ -259,11 +293,12 @@ export default function BodyMetrix() {
               {/* Measurements Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                 {[
-                  { label: 'Weight (kg)', value: weight, setValue: setWeight, step: 0.1 },
-                  { label: 'Arms (cm)', value: arms, setValue: setArms, step: 0.5 },
-                  { label: 'Chest (cm)', value: chest, setValue: setChest, step: 0.5 },
-                  { label: 'Waist (cm)', value: waist, setValue: setWaist, step: 0.5 },
-                  { label: 'Legs (cm)', value: legs, setValue: setLegs, step: 0.5 },
+                  { label: 'Weight (kg)', value: weight, setValue: setWeight, step: 0.1, req: true },
+                  { label: 'Body Fat (%)', value: bodyFat, setValue: setBodyFat, step: 0.1, req: false },
+                  { label: 'Arms (cm)', value: arms, setValue: setArms, step: 0.5, req: true },
+                  { label: 'Chest (cm)', value: chest, setValue: setChest, step: 0.5, req: true },
+                  { label: 'Waist (cm)', value: waist, setValue: setWaist, step: 0.5, req: true },
+                  { label: 'Legs (cm)', value: legs, setValue: setLegs, step: 0.5, req: true },
                 ].map(field => (
                   <div key={field.label}>
                     <label className="block text-sm text-white/60 mb-2">{field.label}</label>
@@ -280,7 +315,7 @@ export default function BodyMetrix() {
                         onChange={e => field.setValue(e.target.value)}
                         placeholder="0"
                         className="glass-input min-w-0 flex-1 px-3 py-3 text-center text-lg font-semibold"
-                        required
+                        required={field.req}
                       />
                       <button
                         type="button"
@@ -354,17 +389,65 @@ export default function BodyMetrix() {
 
               {/* Photo Uploads */}
               <div className="mb-6">
-                <label className="block text-sm text-white/60 mb-2">Progress Photos</label>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm text-white/60">Progress Photos</label>
+                  <button
+                    type="button"
+                    onClick={() => bulkPhotoRef.current?.click()}
+                    className="btn-secondary text-xs px-3 py-1.5"
+                  >
+                    Upload all 4
+                  </button>
+                </div>
+                <p className="text-[10px] text-white/25 mb-3">
+                  Upload 4 photos at once (order: front, side-left, back, side-right) or tap a slot to upload individually.
+                  {swapSource && <span className="text-va-red ml-1">Tap another photo to swap positions.</span>}
+                </p>
+                <input
+                  ref={bulkPhotoRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={e => { handleBulkUpload(e.target.files); if (bulkPhotoRef.current) bulkPhotoRef.current.value = ''; }}
+                />
+                <input
+                  ref={singlePhotoRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => { handlePhotoUpload(singlePhotoTarget, e.target.files?.[0]); if (singlePhotoRef.current) singlePhotoRef.current.value = ''; }}
+                />
                 <div className="photo-grid">
                   {photoAngles.map(angle => (
                     <div key={angle.key} className="flex flex-col gap-2">
                       <label className="text-xs text-white/40 text-center">{angle.label}</label>
                       <div
-                        className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center cursor-pointer hover:border-va-red/30 transition-colors relative"
-                        onClick={() => angle.ref.current?.click()}
+                        className={`aspect-[3/4] rounded-xl overflow-hidden bg-white/5 border flex items-center justify-center cursor-pointer transition-colors relative ${
+                          swapSource === angle.key
+                            ? 'border-va-red ring-2 ring-va-red/30'
+                            : swapSource && photos[angle.key]
+                              ? 'border-white/20 hover:border-va-red/50'
+                              : 'border-white/10 hover:border-va-red/30'
+                        }`}
+                        onClick={() => {
+                          if (photos[angle.key] && (swapSource || Object.values(photos).filter(Boolean).length > 1)) {
+                            handleSwap(angle.key);
+                          } else {
+                            setSinglePhotoTarget(angle.key);
+                            singlePhotoRef.current?.click();
+                          }
+                        }}
                       >
                         {photos[angle.key] ? (
-                          <img src={photos[angle.key]} alt={angle.label} className="w-full h-full object-cover" />
+                          <>
+                            <img src={photos[angle.key]} alt={angle.label} className="w-full h-full object-cover" />
+                            {swapSource === angle.key && (
+                              <div className="absolute inset-0 bg-va-red/20 flex items-center justify-center">
+                                <span className="text-white text-xs font-bold bg-black/50 px-2 py-1 rounded">Tap to swap</span>
+                              </div>
+                            )}
+                          </>
                         ) : (
                           <div className="text-white/20 text-center p-2">
                             <div className="text-2xl mb-1">+</div>
@@ -372,13 +455,6 @@ export default function BodyMetrix() {
                           </div>
                         )}
                       </div>
-                      <input
-                        ref={angle.ref}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={e => handlePhotoUpload(angle.key, e.target.files?.[0])}
-                      />
                     </div>
                   ))}
                 </div>
@@ -425,9 +501,10 @@ export default function BodyMetrix() {
                     </div>
 
                     {/* Measurement Values */}
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
                       {([
                         { label: 'Weight', value: `${m.weight}kg`, field: 'weight' as const, unit: 'kg' },
+                        { label: 'Body Fat', value: m.bodyFat != null ? `${m.bodyFat}%` : '—', field: 'bodyFat' as const, unit: '%' },
                         { label: 'Arms', value: `${m.arms}cm`, field: 'arms' as const, unit: 'cm' },
                         { label: 'Chest', value: `${m.chest}cm`, field: 'chest' as const, unit: 'cm' },
                         { label: 'Waist', value: `${m.waist}cm`, field: 'waist' as const, unit: 'cm' },
