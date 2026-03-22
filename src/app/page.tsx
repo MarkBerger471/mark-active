@@ -24,6 +24,15 @@ export default function Dashboard() {
     }
     return 'bulking';
   });
+  const [targetWeight, setTargetWeight] = useState<number | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('bb_target_weight');
+      return stored ? parseFloat(stored) : null;
+    }
+    return null;
+  });
+  const [showTargetInput, setShowTargetInput] = useState(false);
+  const [targetInput, setTargetInput] = useState('');
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -104,43 +113,103 @@ export default function Dashboard() {
 
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {
-            const chartWidth = 700;
-            const chartHeight = 220;
-            const padding = { top: 30, right: 24, bottom: 44, left: 54 };
-            const innerWidth = chartWidth - padding.left - padding.right;
-            const innerHeight = chartHeight - padding.top - padding.bottom;
-
             const weights = measurements.map(m => m.weight);
-            const minW = Math.min(...weights) - 1;
-            const maxW = Math.max(...weights) + 1;
-            const rangeW = maxW - minW || 1;
             const startWeight = weights[0];
             const endWeight = weights[weights.length - 1];
             const totalChange = Math.round((endWeight - startWeight) * 10) / 10;
 
-            // Progress logic: bulking = weight up is good, cutting = weight down is good
-            const isPositiveProgress = phase === 'bulking' ? totalChange > 0 : totalChange < 0;
-            const progressColor = isPositiveProgress ? '#22c55e' : totalChange === 0 ? '#94a3b8' : '#f59e0b';
-            const accentColor = phase === 'bulking' ? '#22c55e' : '#3b82f6';
+            // Calculate trend: weekly rate from linear regression
+            const dates = measurements.map(m => new Date(m.date).getTime());
+            const firstDate = dates[0];
+            const weeks = dates.map(d => (d - firstDate) / (7 * 24 * 60 * 60 * 1000));
+            const n = weeks.length;
+            const sumX = weeks.reduce((a, b) => a + b, 0);
+            const sumY = weights.reduce((a, b) => a + b, 0);
+            const sumXY = weeks.reduce((a, x, i) => a + x * weights[i], 0);
+            const sumX2 = weeks.reduce((a, x) => a + x * x, 0);
+            const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX); // kg per week
+            const intercept = (sumY - slope * sumX) / n;
 
-            const points = measurements.map((m, i) => {
-              const x = padding.left + (measurements.length === 1 ? innerWidth / 2 : (i / (measurements.length - 1)) * innerWidth);
-              const y = padding.top + innerHeight - ((m.weight - minW) / rangeW) * innerHeight;
-              return { x, y, val: m.weight, date: m.date };
-            });
+            // Projection: extend from last point using trend
+            const lastDate = new Date(measurements[measurements.length - 1].date);
+            const lastWeek = weeks[weeks.length - 1];
+            let projectionWeeks = 0;
+            let projectionLabel = '';
+            if (targetWeight !== null && slope !== 0) {
+              const weeksToTarget = (targetWeight - endWeight) / slope;
+              if (weeksToTarget > 0) {
+                projectionWeeks = Math.ceil(weeksToTarget);
+                const targetDate = new Date(lastDate.getTime() + weeksToTarget * 7 * 24 * 60 * 60 * 1000);
+                projectionLabel = targetDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+              }
+            }
+
+            // Build projection points (trend-based from last data point)
+            const projSteps = projectionWeeks > 0 ? Math.min(projectionWeeks, 52) : 0;
+            const projPoints: { week: number; weight: number; date: Date }[] = [];
+            for (let i = 1; i <= projSteps; i++) {
+              const w = endWeight + slope * i;
+              const d = new Date(lastDate.getTime() + i * 7 * 24 * 60 * 60 * 1000);
+              projPoints.push({ week: lastWeek + i, weight: w, date: d });
+            }
+
+            // Chart dimensions
+            const chartWidth = 700;
+            const chartHeight = 240;
+            const padding = { top: 30, right: 60, bottom: 44, left: 54 };
+            const innerWidth = chartWidth - padding.left - padding.right;
+            const innerHeight = chartHeight - padding.top - padding.bottom;
+
+            // Combine all weights for Y range
+            const allWeights = [...weights, ...(projPoints.map(p => p.weight)), ...(targetWeight !== null ? [targetWeight] : [])];
+            const minW = Math.min(...allWeights) - 1;
+            const maxW = Math.max(...allWeights) + 1;
+            const rangeW = maxW - minW || 1;
+
+            // X range: all weeks including projection
+            const allWeeksArr = [...weeks, ...projPoints.map(p => p.week)];
+            const maxWeek = Math.max(...allWeeksArr);
+            const minWeek = 0;
+            const weekRange = maxWeek - minWeek || 1;
+
+            const toX = (w: number) => padding.left + ((w - minWeek) / weekRange) * innerWidth;
+            const toY = (v: number) => padding.top + innerHeight - ((v - minW) / rangeW) * innerHeight;
+
+            const points = measurements.map((m, i) => ({
+              x: toX(weeks[i]), y: toY(m.weight), val: m.weight, date: m.date
+            }));
 
             const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
             const areaPath = `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`;
 
+            // Trend line across full data range
+            const trendY1 = toY(intercept);
+            const trendY2 = toY(intercept + slope * lastWeek);
+
+            // Projection path (dotted, from last point forward)
+            const projPathPoints = [
+              { x: points[points.length - 1].x, y: points[points.length - 1].y },
+              ...projPoints.map(p => ({ x: toX(p.week), y: toY(p.weight) }))
+            ];
+            const projPath = projPathPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
             const yTicks = 5;
             const yLabels = Array.from({ length: yTicks }, (_, i) => {
               const val = minW + (rangeW * i) / (yTicks - 1);
-              return { val: Math.round(val * 10) / 10, y: padding.top + innerHeight - (i / (yTicks - 1)) * innerHeight };
+              return { val: Math.round(val * 10) / 10, y: toY(val) };
             });
 
-            // Trend line (first to last)
-            const trendY1 = points[0].y;
-            const trendY2 = points[points.length - 1].y;
+            // Progress logic
+            const isPositiveProgress = phase === 'bulking' ? totalChange > 0 : totalChange < 0;
+            const accentColor = phase === 'bulking' ? '#22c55e' : '#3b82f6';
+
+            // X-axis date labels
+            const allDates = [
+              ...measurements.map((m, i) => ({ week: weeks[i], date: m.date })),
+              ...projPoints.map(p => ({ week: p.week, date: p.date.toISOString() }))
+            ];
+            const labelCount = 8;
+            const labelStep = Math.max(1, Math.ceil(allDates.length / labelCount));
 
             return (
               <div className="glass-strong p-6 mb-8">
@@ -156,18 +225,63 @@ export default function Dashboard() {
                     </p>
                   </div>
 
-                  {/* Phase toggle */}
-                  <button
-                    onClick={togglePhase}
-                    className="flex items-center gap-2 glass-input px-4 py-2 rounded-full cursor-pointer hover:border-white/20 transition-all self-start"
-                  >
-                    <div className={`w-10 h-5 rounded-full relative transition-colors duration-300 ${phase === 'bulking' ? 'bg-green-500/40' : 'bg-blue-500/40'}`}>
-                      <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-300 ${phase === 'bulking' ? 'left-0.5 bg-green-400' : 'left-[22px] bg-blue-400'}`} />
-                    </div>
-                    <span className={`text-sm font-semibold uppercase tracking-wider ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>
-                      {phase}
-                    </span>
-                  </button>
+                  <div className="flex items-center gap-3 self-start">
+                    {/* Target weight */}
+                    {showTargetInput ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={targetInput}
+                          onChange={(e) => setTargetInput(e.target.value)}
+                          placeholder="kg"
+                          className="glass-input w-20 px-3 py-1.5 rounded-lg text-sm text-white text-center"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const v = parseFloat(targetInput);
+                              if (v > 0) { setTargetWeight(v); localStorage.setItem('bb_target_weight', String(v)); }
+                              setShowTargetInput(false);
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={() => {
+                            const v = parseFloat(targetInput);
+                            if (v > 0) { setTargetWeight(v); localStorage.setItem('bb_target_weight', String(v)); }
+                            setShowTargetInput(false);
+                          }}
+                          className="text-xs text-green-400 hover:text-green-300 px-2 py-1"
+                        >Set</button>
+                        {targetWeight !== null && (
+                          <button
+                            onClick={() => { setTargetWeight(null); localStorage.removeItem('bb_target_weight'); setShowTargetInput(false); }}
+                            className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
+                          >Clear</button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setTargetInput(targetWeight ? String(targetWeight) : ''); setShowTargetInput(true); }}
+                        className="flex items-center gap-1.5 glass-input px-3 py-1.5 rounded-full text-xs text-white/50 hover:text-white/80 hover:border-white/20 transition-all"
+                      >
+                        🎯 {targetWeight ? `${targetWeight}kg` : 'Set Target'}
+                      </button>
+                    )}
+
+                    {/* Phase toggle */}
+                    <button
+                      onClick={togglePhase}
+                      className="flex items-center gap-2 glass-input px-4 py-2 rounded-full cursor-pointer hover:border-white/20 transition-all"
+                    >
+                      <div className={`w-10 h-5 rounded-full relative transition-colors duration-300 ${phase === 'bulking' ? 'bg-green-500/40' : 'bg-blue-500/40'}`}>
+                        <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-300 ${phase === 'bulking' ? 'left-0.5 bg-green-400' : 'left-[22px] bg-blue-400'}`} />
+                      </div>
+                      <span className={`text-sm font-semibold uppercase tracking-wider ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>
+                        {phase}
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Motivational message */}
@@ -186,6 +300,25 @@ export default function Dashboard() {
                   </p>
                 </div>
 
+                {/* Target info */}
+                {targetWeight !== null && projectionWeeks > 0 && (
+                  <div className="rounded-xl px-4 py-2.5 mb-4 border bg-white/5 border-white/10">
+                    <p className="text-sm text-white/60">
+                      Target <span className="text-white font-semibold">{targetWeight}kg</span>
+                      {' — '}at current trend ({slope > 0 ? '+' : ''}{(slope).toFixed(2)}kg/week), reaching by{' '}
+                      <span className="text-white font-semibold">{projectionLabel}</span>
+                      {' '}(~{projectionWeeks} weeks)
+                    </p>
+                  </div>
+                )}
+                {targetWeight !== null && projectionWeeks === 0 && slope !== 0 && (
+                  <div className="rounded-xl px-4 py-2.5 mb-4 border bg-yellow-500/10 border-yellow-500/20">
+                    <p className="text-sm text-yellow-400">
+                      Target {targetWeight}kg — current trend goes the wrong direction. {phase === 'bulking' ? 'Keep gaining!' : 'Keep cutting!'}
+                    </p>
+                  </div>
+                )}
+
                 {/* Chart */}
                 <div className="overflow-x-auto">
                   <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full" style={{ minWidth: '340px' }}>
@@ -196,6 +329,14 @@ export default function Dashboard() {
                         <text x={padding.left - 10} y={tick.y + 4} textAnchor="end" fill="rgba(255,255,255,0.3)" fontSize="10">{tick.val}</text>
                       </g>
                     ))}
+
+                    {/* Target weight line */}
+                    {targetWeight !== null && (
+                      <g>
+                        <line x1={padding.left} y1={toY(targetWeight)} x2={chartWidth - padding.right} y2={toY(targetWeight)} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4 4" opacity="0.6" />
+                        <text x={chartWidth - padding.right + 4} y={toY(targetWeight) + 4} fill="#f59e0b" fontSize="10" fontWeight="bold">{targetWeight}kg</text>
+                      </g>
+                    )}
 
                     {/* Gradient defs */}
                     <defs>
@@ -212,17 +353,22 @@ export default function Dashboard() {
                     {/* Area fill */}
                     <path d={areaPath} fill="url(#dashWeightGrad)" />
 
-                    {/* Trend line */}
+                    {/* Trend line (historical) */}
                     <line
                       x1={points[0].x} y1={trendY1}
                       x2={points[points.length - 1].x} y2={trendY2}
-                      stroke={progressColor}
+                      stroke={accentColor}
                       strokeWidth="1.5"
                       strokeDasharray="6 4"
-                      opacity="0.5"
+                      opacity="0.4"
                     />
 
-                    {/* Main line */}
+                    {/* Projection line (future) */}
+                    {projPoints.length > 0 && (
+                      <path d={projPath} fill="none" stroke={accentColor} strokeWidth="2" strokeDasharray="6 4" opacity="0.5" />
+                    )}
+
+                    {/* Main line (solid) */}
                     <path d={linePath} fill="none" stroke="url(#dashLineGrad)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
 
                     {/* Data points */}
@@ -232,16 +378,35 @@ export default function Dashboard() {
                       return (
                         <g key={i}>
                           {isLast && <circle cx={p.x} cy={p.y} r="8" fill={accentColor} opacity="0.15" />}
-                          <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={isLast ? accentColor : accentColor} stroke="#fff" strokeWidth={isLast ? 2 : 1.5} />
+                          <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={accentColor} stroke="#fff" strokeWidth={isLast ? 2 : 1.5} />
                           {(isFirst || isLast) && (
-                            <text x={p.x} y={p.y - 12} textAnchor="middle" fill="white" fontSize="11" fontWeight="bold">{p.val}kg</text>
-                          )}
-                          {(isFirst || isLast || measurements.length <= 10 || i % Math.ceil(measurements.length / 8) === 0) && (
-                            <text x={p.x} y={chartHeight - 6} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="9" transform={`rotate(-30, ${p.x}, ${chartHeight - 6})`}>
-                              {new Date(p.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                            </text>
+                            <text x={p.x} y={p.y - 12} textAnchor={isLast ? 'end' : 'start'} fill="white" fontSize="11" fontWeight="bold">{p.val}kg</text>
                           )}
                         </g>
+                      );
+                    })}
+
+                    {/* Projection endpoint */}
+                    {projPoints.length > 0 && (() => {
+                      const last = projPathPoints[projPathPoints.length - 1];
+                      const lastProj = projPoints[projPoints.length - 1];
+                      return (
+                        <g>
+                          <circle cx={last.x} cy={last.y} r="4" fill="#f59e0b" stroke="#fff" strokeWidth="1.5" />
+                          <text x={last.x} y={last.y - 10} textAnchor="end" fill="#f59e0b" fontSize="10" fontWeight="bold">
+                            {Math.round(lastProj.weight * 10) / 10}kg
+                          </text>
+                        </g>
+                      );
+                    })()}
+
+                    {/* X-axis date labels */}
+                    {allDates.filter((_, i) => i === 0 || i === allDates.length - 1 || i % labelStep === 0).map((d, i) => {
+                      const x = toX(d.week);
+                      return (
+                        <text key={i} x={x} y={chartHeight - 6} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="9" transform={`rotate(-30, ${x}, ${chartHeight - 6})`}>
+                          {new Date(d.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        </text>
                       );
                     })}
 
