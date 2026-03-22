@@ -235,7 +235,9 @@ export default function TrainingPlanPage() {
                   {[...sessions].reverse().slice(0, 10).map((s) => {
                     const isExpanded = expandedSession === s.id;
                     const prev = isExpanded ? getPreviousSession(s) : null;
-                    const doneExercises = s.exercises.filter(e => !e.skipped);
+                    // If any set in the session has done=true, use done-based filtering; otherwise treat all as done (legacy)
+                    const hasDoneFlags = s.exercises.some(e => e.sets.some(set => set.done));
+                    const doneExercises = s.exercises.filter(e => !e.skipped && (hasDoneFlags ? e.sets.some(set => set.done) : true));
                     return (
                       <div key={s.id} className="glass-card overflow-hidden">
                         <div
@@ -272,29 +274,40 @@ export default function TrainingPlanPage() {
                               <thead>
                                 <tr className="text-white/30 text-left">
                                   <th className="pb-1 font-normal">Exercise</th>
+                                  <th className="pb-1 font-normal text-right">WU</th>
                                   <th className="pb-1 font-normal text-right">Sets</th>
-                                  <th className="pb-1 font-normal text-right">Weight</th>
+                                  <th className="pb-1 font-normal text-right">Max kg</th>
                                   <th className="pb-1 font-normal text-right">Reps</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {doneExercises.map((ex, i) => {
-                                  const workingSets = ex.sets.filter(set => !set.isWarmup);
-                                  if (workingSets.length === 0) return null;
-                                  const maxWeight = Math.max(...workingSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0));
-                                  const totalReps = workingSets.reduce((sum, set) => sum + (set.reps || 0), 0);
+                                  const isDone = (set: TrainingSet) => hasDoneFlags ? set.done : true;
+                                  const warmupSets = ex.sets.filter(set => set.isWarmup && isDone(set));
+                                  const workingSets = ex.sets.filter(set => !set.isWarmup && isDone(set));
+                                  if (workingSets.length === 0 && warmupSets.length === 0) return null;
+                                  const maxWeight = workingSets.length > 0 ? Math.max(...workingSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0)) : 0;
+                                  const defaultReps = parseInt(ex.targetReps) || 0;
+                                  const totalReps = workingSets.reduce((sum, set) => sum + (set.reps || defaultReps), 0);
                                   const setCount = workingSets.length;
+                                  const wuCount = warmupSets.length;
 
                                   // Find previous session's same exercise
                                   const prevEx = prev?.exercises.find(pe => pe.name === ex.name);
-                                  const prevWorkingSets = prevEx?.sets.filter(set => !set.isWarmup) || [];
+                                  const prevHasDone = prev?.exercises.some(e => e.sets.some(set => set.done));
+                                  const prevIsDone = (set: TrainingSet) => prevHasDone ? set.done : true;
+                                  const prevWorkingSets = prevEx?.sets.filter(set => !set.isWarmup && prevIsDone(set)) || [];
                                   const prevMaxWeight = prevWorkingSets.length > 0 ? Math.max(...prevWorkingSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0)) : undefined;
-                                  const prevTotalReps = prevWorkingSets.length > 0 ? prevWorkingSets.reduce((sum, set) => sum + (set.reps || 0), 0) : undefined;
+                                  const prevDefaultReps = prevEx ? (parseInt(prevEx.targetReps) || 0) : 0;
+                                  const prevTotalReps = prevWorkingSets.length > 0 ? prevWorkingSets.reduce((sum, set) => sum + (set.reps || prevDefaultReps), 0) : undefined;
                                   const prevSetCount = prevWorkingSets.length > 0 ? prevWorkingSets.length : undefined;
 
                                   return (
                                     <tr key={i} className="text-white/70 border-t border-white/5">
                                       <td className="py-1 pr-2 truncate max-w-[140px]">{ex.name}</td>
+                                      <td className="py-1 text-right whitespace-nowrap text-white/30">
+                                        {wuCount > 0 ? wuCount : '-'}
+                                      </td>
                                       <td className="py-1 text-right whitespace-nowrap">
                                         {setCount}{renderDiff(setCount, prevSetCount)}
                                       </td>
