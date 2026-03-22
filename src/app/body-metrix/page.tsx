@@ -66,13 +66,15 @@ export default function BodyMetrix() {
   };
 
   const handleBulkUpload = async (files: FileList | null) => {
-    if (!files) return;
+    if (!files || files.length === 0) return;
     const order: ('front' | 'sideLeft' | 'back' | 'sideRight')[] = ['front', 'sideLeft', 'back', 'sideRight'];
+    // Copy files to array immediately — FileList is a live ref that gets cleared
+    const fileArr = Array.from(files).slice(0, 4);
+    const results = await Promise.all(fileArr.map(f => fileToBase64(f)));
     const newPhotos: typeof photos = {};
-    for (let i = 0; i < Math.min(files.length, 4); i++) {
-      const base64 = await fileToBase64(files[i]);
+    results.forEach((base64, i) => {
       newPhotos[order[i]] = base64;
-    }
+    });
     setPhotos(prev => ({ ...prev, ...newPhotos }));
   };
 
@@ -409,7 +411,7 @@ export default function BodyMetrix() {
                   accept="image/*"
                   multiple
                   className="hidden"
-                  onChange={e => { handleBulkUpload(e.target.files); if (bulkPhotoRef.current) bulkPhotoRef.current.value = ''; }}
+                  onChange={e => { handleBulkUpload(e.target.files).then(() => { if (bulkPhotoRef.current) bulkPhotoRef.current.value = ''; }); }}
                 />
                 <input
                   ref={singlePhotoRef}
