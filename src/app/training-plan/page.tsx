@@ -21,6 +21,7 @@ export default function TrainingPlanPage() {
   const [expandedExercise, setExpandedExercise] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -173,6 +174,20 @@ export default function TrainingPlanPage() {
     return `${w}`;
   };
 
+  const getPreviousSession = (session: TrainingSession): TrainingSession | null => {
+    const sameName = sessions.filter(s => s.workoutName === session.workoutName && s.id !== session.id && s.date <= session.date);
+    return sameName.length > 0 ? sameName[sameName.length - 1] : null;
+  };
+
+  const renderDiff = (current: number, previous: number | undefined) => {
+    if (previous == null) return null;
+    const diff = current - previous;
+    if (diff === 0) return null;
+    const color = diff > 0 ? 'text-green-400' : 'text-red-400';
+    const sign = diff > 0 ? '+' : '';
+    return <span className={`${color} text-[10px] ml-1`}>{sign}{diff % 1 === 0 ? diff : diff.toFixed(1)}</span>;
+  };
+
   // Select workout view
   if (view === 'select') {
     return (
@@ -217,33 +232,88 @@ export default function TrainingPlanPage() {
               <div>
                 <h2 className="text-lg font-semibold text-white mb-4">Recent Sessions</h2>
                 <div className="space-y-2">
-                  {[...sessions].reverse().slice(0, 10).map((s) => (
-                    <div key={s.id} className="glass-card p-4 flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-white font-medium">{s.workoutName}</span>
-                        <span className="text-white/30 text-sm ml-3">
-                          {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                        </span>
-                        <span className="text-xs text-white/20 ml-2">
-                          {s.exercises.filter(e => !e.skipped).length}/{s.exercises.length}
-                        </span>
-                      </div>
-                      <div className="flex gap-2 ml-2 shrink-0">
-                        <button
-                          onClick={() => editSession(s)}
-                          className="text-xs text-white/30 hover:text-white/70 px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
+                  {[...sessions].reverse().slice(0, 10).map((s) => {
+                    const isExpanded = expandedSession === s.id;
+                    const prev = isExpanded ? getPreviousSession(s) : null;
+                    const doneExercises = s.exercises.filter(e => !e.skipped && e.sets.some(set => set.done));
+                    return (
+                      <div key={s.id} className="glass-card overflow-hidden">
+                        <div
+                          className="p-4 flex items-center justify-between cursor-pointer"
+                          onClick={() => setExpandedSession(isExpanded ? null : s.id)}
                         >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSession(s.id)}
-                          className="text-xs text-white/30 hover:text-red-400 px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
-                        >
-                          Delete
-                        </button>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-white font-medium">{s.workoutName}</span>
+                            <span className="text-white/30 text-sm ml-3">
+                              {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </span>
+                            <span className="text-xs text-white/20 ml-2">
+                              {doneExercises.length}/{s.exercises.length}
+                            </span>
+                          </div>
+                          <div className="flex gap-2 ml-2 shrink-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); editSession(s); }}
+                              className="text-xs text-white/30 hover:text-white/70 px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
+                              className="text-xs text-white/30 hover:text-red-400 px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                        {isExpanded && doneExercises.length > 0 && (
+                          <div className="px-4 pb-3 border-t border-white/5">
+                            <table className="w-full text-xs mt-2">
+                              <thead>
+                                <tr className="text-white/30 text-left">
+                                  <th className="pb-1 font-normal">Exercise</th>
+                                  <th className="pb-1 font-normal text-right">Sets</th>
+                                  <th className="pb-1 font-normal text-right">Weight</th>
+                                  <th className="pb-1 font-normal text-right">Reps</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {doneExercises.map((ex, i) => {
+                                  const doneSets = ex.sets.filter(set => set.done && !set.isWarmup);
+                                  if (doneSets.length === 0) return null;
+                                  const maxWeight = Math.max(...doneSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0));
+                                  const totalReps = doneSets.reduce((sum, set) => sum + (set.reps || 0), 0);
+                                  const setCount = doneSets.length;
+
+                                  // Find previous session's same exercise
+                                  const prevEx = prev?.exercises.find(pe => pe.name === ex.name);
+                                  const prevDoneSets = prevEx?.sets.filter(set => set.done && !set.isWarmup) || [];
+                                  const prevMaxWeight = prevDoneSets.length > 0 ? Math.max(...prevDoneSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0)) : undefined;
+                                  const prevTotalReps = prevDoneSets.length > 0 ? prevDoneSets.reduce((sum, set) => sum + (set.reps || 0), 0) : undefined;
+                                  const prevSetCount = prevDoneSets.length > 0 ? prevDoneSets.length : undefined;
+
+                                  return (
+                                    <tr key={i} className="text-white/70 border-t border-white/5">
+                                      <td className="py-1 pr-2 truncate max-w-[140px]">{ex.name}</td>
+                                      <td className="py-1 text-right whitespace-nowrap">
+                                        {setCount}{renderDiff(setCount, prevSetCount)}
+                                      </td>
+                                      <td className="py-1 text-right whitespace-nowrap">
+                                        {formatWeight(maxWeight)}{maxWeight > 0 && renderDiff(maxWeight, prevMaxWeight)}
+                                      </td>
+                                      <td className="py-1 text-right whitespace-nowrap">
+                                        {totalReps}{renderDiff(totalReps, prevTotalReps)}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
