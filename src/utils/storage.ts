@@ -33,7 +33,8 @@ export async function getSetting(key: string): Promise<string | null> {
   try {
     const snap = await getDoc(doc(db, 'settings', key));
     return snap.exists() ? snap.data().value : null;
-  } catch {
+  } catch (e) {
+    console.error('getSetting error:', e);
     return null;
   }
 }
@@ -52,13 +53,31 @@ export async function getMeasurements(): Promise<Measurement[]> {
     const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
     const snap = await getDocs(q);
     return snap.docs.map(d => d.data() as Measurement);
-  } catch {
+  } catch (e) {
+    console.error('getMeasurements error:', e);
     return [];
   }
 }
 
 export async function saveMeasurement(measurement: Measurement) {
-  await setDoc(doc(db, 'measurements', measurement.date), measurement);
+  // Strip base64 photos to avoid exceeding Firestore 1MB limit
+  const toSave = { ...measurement };
+  if (toSave.photos) {
+    const cleanPhotos: Record<string, string> = {};
+    for (const [key, val] of Object.entries(toSave.photos)) {
+      if (val && !val.startsWith('data:')) {
+        cleanPhotos[key] = val; // keep file path references
+      }
+      // base64 photos are dropped — Firestore can't handle them
+    }
+    toSave.photos = cleanPhotos;
+  }
+  try {
+    await setDoc(doc(db, 'measurements', toSave.date), toSave);
+  } catch (e) {
+    console.error('saveMeasurement error:', e);
+    alert('Failed to save measurement. Check console for details.');
+  }
 }
 
 export async function deleteMeasurement(date: string) {
@@ -70,7 +89,8 @@ export async function getTrainingSessions(): Promise<TrainingSession[]> {
   try {
     const snap = await getDocs(collection(db, 'trainingSessions'));
     return snap.docs.map(d => d.data() as TrainingSession);
-  } catch {
+  } catch (e) {
+    console.error('getTrainingSessions error:', e);
     return [];
   }
 }
@@ -100,7 +120,8 @@ export async function getLastSessionForWorkout(workoutName: string): Promise<Tra
     );
     const snap = await getDocs(q);
     return snap.empty ? null : (snap.docs[0].data() as TrainingSession);
-  } catch {
+  } catch (e) {
+    console.error('getLastSessionForWorkout error:', e);
     return null;
   }
 }
@@ -274,7 +295,8 @@ export async function getNutritionPlan(): Promise<NutritionPlan | null> {
   try {
     const snap = await getDoc(doc(db, 'nutrition', 'plan'));
     return snap.exists() ? (snap.data() as NutritionPlan) : null;
-  } catch {
+  } catch (e) {
+    console.error('getNutritionPlan error:', e);
     return null;
   }
 }
