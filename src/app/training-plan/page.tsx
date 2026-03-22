@@ -62,12 +62,12 @@ export default function TrainingPlanPage() {
     const exerciseData: TrainingExercise[] = lastSession
       ? lastSession.exercises.map(e => ({
           ...e,
-          sets: e.sets.map(s => ({ ...s, done: false })),
+          sets: e.sets.map(s => ({ ...s, done: true })),
           skipped: false,
         }))
       : preset.exercises.map(e => ({
           ...e,
-          sets: e.sets.map(s => ({ ...s, done: false })),
+          sets: e.sets.map(s => ({ ...s, done: true })),
         }));
 
     setExercises(exerciseData);
