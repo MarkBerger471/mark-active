@@ -14,6 +14,22 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 
+// Strip undefined values recursively — Firestore rejects undefined
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function stripUndefined(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) return obj.map(stripUndefined);
+  if (typeof obj === 'object') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const clean: any = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (v !== undefined) clean[k] = stripUndefined(v);
+    }
+    return clean;
+  }
+  return obj;
+}
+
 // Auth (stays in sessionStorage — per-browser-session)
 export function isSessionValid(): boolean {
   if (typeof window === 'undefined') return false;
@@ -73,7 +89,7 @@ export async function saveMeasurement(measurement: Measurement) {
     toSave.photos = cleanPhotos;
   }
   try {
-    await setDoc(doc(db, 'measurements', toSave.date), toSave);
+    await setDoc(doc(db, 'measurements', toSave.date), stripUndefined(toSave));
   } catch (e) {
     console.error('saveMeasurement error:', e);
     alert('Failed to save measurement. Check console for details.');
@@ -103,7 +119,7 @@ export async function saveTrainingSession(session: TrainingSession) {
   } else {
     session.savedAt = session.savedAt || new Date().toISOString();
   }
-  await setDoc(doc(db, 'trainingSessions', session.id), session);
+  await setDoc(doc(db, 'trainingSessions', session.id), stripUndefined(session));
 }
 
 export async function deleteTrainingSession(id: string) {
@@ -302,7 +318,7 @@ export async function getNutritionPlan(): Promise<NutritionPlan | null> {
 }
 
 export async function saveNutritionPlan(plan: NutritionPlan) {
-  await setDoc(doc(db, 'nutrition', 'plan'), plan);
+  await setDoc(doc(db, 'nutrition', 'plan'), stripUndefined(plan));
 }
 
 // File to base64 (client-side utility)
@@ -356,7 +372,7 @@ export async function seedInitialData() {
     ];
     const batch = writeBatch(db);
     historicalData.forEach(m => {
-      batch.set(doc(db, 'measurements', m.date), m);
+      batch.set(doc(db, 'measurements', m.date), stripUndefined(m));
     });
     await batch.commit();
   }
