@@ -524,7 +524,7 @@ function SetRow({
   formatWeight: (w: number | string) => string;
 }) {
   const weightNum = typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0;
-  const step = weightNum >= 40 ? 5 : 2.5;
+  const step = 1;
 
   return (
     <div className={`flex items-center gap-1.5 mb-2 ${set.done ? 'opacity-50' : ''}`}>
