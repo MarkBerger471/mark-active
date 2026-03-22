@@ -78,30 +78,45 @@ export async function getMeasurements(): Promise<Measurement[]> {
 
 export async function saveMeasurement(measurement: Measurement) {
   const toSave = { ...measurement };
-  // Upload base64 photos to Firebase Storage, store download URLs
+
+  // Separate base64 photos for background upload
+  const photosToUpload: Record<string, string> = {};
+  const savedPhotos: Record<string, string> = {};
   if (toSave.photos) {
-    const uploadedPhotos: Record<string, string> = {};
     for (const [angle, val] of Object.entries(toSave.photos)) {
       if (!val) continue;
       if (val.startsWith('data:')) {
-        try {
-          const storageRef = ref(storage, `photos/${toSave.date}/${angle}.jpg`);
-          await uploadString(storageRef, val, 'data_url');
-          uploadedPhotos[angle] = await getDownloadURL(storageRef);
-        } catch (e) {
-          console.error(`Photo upload failed for ${angle}:`, e);
-        }
+        photosToUpload[angle] = val;
       } else {
-        uploadedPhotos[angle] = val; // already a URL
+        savedPhotos[angle] = val; // already a URL
       }
     }
-    toSave.photos = uploadedPhotos;
   }
+  toSave.photos = savedPhotos;
+
+  // Save measurement immediately (without base64 photos)
   try {
     await setDoc(doc(db, 'measurements', toSave.date), stripUndefined(toSave));
   } catch (e) {
     console.error('saveMeasurement error:', e);
     alert('Failed to save measurement. Check console for details.');
+    return;
+  }
+
+  // Upload photos in background, then update the document
+  if (Object.keys(photosToUpload).length > 0) {
+    (async () => {
+      try {
+        for (const [angle, base64] of Object.entries(photosToUpload)) {
+          const storageRef = ref(storage, `photos/${toSave.date}/${angle}.jpg`);
+          await uploadString(storageRef, base64, 'data_url');
+          savedPhotos[angle] = await getDownloadURL(storageRef);
+        }
+        await setDoc(doc(db, 'measurements', toSave.date), stripUndefined({ ...toSave, photos: savedPhotos }));
+      } catch (e) {
+        console.error('Photo upload error:', e);
+      }
+    })();
   }
 }
 
