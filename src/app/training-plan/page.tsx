@@ -175,8 +175,13 @@ export default function TrainingPlanPage() {
   };
 
   const getPreviousSession = (session: TrainingSession): TrainingSession | null => {
-    const sameName = sessions.filter(s => s.workoutName === session.workoutName && s.id !== session.id && s.date <= session.date);
-    return sameName.length > 0 ? sameName[sameName.length - 1] : null;
+    const sameName = sessions
+      .filter(s => s.workoutName === session.workoutName && s.id !== session.id)
+      .sort((a, b) => (a.savedAt || a.date).localeCompare(b.savedAt || b.date));
+    // Find the one right before this session
+    const thisTime = session.savedAt || session.date;
+    const before = sameName.filter(s => (s.savedAt || s.date) < thisTime);
+    return before.length > 0 ? before[before.length - 1] : null;
   };
 
   const renderDiff = (current: number, previous: number | undefined) => {
@@ -232,7 +237,7 @@ export default function TrainingPlanPage() {
               <div>
                 <h2 className="text-lg font-semibold text-white mb-4">Recent Sessions</h2>
                 <div className="space-y-2">
-                  {[...sessions].reverse().slice(0, 10).map((s) => {
+                  {[...sessions].sort((a, b) => (b.savedAt || b.date).localeCompare(a.savedAt || a.date)).slice(0, 10).map((s) => {
                     const isExpanded = expandedSession === s.id;
                     const prev = isExpanded ? getPreviousSession(s) : null;
                     // If any set in the session has done=true, use done-based filtering; otherwise treat all as done (legacy)
@@ -248,6 +253,9 @@ export default function TrainingPlanPage() {
                             <span className="text-white font-medium">{s.workoutName}</span>
                             <span className="text-white/30 text-sm ml-3">
                               {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {s.savedAt && (
+                                <span className="ml-1">{new Date(s.savedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                              )}
                             </span>
                             <span className="text-xs text-white/20 ml-2">
                               {doneExercises.length}/{s.exercises.length}

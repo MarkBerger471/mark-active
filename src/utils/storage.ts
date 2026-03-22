@@ -87,6 +87,7 @@ export function getTrainingSessions(): TrainingSession[] {
 
 export function saveTrainingSession(session: TrainingSession) {
   const sessions = getTrainingSessions();
+  session.savedAt = new Date().toISOString();
   const existingIndex = sessions.findIndex(s => s.id === session.id);
   if (existingIndex >= 0) {
     sessions[existingIndex] = session;

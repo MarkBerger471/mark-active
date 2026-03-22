@@ -60,6 +60,7 @@ export interface Workout {
 export interface TrainingSession {
   id: string;
   date: string;
+  savedAt?: string; // ISO timestamp
   workoutName: string;
   exercises: TrainingExercise[];
 }
