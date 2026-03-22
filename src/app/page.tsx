@@ -79,16 +79,19 @@ export default function Dashboard() {
 
           {/* Quick Stats */}
           {latestMeasurement && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
               {([
                 { label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight' as const },
+                { label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat' as const },
                 { label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' as const },
                 { label: 'Chest', value: `${latestMeasurement.chest}cm`, field: 'chest' as const },
                 { label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist' as const },
                 { label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' as const },
               ]).map((stat) => {
-                const change = previousMeasurement
-                  ? Math.round((latestMeasurement[stat.field] - previousMeasurement[stat.field]) * 10) / 10
+                const curVal = latestMeasurement[stat.field];
+                const prevVal = previousMeasurement?.[stat.field];
+                const change = (curVal != null && prevVal != null)
+                  ? Math.round((curVal - prevVal) * 10) / 10
                   : undefined;
                 return (
                 <div key={stat.label} className="glass-card p-4 stat-accent">
