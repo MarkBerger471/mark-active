@@ -69,15 +69,16 @@ export default function NutritionPlanPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      const stored = getNutritionPlan();
-      setPlan(stored);
-      setLoaded(true);
+      getNutritionPlan().then(stored => {
+        setPlan(stored);
+        setLoaded(true);
+      });
     }
   }, [isAuthenticated]);
 
-  const persist = useCallback((updated: NutritionPlan) => {
+  const persist = useCallback(async (updated: NutritionPlan) => {
     setPlan(updated);
-    saveNutritionPlan(updated);
+    await saveNutritionPlan(updated);
   }, []);
 
   // --- Setup form handlers ---

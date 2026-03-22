@@ -5,6 +5,7 @@ import {
   isSessionValid,
   setSession,
   seedInitialData,
+  saveSetting,
 } from '@/utils/storage';
 
 const MASTER_PASSWORD = 'MBBB';
@@ -32,9 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback((name: string, password: string): boolean => {
     if (!name || password !== MASTER_PASSWORD) return false;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('bb_user_name', name);
-    }
+    saveSetting('userName', name);
     setSession(true);
     setIsAuthenticated(true);
     seedInitialData();

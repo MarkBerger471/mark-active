@@ -22,6 +22,7 @@ export default function TrainingPlanPage() {
   const [saved, setSaved] = useState(false);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [lastSessions, setLastSessions] = useState<Record<string, TrainingSession>>({});
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -31,9 +32,18 @@ export default function TrainingPlanPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      setSessions(getTrainingSessions());
+      getTrainingSessions().then(setSessions);
+      // Load last session for each workout
+      Promise.all(workouts.map(async w => {
+        const last = await getLastSessionForWorkout(w.name);
+        return [w.name, last] as const;
+      })).then(results => {
+        const map: Record<string, TrainingSession> = {};
+        results.forEach(([name, session]) => { if (session) map[name] = session; });
+        setLastSessions(map);
+      });
     }
-  }, [isAuthenticated, view]);
+  }, [isAuthenticated, view, workouts]);
 
   if (isLoading || !isAuthenticated) {
     return (
@@ -43,12 +53,12 @@ export default function TrainingPlanPage() {
     );
   }
 
-  const startWorkout = (workoutName: string) => {
+  const startWorkout = async (workoutName: string) => {
     const preset = workouts.find(w => w.name === workoutName);
     if (!preset) return;
 
     // Load from last session if available, otherwise use preset
-    const lastSession = getLastSessionForWorkout(workoutName);
+    const lastSession = await getLastSessionForWorkout(workoutName);
     const exerciseData: TrainingExercise[] = lastSession
       ? lastSession.exercises.map(e => ({
           ...e,
@@ -133,7 +143,7 @@ export default function TrainingPlanPage() {
     });
   };
 
-  const saveWorkout = () => {
+  const saveWorkout = async () => {
     if (!activeWorkout) return;
     const session: TrainingSession = {
       id: sessionId,
@@ -141,7 +151,7 @@ export default function TrainingPlanPage() {
       workoutName: activeWorkout,
       exercises,
     };
-    saveTrainingSession(session);
+    await saveTrainingSession(session);
     setSaved(true);
   };
 
@@ -163,10 +173,10 @@ export default function TrainingPlanPage() {
     setView('workout');
   };
 
-  const handleDeleteSession = (id: string) => {
+  const handleDeleteSession = async (id: string) => {
     if (!confirm('Delete this session?')) return;
-    deleteTrainingSession(id);
-    setSessions(getTrainingSessions());
+    await deleteTrainingSession(id);
+    setSessions(await getTrainingSessions());
   };
 
   const formatWeight = (w: number | string) => {
@@ -223,7 +233,7 @@ export default function TrainingPlanPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
               {workouts.map((w, i) => {
-                const lastSession = getLastSessionForWorkout(w.name);
+                const lastSession = lastSessions[w.name];
                 const colors = ['from-red-500/10', 'from-blue-500/10', 'from-amber-500/10', 'from-green-500/10'];
                 return (
                   <button
@@ -372,7 +382,7 @@ export default function TrainingPlanPage() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => { saveWorkout(); setTimeout(() => setView('select'), 500); }}
+                onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }}
                 className={`btn-primary text-sm px-4 py-2 ${saved ? '!bg-green-700' : ''}`}
               >
                 {saved ? 'Saved' : 'Save'}

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Navigation from '@/components/Navigation';
 import Link from 'next/link';
-import { getMeasurements } from '@/utils/storage';
+import { getMeasurements, getSetting, saveSetting } from '@/utils/storage';
 import { Measurement } from '@/types';
 import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
 
@@ -18,19 +18,8 @@ export default function Dashboard() {
   const [latestMeasurement, setLatestMeasurement] = useState<Measurement | null>(null);
   const [previousMeasurement, setPreviousMeasurement] = useState<Measurement | null>(null);
   const [showPhotos, setShowPhotos] = useState(false);
-  const [phase, setPhase] = useState<Phase>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('bb_phase') as Phase) || 'bulking';
-    }
-    return 'bulking';
-  });
-  const [targetWeight, setTargetWeight] = useState<number | null>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('bb_target_weight');
-      return stored ? parseFloat(stored) : null;
-    }
-    return null;
-  });
+  const [phase, setPhase] = useState<Phase>('bulking');
+  const [targetWeight, setTargetWeight] = useState<number | null>(null);
   const [showTargetInput, setShowTargetInput] = useState(false);
   const [targetInput, setTargetInput] = useState('');
 
@@ -42,21 +31,24 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      const all = getMeasurements();
-      setMeasurements(all);
-      if (all.length > 0) {
-        setLatestMeasurement(all[all.length - 1]);
-        if (all.length > 1) {
-          setPreviousMeasurement(all[all.length - 2]);
+      getMeasurements().then(all => {
+        setMeasurements(all);
+        if (all.length > 0) {
+          setLatestMeasurement(all[all.length - 1]);
+          if (all.length > 1) {
+            setPreviousMeasurement(all[all.length - 2]);
+          }
         }
-      }
+      });
+      getSetting('phase').then(v => { if (v) setPhase(v as Phase); });
+      getSetting('targetWeight').then(v => { if (v) setTargetWeight(parseFloat(v)); });
     }
   }, [isAuthenticated]);
 
   const togglePhase = () => {
     const next = phase === 'bulking' ? 'cutting' : 'bulking';
     setPhase(next);
-    localStorage.setItem('bb_phase', next);
+    saveSetting('phase', next);
   };
 
   if (isLoading || !isAuthenticated) {
@@ -240,7 +232,7 @@ export default function Dashboard() {
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               const v = parseFloat(targetInput);
-                              if (v > 0) { setTargetWeight(v); localStorage.setItem('bb_target_weight', String(v)); }
+                              if (v > 0) { setTargetWeight(v); saveSetting('targetWeight', String(v)); }
                               setShowTargetInput(false);
                             }
                           }}
@@ -248,14 +240,14 @@ export default function Dashboard() {
                         <button
                           onClick={() => {
                             const v = parseFloat(targetInput);
-                            if (v > 0) { setTargetWeight(v); localStorage.setItem('bb_target_weight', String(v)); }
+                            if (v > 0) { setTargetWeight(v); saveSetting('targetWeight', String(v)); }
                             setShowTargetInput(false);
                           }}
                           className="text-xs text-green-400 hover:text-green-300 px-2 py-1"
                         >Set</button>
                         {targetWeight !== null && (
                           <button
-                            onClick={() => { setTargetWeight(null); localStorage.removeItem('bb_target_weight'); setShowTargetInput(false); }}
+                            onClick={() => { setTargetWeight(null); saveSetting('targetWeight', null); setShowTargetInput(false); }}
                             className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
                           >Clear</button>
                         )}

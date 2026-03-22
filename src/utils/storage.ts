@@ -1,117 +1,111 @@
 import { Measurement, TrainingDay, NutritionPlan, Workout, TrainingSession } from '@/types';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  setDoc,
+  deleteDoc,
+  query,
+  orderBy,
+  where,
+  limit,
+  writeBatch,
+} from 'firebase/firestore';
 
-const KEYS = {
-  MEASUREMENTS: 'bb_measurements',
-  TRAINING: 'bb_training',
-  NUTRITION: 'bb_nutrition',
-  AUTH: 'bb_auth',
-  SESSION: 'bb_session',
-  TRAINING_SESSIONS: 'bb_training_sessions',
-};
-
-// Simple hash function for password (not cryptographic, but sufficient for localStorage auth)
-export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-// Auth
-export function getStoredCredentials(): { username: string; passwordHash: string } | null {
-  if (typeof window === 'undefined') return null;
-  const data = localStorage.getItem(KEYS.AUTH);
-  return data ? JSON.parse(data) : null;
-}
-
-export function setStoredCredentials(username: string, passwordHash: string) {
-  localStorage.setItem(KEYS.AUTH, JSON.stringify({ username, passwordHash }));
-}
-
+// Auth (stays in sessionStorage — per-browser-session)
 export function isSessionValid(): boolean {
   if (typeof window === 'undefined') return false;
-  return sessionStorage.getItem(KEYS.SESSION) === 'true';
+  return sessionStorage.getItem('bb_session') === 'true';
 }
 
 export function setSession(valid: boolean) {
   if (valid) {
-    sessionStorage.setItem(KEYS.SESSION, 'true');
+    sessionStorage.setItem('bb_session', 'true');
   } else {
-    sessionStorage.removeItem(KEYS.SESSION);
+    sessionStorage.removeItem('bb_session');
   }
 }
 
-// Measurements
-export function getMeasurements(): Measurement[] {
-  if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(KEYS.MEASUREMENTS);
-  return data ? JSON.parse(data) : [];
-}
-
-export function saveMeasurement(measurement: Measurement) {
-  const measurements = getMeasurements();
-  const existingIndex = measurements.findIndex(m => m.date === measurement.date);
-  if (existingIndex >= 0) {
-    measurements[existingIndex] = measurement;
-  } else {
-    measurements.push(measurement);
+// Settings (Firestore)
+export async function getSetting(key: string): Promise<string | null> {
+  try {
+    const snap = await getDoc(doc(db, 'settings', key));
+    return snap.exists() ? snap.data().value : null;
+  } catch {
+    return null;
   }
-  measurements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  localStorage.setItem(KEYS.MEASUREMENTS, JSON.stringify(measurements));
 }
 
-export function deleteMeasurement(date: string) {
-  const measurements = getMeasurements().filter(m => m.date !== date);
-  localStorage.setItem(KEYS.MEASUREMENTS, JSON.stringify(measurements));
+export async function saveSetting(key: string, value: string | null) {
+  if (value === null) {
+    await deleteDoc(doc(db, 'settings', key));
+  } else {
+    await setDoc(doc(db, 'settings', key), { value });
+  }
 }
 
-// Training (legacy)
-export function getTrainingPlan(): TrainingDay[] {
-  if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(KEYS.TRAINING);
-  return data ? JSON.parse(data) : [];
+// Measurements (Firestore)
+export async function getMeasurements(): Promise<Measurement[]> {
+  try {
+    const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as Measurement);
+  } catch {
+    return [];
+  }
 }
 
-export function saveTrainingPlan(plan: TrainingDay[]) {
-  localStorage.setItem(KEYS.TRAINING, JSON.stringify(plan));
+export async function saveMeasurement(measurement: Measurement) {
+  await setDoc(doc(db, 'measurements', measurement.date), measurement);
 }
 
-// Training Sessions (new)
-export function getTrainingSessions(): TrainingSession[] {
-  if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(KEYS.TRAINING_SESSIONS);
-  return data ? JSON.parse(data) : [];
+export async function deleteMeasurement(date: string) {
+  await deleteDoc(doc(db, 'measurements', date));
 }
 
-export function saveTrainingSession(session: TrainingSession) {
-  const sessions = getTrainingSessions();
-  const existingIndex = sessions.findIndex(s => s.id === session.id);
-  if (existingIndex >= 0) {
-    // Preserve original savedAt on edits
-    session.savedAt = sessions[existingIndex].savedAt || session.savedAt || new Date().toISOString();
-    sessions[existingIndex] = session;
+// Training Sessions (Firestore)
+export async function getTrainingSessions(): Promise<TrainingSession[]> {
+  try {
+    const snap = await getDocs(collection(db, 'trainingSessions'));
+    return snap.docs.map(d => d.data() as TrainingSession);
+  } catch {
+    return [];
+  }
+}
+
+export async function saveTrainingSession(session: TrainingSession) {
+  // Check if existing to preserve savedAt
+  const existing = await getDoc(doc(db, 'trainingSessions', session.id));
+  if (existing.exists()) {
+    session.savedAt = existing.data().savedAt || session.savedAt || new Date().toISOString();
   } else {
     session.savedAt = session.savedAt || new Date().toISOString();
-    sessions.push(session);
   }
-  localStorage.setItem(KEYS.TRAINING_SESSIONS, JSON.stringify(sessions));
+  await setDoc(doc(db, 'trainingSessions', session.id), session);
 }
 
-export function deleteTrainingSession(id: string) {
-  const sessions = getTrainingSessions().filter(s => s.id !== id);
-  localStorage.setItem(KEYS.TRAINING_SESSIONS, JSON.stringify(sessions));
+export async function deleteTrainingSession(id: string) {
+  await deleteDoc(doc(db, 'trainingSessions', id));
 }
 
-export function getLastSessionForWorkout(workoutName: string): TrainingSession | null {
-  const sessions = getTrainingSessions()
-    .filter(s => s.workoutName === workoutName)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  return sessions[0] || null;
+export async function getLastSessionForWorkout(workoutName: string): Promise<TrainingSession | null> {
+  try {
+    const q = query(
+      collection(db, 'trainingSessions'),
+      where('workoutName', '==', workoutName),
+      orderBy('date', 'desc'),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    return snap.empty ? null : (snap.docs[0].data() as TrainingSession);
+  } catch {
+    return null;
+  }
 }
 
-// Preset workouts
+// Preset workouts (static, no persistence needed)
 export function getPresetWorkouts(): Workout[] {
   return [
     {
@@ -275,18 +269,21 @@ export function getPresetWorkouts(): Workout[] {
   ];
 }
 
-// Nutrition
-export function getNutritionPlan(): NutritionPlan | null {
-  if (typeof window === 'undefined') return null;
-  const data = localStorage.getItem(KEYS.NUTRITION);
-  return data ? JSON.parse(data) : null;
+// Nutrition (Firestore)
+export async function getNutritionPlan(): Promise<NutritionPlan | null> {
+  try {
+    const snap = await getDoc(doc(db, 'nutrition', 'plan'));
+    return snap.exists() ? (snap.data() as NutritionPlan) : null;
+  } catch {
+    return null;
+  }
 }
 
-export function saveNutritionPlan(plan: NutritionPlan) {
-  localStorage.setItem(KEYS.NUTRITION, JSON.stringify(plan));
+export async function saveNutritionPlan(plan: NutritionPlan) {
+  await setDoc(doc(db, 'nutrition', 'plan'), plan);
 }
 
-// File to base64
+// File to base64 (client-side utility)
 export function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -296,10 +293,10 @@ export function fileToBase64(file: File): Promise<string> {
   });
 }
 
-// Seed initial data from spreadsheet history
-export function seedInitialData() {
-  const measurements = getMeasurements();
-  if (measurements.length === 0) {
+// Seed initial data
+export async function seedInitialData() {
+  const existing = await getMeasurements();
+  if (existing.length === 0) {
     const historicalData: Measurement[] = [
       { date: '2025-10-12', weight: 101, arms: 40, chest: 106, waist: 98, legs: 61, energy: 'Good', hunger: 'Normal, a bit hungry sometimes', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 5, foodChanges: 100, photos: {} },
       { date: '2025-10-19', weight: 101, arms: 38, chest: 106, waist: 98, legs: 62, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 4, foodChanges: 80, photos: {} },
@@ -323,19 +320,9 @@ export function seedInitialData() {
       { date: '2026-03-03', weight: 110, arms: 41, chest: 112, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 3, foodChanges: 50, photos: {} },
       {
         date: '2026-03-08',
-        weight: 110.3,
-        arms: 40,
-        chest: 111,
-        waist: 106,
-        legs: 68,
-        energy: 'Sick all week',
-        hunger: 'Good',
-        tiredness: 'Good',
-        digestion: 'No problem',
-        sleepHours: 7,
-        cardio: 1,
-        trainings: 0,
-        foodChanges: 100,
+        weight: 110.3, arms: 40, chest: 111, waist: 106, legs: 68,
+        energy: 'Sick all week', hunger: 'Good', tiredness: 'Good', digestion: 'No problem',
+        sleepHours: 7, cardio: 1, trainings: 0, foodChanges: 100,
         photos: {
           front: '/progress-photos/2026-03-08/front.jpeg',
           sideLeft: '/progress-photos/2026-03-08/side-left.jpeg',
@@ -345,6 +332,20 @@ export function seedInitialData() {
       },
       { date: '2026-03-15', weight: 111.2, arms: 40, chest: 117, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 4, trainings: 1, foodChanges: 100, photos: {} },
     ];
-    historicalData.forEach(m => saveMeasurement(m));
+    const batch = writeBatch(db);
+    historicalData.forEach(m => {
+      batch.set(doc(db, 'measurements', m.date), m);
+    });
+    await batch.commit();
   }
+}
+
+// Legacy (unused but kept for type compatibility)
+export function getTrainingPlan(): TrainingDay[] { return []; }
+export function saveTrainingPlan(_plan: TrainingDay[]) {}
+export async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }

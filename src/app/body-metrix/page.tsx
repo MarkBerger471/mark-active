@@ -47,7 +47,7 @@ export default function BodyMetrix() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      setMeasurements(getMeasurements());
+      getMeasurements().then(setMeasurements);
     }
   }, [isAuthenticated]);
 
@@ -97,8 +97,8 @@ export default function BodyMetrix() {
     setSwapSource(null);
   };
 
-  const prefillFromLast = () => {
-    const all = getMeasurements();
+  const prefillFromLast = async () => {
+    const all = await getMeasurements();
     const last = all.length > 0 ? all[all.length - 1] : null;
     setDate(new Date().toISOString().split('T')[0]);
     setArms(last ? String(last.arms) : '');
@@ -120,7 +120,7 @@ export default function BodyMetrix() {
     if (singlePhotoRef.current) singlePhotoRef.current.value = '';
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const measurement: Measurement = {
       date,
@@ -140,8 +140,8 @@ export default function BodyMetrix() {
       foodChanges,
       photos,
     };
-    saveMeasurement(measurement);
-    setMeasurements(getMeasurements());
+    await saveMeasurement(measurement);
+    setMeasurements(await getMeasurements());
     setShowForm(false);
   };
 
@@ -155,10 +155,10 @@ export default function BodyMetrix() {
     return diff;
   };
 
-  const handleDelete = (dateStr: string) => {
+  const handleDelete = async (dateStr: string) => {
     if (confirm('Delete this measurement entry?')) {
-      deleteMeasurement(dateStr);
-      setMeasurements(getMeasurements());
+      await deleteMeasurement(dateStr);
+      setMeasurements(await getMeasurements());
     }
   };
 
@@ -210,9 +210,20 @@ export default function BodyMetrix() {
       return { val: Math.round(val * 10) / 10, y: padding.top + innerHeight - (i / (yTicks - 1)) * innerHeight };
     });
 
+    const firstVal = values[0];
+    const lastVal = values[values.length - 1];
+    const totalChange = Math.round((lastVal - firstVal) * 10) / 10;
+    const changeSign = totalChange > 0 ? '+' : '';
+    const changeColor = totalChange > 0 ? 'text-green-400' : totalChange < 0 ? 'text-red-400' : 'text-white/40';
+
     return (
       <div className="bg-white/5 rounded-xl p-4">
-        <h4 className="text-sm font-medium text-white/70 mb-2">{label} ({unit})</h4>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-sm font-medium text-white/70">{label} ({unit})</h4>
+          <span className={`text-sm font-bold ${changeColor}`}>
+            {changeSign}{totalChange}{unit}
+          </span>
+        </div>
         <div className="overflow-x-auto">
           <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full" style={{ minWidth: '300px' }}>
             {yLabels.map((tick, i) => (
