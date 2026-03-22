@@ -174,14 +174,29 @@ export default function TrainingPlanPage() {
     return `${w}`;
   };
 
-  const getPreviousSession = (session: TrainingSession): TrainingSession | null => {
-    const sameName = sessions
-      .filter(s => s.workoutName === session.workoutName && s.id !== session.id)
-      .sort((a, b) => (a.savedAt || a.date).localeCompare(b.savedAt || b.date));
-    // Find the one right before this session
+  // Get all previous sessions of same workout, ordered newest first
+  const getPreviousSessions = (session: TrainingSession): TrainingSession[] => {
     const thisTime = session.savedAt || session.date;
-    const before = sameName.filter(s => (s.savedAt || s.date) < thisTime);
-    return before.length > 0 ? before[before.length - 1] : null;
+    return sessions
+      .filter(s => s.workoutName === session.workoutName && s.id !== session.id && (s.savedAt || s.date) < thisTime)
+      .sort((a, b) => (b.savedAt || b.date).localeCompare(a.savedAt || a.date));
+  };
+
+  // Search back through sessions to find the last time an exercise was done with data
+  const findPrevExerciseData = (exerciseName: string, prevSessions: TrainingSession[]): { sets: number; reps: number; maxWeight: number } | null => {
+    for (const ps of prevSessions) {
+      const hasDone = ps.exercises.some(e => e.sets.some(set => set.done));
+      const ex = ps.exercises.find(e => e.name === exerciseName && !e.skipped);
+      if (!ex) continue;
+      const isDone = (set: TrainingSet) => hasDone ? set.done : true;
+      const working = ex.sets.filter(set => !set.isWarmup && isDone(set));
+      if (working.length === 0) continue;
+      const maxW = Math.max(...working.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0));
+      const defReps = parseInt(ex.targetReps) || 0;
+      const totalReps = working.reduce((sum, set) => sum + (set.reps || defReps), 0);
+      return { sets: working.length, reps: totalReps, maxWeight: maxW };
+    }
+    return null;
   };
 
   const renderDiff = (current: number, previous: number | undefined) => {
@@ -239,7 +254,7 @@ export default function TrainingPlanPage() {
                 <div className="space-y-2">
                   {[...sessions].sort((a, b) => (b.savedAt || b.date).localeCompare(a.savedAt || a.date)).slice(0, 10).map((s) => {
                     const isExpanded = expandedSession === s.id;
-                    const prev = isExpanded ? getPreviousSession(s) : null;
+                    const prevSessions = isExpanded ? getPreviousSessions(s) : [];
                     // If any set in the session has done=true, use done-based filtering; otherwise treat all as done (legacy)
                     const hasDoneFlags = s.exercises.some(e => e.sets.some(set => set.done));
                     const doneExercises = s.exercises.filter(e => !e.skipped && (hasDoneFlags ? e.sets.some(set => set.done) : true));
@@ -300,15 +315,11 @@ export default function TrainingPlanPage() {
                                   const setCount = workingSets.length;
                                   const wuCount = warmupSets.length;
 
-                                  // Find previous session's same exercise
-                                  const prevEx = prev?.exercises.find(pe => pe.name === ex.name);
-                                  const prevHasDone = prev?.exercises.some(e => e.sets.some(set => set.done));
-                                  const prevIsDone = (set: TrainingSet) => prevHasDone ? set.done : true;
-                                  const prevWorkingSets = prevEx?.sets.filter(set => !set.isWarmup && prevIsDone(set)) || [];
-                                  const prevMaxWeight = prevWorkingSets.length > 0 ? Math.max(...prevWorkingSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0)) : undefined;
-                                  const prevDefaultReps = prevEx ? (parseInt(prevEx.targetReps) || 0) : 0;
-                                  const prevTotalReps = prevWorkingSets.length > 0 ? prevWorkingSets.reduce((sum, set) => sum + (set.reps || prevDefaultReps), 0) : undefined;
-                                  const prevSetCount = prevWorkingSets.length > 0 ? prevWorkingSets.length : undefined;
+                                  // Find previous data for this exercise (search back through history)
+                                  const prevData = findPrevExerciseData(ex.name, prevSessions);
+                                  const prevSetCount = prevData?.sets ?? (prevSessions.length > 0 ? 0 : undefined);
+                                  const prevTotalReps = prevData?.reps ?? (prevSessions.length > 0 ? 0 : undefined);
+                                  const prevMaxWeight = prevData?.maxWeight;
 
                                   return (
                                     <tr key={i} className="text-white/70 border-t border-white/5">
