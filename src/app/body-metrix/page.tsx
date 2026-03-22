@@ -28,10 +28,10 @@ export default function BodyMetrix() {
   const [hunger, setHunger] = useState('');
   const [tiredness, setTiredness] = useState('');
   const [digestion, setDigestion] = useState('');
-  const [sleepHours, setSleepHours] = useState(7);
+  const [sleepHours, setSleepHours] = useState(7.5);
   const [cardio, setCardio] = useState(5);
   const [trainings, setTrainings] = useState(5);
-  const [foodChanges, setFoodChanges] = useState(100);
+  const [foodChanges, setFoodChanges] = useState(95);
   const [photos, setPhotos] = useState<{ front?: string; sideLeft?: string; sideRight?: string; back?: string }>({});
 
   const bulkPhotoRef = useRef<HTMLInputElement>(null);
@@ -111,10 +111,10 @@ export default function BodyMetrix() {
     setHunger(last?.hunger || '');
     setTiredness(last?.tiredness || '');
     setDigestion(last?.digestion || '');
-    setSleepHours(last?.sleepHours ?? 7);
+    setSleepHours(last?.sleepHours ?? 7.5);
     setCardio(last?.cardio ?? 5);
     setTrainings(last?.trainings ?? 5);
-    setFoodChanges(last?.foodChanges ?? 100);
+    setFoodChanges(last?.foodChanges ?? 95);
     setPhotos({});
     if (bulkPhotoRef.current) bulkPhotoRef.current.value = '';
     if (singlePhotoRef.current) singlePhotoRef.current.value = '';
