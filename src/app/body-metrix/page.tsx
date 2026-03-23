@@ -13,6 +13,7 @@ export default function BodyMetrix() {
   const router = useRouter();
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [editingDate, setEditingDate] = useState<string | null>(null); // tracks inline edit
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
   const [expandedPhotos, setExpandedPhotos] = useState<string | null>(null);
 
@@ -39,7 +40,33 @@ export default function BodyMetrix() {
   const [singlePhotoTarget, setSinglePhotoTarget] = useState<'front' | 'sideLeft' | 'back' | 'sideRight'>('front');
   const [swapSource, setSwapSource] = useState<'front' | 'sideLeft' | 'back' | 'sideRight' | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
-  const dragCounters = useRef<Record<string, number>>({});
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
+  const handleDrop = async (angle: 'front' | 'sideLeft' | 'back' | 'sideRight', e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(null);
+    const files = e.dataTransfer.files;
+    if (files.length === 1) {
+      handlePhotoUpload(angle, files[0]);
+    } else if (files.length > 1) {
+      handleBulkUpload(files);
+    } else {
+      const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+      const html = e.dataTransfer.getData('text/html');
+      const imgUrl = url || html?.match(/src="([^"]+)"/)?.[1];
+      if (imgUrl) {
+        try {
+          const resp = await fetch(imgUrl);
+          const blob = await resp.blob();
+          const file = new File([blob], 'photo.jpg', { type: blob.type });
+          handlePhotoUpload(angle, file);
+        } catch {
+          setPhotos(prev => ({ ...prev, [angle]: imgUrl }));
+        }
+      }
+    }
+  };
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -145,6 +172,7 @@ export default function BodyMetrix() {
     await saveMeasurement(measurement);
     setMeasurements(await getMeasurements());
     setShowForm(false);
+    setEditingDate(null);
   };
 
   // Auto-calculate change vs previous measurement
@@ -181,8 +209,8 @@ export default function BodyMetrix() {
     setTrainings(m.trainings ?? 5);
     setFoodChanges(m.foodChanges ?? 95);
     setPhotos(m.photos || {});
-    setShowForm(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setShowForm(false); // close top form if open
+    setEditingDate(m.date); // open inline edit
   };
 
   const formatChange = (val?: number) => {
@@ -287,6 +315,107 @@ export default function BodyMetrix() {
     { key: 'sideRight', label: 'Side Right' },
   ];
 
+  const renderMeasurementForm = (title: string) => (
+    <form onSubmit={handleSubmit} className="glass-strong p-6 mb-8">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => { setShowForm(false); setEditingDate(null); }}
+            className="text-sm px-4 py-2 rounded-xl font-semibold border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+          >Cancel</button>
+          <button type="submit" className="btn-primary text-sm px-4 py-2">Save</button>
+        </div>
+      </div>
+
+      {/* Date */}
+      <div className="mb-6">
+        <label className="block text-sm text-white/60 mb-2">Date</label>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="glass-input w-full px-4 py-3" required />
+      </div>
+
+      {/* Measurements Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+        {[
+          { label: 'Weight (kg)', value: weight, setValue: setWeight, step: 0.1, req: true },
+          { label: 'Body Fat (%)', value: bodyFat, setValue: setBodyFat, step: 0.1, req: false },
+          { label: 'Arms (cm)', value: arms, setValue: setArms, step: 0.5, req: true },
+          { label: 'Chest (cm)', value: chest, setValue: setChest, step: 0.5, req: true },
+          { label: 'Waist (cm)', value: waist, setValue: setWaist, step: 0.5, req: true },
+          { label: 'Legs (cm)', value: legs, setValue: setLegs, step: 0.5, req: true },
+        ].map(field => (
+          <div key={field.label}>
+            <label className="block text-sm text-white/60 mb-2">{field.label}</label>
+            <div className="flex items-stretch gap-3">
+              <button type="button" onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') - field.step) * 10) / 10))} className="shrink-0 w-12 py-3 rounded-xl text-xl font-bold transition-colors border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 active:bg-red-500/30">−</button>
+              <input type="text" inputMode="decimal" value={field.value} onChange={e => field.setValue(e.target.value)} placeholder="0" className="glass-input min-w-0 flex-1 px-3 py-3 text-center text-lg font-semibold" required={field.req} />
+              <button type="button" onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') + field.step) * 10) / 10))} className="shrink-0 w-12 py-3 rounded-xl text-xl font-bold transition-colors border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 active:bg-green-500/30">+</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Text status fields */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {([
+          { label: 'Energy levels', value: energy, setValue: setEnergy, placeholder: 'feel good, tired etc' },
+          { label: 'Hunger', value: hunger, setValue: setHunger, placeholder: 'normal, hungry, too full' },
+          { label: 'Tiredness', value: tiredness, setValue: setTiredness, placeholder: 'normal, too much etc' },
+          { label: 'Digestion', value: digestion, setValue: setDigestion, placeholder: 'no problem, issues etc' },
+        ]).map(field => (
+          <div key={field.label}>
+            <label className="block text-sm text-white/60 mb-2">{field.label}</label>
+            <input type="text" value={field.value} onChange={e => field.setValue(e.target.value)} placeholder={field.placeholder} className="glass-input w-full px-4 py-3" />
+          </div>
+        ))}
+      </div>
+
+      {/* Slider fields */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <SliderField label="Sleep (hours/night)" value={sleepHours} onChange={setSleepHours} min={5} max={10} step={0.5} targetMin={7} targetMax={8} unit="h" />
+        <SliderField label="Cardio (sessions/week)" value={cardio} onChange={setCardio} min={0} max={7} step={1} targetMin={4} targetMax={6} unit="x" />
+        <SliderField label="Trainings (sessions/week)" value={trainings} onChange={setTrainings} min={0} max={7} step={1} targetMin={4} targetMax={6} unit="x" />
+        <SliderField label="Food adherence" value={foodChanges} onChange={setFoodChanges} min={0} max={100} step={5} targetMin={95} targetMax={100} unit="%" />
+      </div>
+
+      {/* Photo Uploads */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <label className="text-sm text-white/60">Progress Photos</label>
+          <button type="button" onClick={() => bulkPhotoRef.current?.click()} className="btn-secondary text-xs px-3 py-1.5">Upload all 4</button>
+        </div>
+        <p className="text-[10px] text-white/25 mb-3">Upload 4 photos at once (order: front, side-left, back, side-right) or tap a slot to upload individually.</p>
+        <input ref={bulkPhotoRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { handleBulkUpload(e.target.files).then(() => { if (bulkPhotoRef.current) bulkPhotoRef.current.value = ''; }); }} />
+        <input ref={singlePhotoRef} type="file" accept="image/*" className="hidden" onChange={e => { handlePhotoUpload(singlePhotoTarget, e.target.files?.[0]); if (singlePhotoRef.current) singlePhotoRef.current.value = ''; }} />
+        <div className="photo-grid" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); setDragOver(null); }}>
+          {photoAngles.map(angle => (
+            <div key={angle.key} className="flex flex-col gap-2 overflow-visible" onDragOver={(e) => { e.preventDefault(); setDragOver(angle.key); }} onDragLeave={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const { clientX, clientY } = e; if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) setDragOver(null); }} onDrop={(e) => handleDrop(angle.key, e)}>
+              <label className="text-xs text-white/40 text-center">{angle.label}</label>
+              <div className="relative" style={{ overflow: 'visible' }}>
+                {photos[angle.key] && (
+                  <button type="button" className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold flex items-center justify-center shadow-lg border-2 border-white/80" style={{ zIndex: 50 }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setPhotos(prev => { const updated = { ...prev }; delete updated[angle.key]; return updated; }); }}>✕</button>
+                )}
+                <div className={`aspect-[3/4] rounded-xl overflow-hidden bg-white/5 border flex items-center justify-center cursor-pointer transition-colors ${dragOver === angle.key ? 'border-va-red ring-2 ring-va-red/30 bg-va-red/10' : 'border-white/10 hover:border-va-red/30'}`} onClick={() => { if (photos[angle.key]) { setLightbox(photos[angle.key]!); } else { setSinglePhotoTarget(angle.key); singlePhotoRef.current?.click(); } }}>
+                  {photos[angle.key] ? (
+                    <img src={photos[angle.key]} alt={angle.label} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-white/20 text-center p-2 pointer-events-none">
+                      <div className="text-2xl mb-1">+</div>
+                      <div className="text-xs">Drop or tap</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button type="submit" className="btn-primary w-full py-3">Save Measurement</button>
+    </form>
+  );
+
   return (
     <div className="min-h-screen">
       <Navigation />
@@ -298,245 +427,26 @@ export default function BodyMetrix() {
               <h1 className="text-3xl font-bold text-white">Body Metrix</h1>
               <p className="text-white/40 mt-1">Track your weekly measurements and progress photos</p>
             </div>
-            <div className="flex gap-2">
-              {showForm && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                  }}
-                  className="text-sm px-4 py-2 rounded-xl font-semibold border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all"
-                >
-                  Cancel
-                </button>
-              )}
+            {!editingDate && (
               <button
                 type="button"
                 onClick={() => {
-                  if (showForm) {
-                    const form = document.querySelector('form');
-                    if (form) form.requestSubmit();
-                  } else {
+                  if (!showForm) {
                     prefillFromLast();
                     setShowForm(true);
+                  } else {
+                    setShowForm(false);
                   }
                 }}
                 className="btn-primary"
               >
-                {showForm ? 'Save' : '+ Add Entry'}
+                {showForm ? 'Cancel' : '+ Add Entry'}
               </button>
-            </div>
+            )}
           </div>
 
-          {/* Add Measurement Form */}
-          {showForm && (
-            <form onSubmit={handleSubmit} className="glass-strong p-6 mb-8">
-              <h2 className="text-lg font-semibold text-white mb-4">{measurements.some(m => m.date === date) ? 'Edit Measurement' : 'New Measurement'}</h2>
-
-              {/* Date */}
-              <div className="mb-6">
-                <label className="block text-sm text-white/60 mb-2">Date</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={e => setDate(e.target.value)}
-                  className="glass-input w-full px-4 py-3"
-                  required
-                />
-              </div>
-
-              {/* Measurements Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                {[
-                  { label: 'Weight (kg)', value: weight, setValue: setWeight, step: 0.1, req: true },
-                  { label: 'Body Fat (%)', value: bodyFat, setValue: setBodyFat, step: 0.1, req: false },
-                  { label: 'Arms (cm)', value: arms, setValue: setArms, step: 0.5, req: true },
-                  { label: 'Chest (cm)', value: chest, setValue: setChest, step: 0.5, req: true },
-                  { label: 'Waist (cm)', value: waist, setValue: setWaist, step: 0.5, req: true },
-                  { label: 'Legs (cm)', value: legs, setValue: setLegs, step: 0.5, req: true },
-                ].map(field => (
-                  <div key={field.label}>
-                    <label className="block text-sm text-white/60 mb-2">{field.label}</label>
-                    <div className="flex items-stretch gap-3">
-                      <button
-                        type="button"
-                        onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') - field.step) * 10) / 10))}
-                        className="shrink-0 w-12 py-3 rounded-xl text-xl font-bold transition-colors border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 active:bg-red-500/30"
-                      >−</button>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={field.value}
-                        onChange={e => field.setValue(e.target.value)}
-                        placeholder="0"
-                        className="glass-input min-w-0 flex-1 px-3 py-3 text-center text-lg font-semibold"
-                        required={field.req}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => field.setValue(String(Math.round((parseFloat(field.value || '0') + field.step) * 10) / 10))}
-                        className="shrink-0 w-12 py-3 rounded-xl text-xl font-bold transition-colors border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 active:bg-green-500/30"
-                      >+</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {measurements.length > 0 && (
-                <p className="text-xs text-white/30 mb-4">Changes will be auto-calculated vs. your previous entry.</p>
-              )}
-
-              {/* Text status fields */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                {([
-                  { label: 'Energy levels', value: energy, setValue: setEnergy, placeholder: 'feel good, tired etc' },
-                  { label: 'Hunger', value: hunger, setValue: setHunger, placeholder: 'normal, hungry, too full' },
-                  { label: 'Tiredness', value: tiredness, setValue: setTiredness, placeholder: 'normal, too much etc' },
-                  { label: 'Digestion', value: digestion, setValue: setDigestion, placeholder: 'no problem, issues etc' },
-                ]).map(field => (
-                  <div key={field.label}>
-                    <label className="block text-sm text-white/60 mb-2">{field.label}</label>
-                    <input
-                      type="text"
-                      value={field.value}
-                      onChange={e => field.setValue(e.target.value)}
-                      placeholder={field.placeholder}
-                      className="glass-input w-full px-4 py-3"
-                    />
-                  </div>
-                ))}
-              </div>
-
-              {/* Slider fields */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <SliderField
-                  label="Sleep (hours/night)"
-                  value={sleepHours}
-                  onChange={setSleepHours}
-                  min={5} max={10} step={0.5}
-                  targetMin={7} targetMax={8}
-                  unit="h"
-                />
-                <SliderField
-                  label="Cardio (sessions/week)"
-                  value={cardio}
-                  onChange={setCardio}
-                  min={0} max={7} step={1}
-                  targetMin={4} targetMax={6}
-                  unit="x"
-                />
-                <SliderField
-                  label="Trainings (sessions/week)"
-                  value={trainings}
-                  onChange={setTrainings}
-                  min={0} max={7} step={1}
-                  targetMin={4} targetMax={6}
-                  unit="x"
-                />
-                <SliderField
-                  label="Food adherence"
-                  value={foodChanges}
-                  onChange={setFoodChanges}
-                  min={0} max={100} step={5}
-                  targetMin={95} targetMax={100}
-                  unit="%"
-                />
-              </div>
-
-              {/* Photo Uploads */}
-              <div className="mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <label className="text-sm text-white/60">Progress Photos</label>
-                  <button
-                    type="button"
-                    onClick={() => bulkPhotoRef.current?.click()}
-                    className="btn-secondary text-xs px-3 py-1.5"
-                  >
-                    Upload all 4
-                  </button>
-                </div>
-                <p className="text-[10px] text-white/25 mb-3">
-                  Upload 4 photos at once (order: front, side-left, back, side-right) or tap a slot to upload individually.
-                  {swapSource && <span className="text-va-red ml-1">Tap another photo to swap positions.</span>}
-                </p>
-                <input
-                  ref={bulkPhotoRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={e => { handleBulkUpload(e.target.files).then(() => { if (bulkPhotoRef.current) bulkPhotoRef.current.value = ''; }); }}
-                />
-                <input
-                  ref={singlePhotoRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={e => { handlePhotoUpload(singlePhotoTarget, e.target.files?.[0]); if (singlePhotoRef.current) singlePhotoRef.current.value = ''; }}
-                />
-                <div className="photo-grid">
-                  {photoAngles.map(angle => (
-                    <div key={angle.key} className="flex flex-col gap-2">
-                      <label className="text-xs text-white/40 text-center">{angle.label}</label>
-                      <div
-                        className={`aspect-[3/4] rounded-xl overflow-hidden bg-white/5 border flex items-center justify-center cursor-pointer transition-colors relative ${
-                          dragOver === angle.key
-                            ? 'border-va-red ring-2 ring-va-red/30 bg-va-red/10'
-                            : swapSource === angle.key
-                              ? 'border-va-red ring-2 ring-va-red/30'
-                              : swapSource && photos[angle.key]
-                                ? 'border-white/20 hover:border-va-red/50'
-                                : 'border-white/10 hover:border-va-red/30'
-                        }`}
-                        onClick={() => {
-                          if (photos[angle.key] && (swapSource || Object.values(photos).filter(Boolean).length > 1)) {
-                            handleSwap(angle.key);
-                          } else {
-                            setSinglePhotoTarget(angle.key);
-                            singlePhotoRef.current?.click();
-                          }
-                        }}
-                        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); dragCounters.current[angle.key] = (dragCounters.current[angle.key] || 0) + 1; setDragOver(angle.key); }}
-                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); dragCounters.current[angle.key] = (dragCounters.current[angle.key] || 0) - 1; if (dragCounters.current[angle.key] <= 0) { dragCounters.current[angle.key] = 0; setDragOver(null); } }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          dragCounters.current[angle.key] = 0;
-                          setDragOver(null);
-                          const files = e.dataTransfer.files;
-                          if (files.length === 1) {
-                            handlePhotoUpload(angle.key, files[0]);
-                          } else if (files.length > 1) {
-                            handleBulkUpload(files);
-                          }
-                        }}
-                      >
-                        {photos[angle.key] ? (
-                          <>
-                            <img src={photos[angle.key]} alt={angle.label} className="w-full h-full object-cover" />
-                            {swapSource === angle.key && (
-                              <div className="absolute inset-0 bg-va-red/20 flex items-center justify-center">
-                                <span className="text-white text-xs font-bold bg-black/50 px-2 py-1 rounded">Tap to swap</span>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="text-white/20 text-center p-2">
-                            <div className="text-2xl mb-1">+</div>
-                            <div className="text-xs">Drop or tap</div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <button type="submit" className="btn-primary w-full py-3">
-                Save Measurement
-              </button>
-            </form>
-          )}
+          {/* Add Measurement Form (new entry only, not inline edit) */}
+          {showForm && !editingDate && renderMeasurementForm('New Measurement')}
 
           {/* Measurement Timeline */}
           <div className="mb-8">
@@ -554,8 +464,16 @@ export default function BodyMetrix() {
 
                   const isExpanded = expandedEntry === m.date;
 
+                  if (editingDate === m.date) {
+                    return (
+                      <div key={m.date} id={`measurement-${m.date}`}>
+                        {renderMeasurementForm(`Edit — ${formatDate(m.date)}`)}
+                      </div>
+                    );
+                  }
+
                   return (
-                  <div key={m.date} className="glass-card p-6">
+                  <div key={m.date} id={`measurement-${m.date}`} className="glass-card p-6">
                     <div
                       className="flex items-center justify-between mb-4 cursor-pointer"
                       onClick={() => setExpandedEntry(isExpanded ? null : m.date)}
@@ -645,7 +563,7 @@ export default function BodyMetrix() {
                               const src = m.photos[angle];
                               if (!src) return null;
                               return (
-                                <div key={angle} className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
+                                <div key={angle} className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5 cursor-pointer" onClick={() => setLightbox(src)}>
                                   <img src={src} alt={angle} className="w-full h-full object-cover" />
                                 </div>
                               );
@@ -681,6 +599,25 @@ export default function BodyMetrix() {
           </div>
         </div>
       </main>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white/70 hover:text-white text-3xl"
+            onClick={() => setLightbox(null)}
+          >✕</button>
+          <img
+            src={lightbox}
+            alt="Full size"
+            className="max-w-full max-h-full object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

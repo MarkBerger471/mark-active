@@ -181,8 +181,9 @@ export async function getMeasurements(): Promise<Measurement[]> {
 export async function saveMeasurement(measurement: Measurement) {
   const toSave = { ...measurement };
 
-  // Separate base64 photos for background upload
-  const savedPhotos: Record<string, string> = {};
+  // Queue base64 photos for background upload, but keep them in local data
+  const localPhotos: Record<string, string> = {};
+  const firestorePhotos: Record<string, string> = {};
   if (toSave.photos) {
     for (const [angle, val] of Object.entries(toSave.photos)) {
       if (!val) continue;
@@ -194,15 +195,19 @@ export async function saveMeasurement(measurement: Measurement) {
           base64: val,
           timestamp: Date.now(),
         });
+        localPhotos[angle] = val; // Keep base64 in local DB for display
       } else {
-        savedPhotos[angle] = val;
+        localPhotos[angle] = val;
+        firestorePhotos[angle] = val;
       }
     }
   }
-  toSave.photos = savedPhotos;
+  // Local copy keeps base64 for display; Firestore copy only has URLs
+  const localMeasurement = { ...toSave, photos: localPhotos };
+  toSave.photos = firestorePhotos;
 
-  // Save to IndexedDB immediately
-  await idbPutMeasurement(toSave);
+  // Save to IndexedDB with base64 photos for local display
+  await idbPutMeasurement(localMeasurement);
 
   // Queue for Firestore sync
   await addPendingSync({

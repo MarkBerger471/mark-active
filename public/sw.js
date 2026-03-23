@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bb-shell-v1';
+const CACHE_NAME = 'bb-shell-v2';
 const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan'];
 
 self.addEventListener('install', (event) => {
