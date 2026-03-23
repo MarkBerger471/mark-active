@@ -55,6 +55,93 @@ export function ScaleIcon({ className = '' }: { className?: string }) {
   );
 }
 
+// Muscle group icons for workout cards
+export function ShouldersIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" className={className}>
+      {/* Head */}
+      <circle cx="32" cy="12" r="6" fill="currentColor" opacity="0.15" />
+      {/* Neck */}
+      <rect x="29" y="18" width="6" height="4" fill="currentColor" opacity="0.1" />
+      {/* Torso */}
+      <path d="M24 28v20h16V28" fill="currentColor" opacity="0.08" />
+      {/* Shoulders highlighted */}
+      <path d="M24 22c-8 0-14 4-14 8v4h14V22z" fill="currentColor" opacity="0.35" />
+      <path d="M40 22c8 0 14 4 14 8v4H40V22z" fill="currentColor" opacity="0.35" />
+      {/* Deltoid caps */}
+      <ellipse cx="14" cy="28" rx="5" ry="6" fill="currentColor" opacity="0.25" />
+      <ellipse cx="50" cy="28" rx="5" ry="6" fill="currentColor" opacity="0.25" />
+    </svg>
+  );
+}
+
+export function LegsIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" className={className}>
+      {/* Torso faded */}
+      <path d="M22 4h20v16H22z" fill="currentColor" opacity="0.06" />
+      {/* Hips */}
+      <path d="M20 18h24v8H20z" fill="currentColor" opacity="0.1" />
+      {/* Legs highlighted */}
+      <path d="M20 26h10v24c0 2-2 4-4 4h-2c-2 0-4-2-4-4V26z" fill="currentColor" opacity="0.3" />
+      <path d="M34 26h10v24c0 2-2 4-4 4h-2c-2 0-4-2-4-4V26z" fill="currentColor" opacity="0.3" />
+      {/* Quad detail */}
+      <path d="M22 30c2 4 2 10 0 16" stroke="currentColor" strokeWidth="1" opacity="0.2" />
+      <path d="M42 30c-2 4-2 10 0 16" stroke="currentColor" strokeWidth="1" opacity="0.2" />
+      {/* Calves */}
+      <ellipse cx="25" cy="44" rx="3" ry="6" fill="currentColor" opacity="0.2" />
+      <ellipse cx="39" cy="44" rx="3" ry="6" fill="currentColor" opacity="0.2" />
+    </svg>
+  );
+}
+
+export function ChestIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" className={className}>
+      {/* Head */}
+      <circle cx="32" cy="8" r="5" fill="currentColor" opacity="0.1" />
+      {/* Shoulders */}
+      <path d="M18 18c-6 0-10 3-10 6v2h14v-8z" fill="currentColor" opacity="0.08" />
+      <path d="M46 18c6 0 10 3 10 6v2H42v-8z" fill="currentColor" opacity="0.08" />
+      {/* Chest highlighted */}
+      <path d="M18 18h28v16H18z" fill="currentColor" opacity="0.12" />
+      <ellipse cx="25" cy="26" rx="8" ry="7" fill="currentColor" opacity="0.3" />
+      <ellipse cx="39" cy="26" rx="8" ry="7" fill="currentColor" opacity="0.3" />
+      {/* Pec line */}
+      <path d="M32 20v12" stroke="currentColor" strokeWidth="1" opacity="0.15" />
+      {/* Arms with triceps */}
+      <path d="M8 26v16c0 2 2 3 4 3s4-1 4-3V26" fill="currentColor" opacity="0.2" />
+      <path d="M48 26v16c0 2 2 3 4 3s4-1 4-3V26" fill="currentColor" opacity="0.2" />
+      {/* Lower body faded */}
+      <path d="M18 34h28v20H18z" fill="currentColor" opacity="0.04" />
+    </svg>
+  );
+}
+
+export function BackIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" className={className}>
+      {/* Head */}
+      <circle cx="32" cy="8" r="5" fill="currentColor" opacity="0.1" />
+      {/* Back highlighted - V taper */}
+      <path d="M16 16h32v6l-4 22H20L16 22v-6z" fill="currentColor" opacity="0.3" />
+      {/* Spine */}
+      <path d="M32 16v28" stroke="currentColor" strokeWidth="1.5" opacity="0.2" />
+      {/* Lat detail */}
+      <path d="M20 20c-4 2-6 8-4 14" stroke="currentColor" strokeWidth="1" opacity="0.15" />
+      <path d="M44 20c4 2 6 8 4 14" stroke="currentColor" strokeWidth="1" opacity="0.15" />
+      {/* Arms with biceps */}
+      <path d="M8 22v14c0 2 2 3 4 3s4-1 4-3V22" fill="currentColor" opacity="0.2" />
+      <path d="M48 22v14c0 2 2 3 4 3s4-1 4-3V22" fill="currentColor" opacity="0.2" />
+      {/* Bicep bump */}
+      <ellipse cx="10" cy="30" rx="3" ry="5" fill="currentColor" opacity="0.15" />
+      <ellipse cx="54" cy="30" rx="3" ry="5" fill="currentColor" opacity="0.15" />
+      {/* Lower body faded */}
+      <path d="M20 44h24v12H20z" fill="currentColor" opacity="0.04" />
+    </svg>
+  );
+}
+
 export function ForkKnifeIcon({ className = '' }: { className?: string }) {
   return (
     <svg viewBox="0 0 64 64" fill="none" className={className}>

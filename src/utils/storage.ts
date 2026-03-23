@@ -9,11 +9,31 @@ import {
   deleteDoc,
   query,
   orderBy,
-  where,
-  limit,
   writeBatch,
 } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import {
+  getAllMeasurements as idbGetMeasurements,
+  putMeasurement as idbPutMeasurement,
+  deleteMeasurementLocal as idbDeleteMeasurement,
+  bulkPutMeasurements,
+  getAllTrainingSessions as idbGetSessions,
+  putTrainingSession as idbPutSession,
+  deleteTrainingSessionLocal as idbDeleteSession,
+  bulkPutTrainingSessions,
+  getNutritionPlanLocal as idbGetNutrition,
+  putNutritionPlanLocal as idbPutNutrition,
+  getSettingLocal as idbGetSetting,
+  putSettingLocal as idbPutSetting,
+  deleteSettingLocal as idbDeleteSetting,
+  addPendingSync,
+  getAllPendingSync,
+  deletePendingSync,
+  addPendingPhoto,
+  getAllPendingPhotos,
+  deletePendingPhoto,
+  hasPendingSyncFor,
+} from './offlineDb';
 
 // Strip undefined values recursively — Firestore rejects undefined
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,25 +51,93 @@ function stripUndefined(obj: any): any {
   return obj;
 }
 
-// Auth (stays in sessionStorage — per-browser-session)
+// Background refresh: pull from Firestore into IndexedDB when online
+function backgroundRefreshMeasurements() {
+  if (typeof window === 'undefined' || !navigator.onLine) return;
+  (async () => {
+    try {
+      const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => d.data() as Measurement);
+      // Only overwrite docs without pending sync
+      for (const m of items) {
+        const pending = await hasPendingSyncFor('measurements', m.date);
+        if (!pending) await idbPutMeasurement(m);
+      }
+    } catch (e) {
+      console.warn('Background refresh measurements failed:', e);
+    }
+  })();
+}
+
+function backgroundRefreshSessions() {
+  if (typeof window === 'undefined' || !navigator.onLine) return;
+  (async () => {
+    try {
+      const snap = await getDocs(collection(db, 'trainingSessions'));
+      const items = snap.docs.map(d => d.data() as TrainingSession);
+      for (const s of items) {
+        const pending = await hasPendingSyncFor('trainingSessions', s.id);
+        if (!pending) await idbPutSession(s);
+      }
+    } catch (e) {
+      console.warn('Background refresh sessions failed:', e);
+    }
+  })();
+}
+
+function backgroundRefreshNutrition() {
+  if (typeof window === 'undefined' || !navigator.onLine) return;
+  (async () => {
+    try {
+      const snap = await getDoc(doc(db, 'nutrition', 'plan'));
+      if (snap.exists()) {
+        const pending = await hasPendingSyncFor('nutrition', 'plan');
+        if (!pending) await idbPutNutrition(snap.data() as NutritionPlan);
+      }
+    } catch (e) {
+      console.warn('Background refresh nutrition failed:', e);
+    }
+  })();
+}
+
+function backgroundRefreshSetting(key: string) {
+  if (typeof window === 'undefined' || !navigator.onLine) return;
+  (async () => {
+    try {
+      const snap = await getDoc(doc(db, 'settings', key));
+      const pending = await hasPendingSyncFor('settings', key);
+      if (!pending) {
+        if (snap.exists()) {
+          await idbPutSetting(key, snap.data().value);
+        }
+      }
+    } catch (e) {
+      console.warn('Background refresh setting failed:', e);
+    }
+  })();
+}
+
+// Auth (localStorage for offline persistence)
 export function isSessionValid(): boolean {
   if (typeof window === 'undefined') return false;
-  return sessionStorage.getItem('bb_session') === 'true';
+  return localStorage.getItem('bb_session') === 'true';
 }
 
 export function setSession(valid: boolean) {
   if (valid) {
-    sessionStorage.setItem('bb_session', 'true');
+    localStorage.setItem('bb_session', 'true');
   } else {
-    sessionStorage.removeItem('bb_session');
+    localStorage.removeItem('bb_session');
   }
 }
 
-// Settings (Firestore)
+// Settings — offline-first
 export async function getSetting(key: string): Promise<string | null> {
   try {
-    const snap = await getDoc(doc(db, 'settings', key));
-    return snap.exists() ? snap.data().value : null;
+    const local = await idbGetSetting(key);
+    backgroundRefreshSetting(key);
+    return local;
   } catch (e) {
     console.error('getSetting error:', e);
     return null;
@@ -58,18 +146,32 @@ export async function getSetting(key: string): Promise<string | null> {
 
 export async function saveSetting(key: string, value: string | null) {
   if (value === null) {
-    await deleteDoc(doc(db, 'settings', key));
+    await idbDeleteSetting(key);
+    await addPendingSync({
+      collection: 'settings',
+      docId: key,
+      operation: 'delete',
+      timestamp: Date.now(),
+    });
   } else {
-    await setDoc(doc(db, 'settings', key), { value });
+    await idbPutSetting(key, value);
+    await addPendingSync({
+      collection: 'settings',
+      docId: key,
+      operation: 'set',
+      data: { value },
+      timestamp: Date.now(),
+    });
   }
+  flushSyncQueue();
 }
 
-// Measurements (Firestore)
+// Measurements — offline-first
 export async function getMeasurements(): Promise<Measurement[]> {
   try {
-    const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
-    const snap = await getDocs(q);
-    return snap.docs.map(d => d.data() as Measurement);
+    const local = await idbGetMeasurements();
+    backgroundRefreshMeasurements();
+    return local;
   } catch (e) {
     console.error('getMeasurements error:', e);
     return [];
@@ -80,55 +182,57 @@ export async function saveMeasurement(measurement: Measurement) {
   const toSave = { ...measurement };
 
   // Separate base64 photos for background upload
-  const photosToUpload: Record<string, string> = {};
   const savedPhotos: Record<string, string> = {};
   if (toSave.photos) {
     for (const [angle, val] of Object.entries(toSave.photos)) {
       if (!val) continue;
       if (val.startsWith('data:')) {
-        photosToUpload[angle] = val;
+        // Queue photo for upload when online
+        await addPendingPhoto({
+          measurementDate: toSave.date,
+          angle,
+          base64: val,
+          timestamp: Date.now(),
+        });
       } else {
-        savedPhotos[angle] = val; // already a URL
+        savedPhotos[angle] = val;
       }
     }
   }
   toSave.photos = savedPhotos;
 
-  // Save measurement immediately (without base64 photos)
-  try {
-    await setDoc(doc(db, 'measurements', toSave.date), stripUndefined(toSave));
-  } catch (e) {
-    console.error('saveMeasurement error:', e);
-    alert('Failed to save measurement. Check console for details.');
-    return;
-  }
+  // Save to IndexedDB immediately
+  await idbPutMeasurement(toSave);
 
-  // Upload photos in background, then update the document
-  if (Object.keys(photosToUpload).length > 0) {
-    (async () => {
-      try {
-        for (const [angle, base64] of Object.entries(photosToUpload)) {
-          const storageRef = ref(storage, `photos/${toSave.date}/${angle}.jpg`);
-          await uploadString(storageRef, base64, 'data_url');
-          savedPhotos[angle] = await getDownloadURL(storageRef);
-        }
-        await setDoc(doc(db, 'measurements', toSave.date), stripUndefined({ ...toSave, photos: savedPhotos }));
-      } catch (e) {
-        console.error('Photo upload error:', e);
-      }
-    })();
-  }
+  // Queue for Firestore sync
+  await addPendingSync({
+    collection: 'measurements',
+    docId: toSave.date,
+    operation: 'set',
+    data: stripUndefined(toSave),
+    timestamp: Date.now(),
+  });
+
+  flushSyncQueue();
 }
 
 export async function deleteMeasurement(date: string) {
-  await deleteDoc(doc(db, 'measurements', date));
+  await idbDeleteMeasurement(date);
+  await addPendingSync({
+    collection: 'measurements',
+    docId: date,
+    operation: 'delete',
+    timestamp: Date.now(),
+  });
+  flushSyncQueue();
 }
 
-// Training Sessions (Firestore)
+// Training Sessions — offline-first
 export async function getTrainingSessions(): Promise<TrainingSession[]> {
   try {
-    const snap = await getDocs(collection(db, 'trainingSessions'));
-    return snap.docs.map(d => d.data() as TrainingSession);
+    const local = await idbGetSessions();
+    backgroundRefreshSessions();
+    return local;
   } catch (e) {
     console.error('getTrainingSessions error:', e);
     return [];
@@ -136,30 +240,46 @@ export async function getTrainingSessions(): Promise<TrainingSession[]> {
 }
 
 export async function saveTrainingSession(session: TrainingSession) {
-  // Check if existing to preserve savedAt
-  const existing = await getDoc(doc(db, 'trainingSessions', session.id));
-  if (existing.exists()) {
-    session.savedAt = existing.data().savedAt || session.savedAt || new Date().toISOString();
+  // Check existing in IDB to preserve savedAt
+  const allLocal = await idbGetSessions();
+  const existing = allLocal.find(s => s.id === session.id);
+  if (existing) {
+    session.savedAt = existing.savedAt || session.savedAt || new Date().toISOString();
   } else {
     session.savedAt = session.savedAt || new Date().toISOString();
   }
-  await setDoc(doc(db, 'trainingSessions', session.id), stripUndefined(session));
+
+  await idbPutSession(session);
+
+  await addPendingSync({
+    collection: 'trainingSessions',
+    docId: session.id,
+    operation: 'set',
+    data: stripUndefined(session),
+    timestamp: Date.now(),
+  });
+
+  flushSyncQueue();
 }
 
 export async function deleteTrainingSession(id: string) {
-  await deleteDoc(doc(db, 'trainingSessions', id));
+  await idbDeleteSession(id);
+  await addPendingSync({
+    collection: 'trainingSessions',
+    docId: id,
+    operation: 'delete',
+    timestamp: Date.now(),
+  });
+  flushSyncQueue();
 }
 
 export async function getLastSessionForWorkout(workoutName: string): Promise<TrainingSession | null> {
   try {
-    const q = query(
-      collection(db, 'trainingSessions'),
-      where('workoutName', '==', workoutName),
-      orderBy('date', 'desc'),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    return snap.empty ? null : (snap.docs[0].data() as TrainingSession);
+    const all = await idbGetSessions();
+    const matching = all
+      .filter(s => s.workoutName === workoutName)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    return matching[0] || null;
   } catch (e) {
     console.error('getLastSessionForWorkout error:', e);
     return null;
@@ -170,7 +290,7 @@ export async function getLastSessionForWorkout(workoutName: string): Promise<Tra
 export function getPresetWorkouts(): Workout[] {
   return [
     {
-      name: 'Shoulders',
+      name: 'Shoulders + Abs',
       exercises: [
         { name: 'Lateral raises dumbbells (seated)', targetReps: '6-8', sets: [
           { weight: 10, isWarmup: true },
@@ -330,11 +450,12 @@ export function getPresetWorkouts(): Workout[] {
   ];
 }
 
-// Nutrition (Firestore)
+// Nutrition — offline-first
 export async function getNutritionPlan(): Promise<NutritionPlan | null> {
   try {
-    const snap = await getDoc(doc(db, 'nutrition', 'plan'));
-    return snap.exists() ? (snap.data() as NutritionPlan) : null;
+    const local = await idbGetNutrition();
+    backgroundRefreshNutrition();
+    return local;
   } catch (e) {
     console.error('getNutritionPlan error:', e);
     return null;
@@ -342,7 +463,15 @@ export async function getNutritionPlan(): Promise<NutritionPlan | null> {
 }
 
 export async function saveNutritionPlan(plan: NutritionPlan) {
-  await setDoc(doc(db, 'nutrition', 'plan'), stripUndefined(plan));
+  await idbPutNutrition(plan);
+  await addPendingSync({
+    collection: 'nutrition',
+    docId: 'plan',
+    operation: 'set',
+    data: stripUndefined(plan),
+    timestamp: Date.now(),
+  });
+  flushSyncQueue();
 }
 
 // File to base64 (client-side utility)
@@ -355,51 +484,132 @@ export function fileToBase64(file: File): Promise<string> {
   });
 }
 
-// Seed initial data
-export async function seedInitialData() {
-  const existing = await getMeasurements();
-  if (existing.length === 0) {
-    const historicalData: Measurement[] = [
-      { date: '2025-10-12', weight: 101, arms: 40, chest: 106, waist: 98, legs: 61, energy: 'Good', hunger: 'Normal, a bit hungry sometimes', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 5, foodChanges: 100, photos: {} },
-      { date: '2025-10-19', weight: 101, arms: 38, chest: 106, waist: 98, legs: 62, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 4, foodChanges: 80, photos: {} },
-      { date: '2025-10-26', weight: 102, arms: 38, chest: 107.5, waist: 101, legs: 61, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 1, trainings: 5, foodChanges: 60, photos: {} },
-      { date: '2025-11-01', weight: 101, arms: 38, chest: 110, waist: 100, legs: 62, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 4, trainings: 5, foodChanges: 100, photos: {} },
-      { date: '2025-11-09', weight: 102.4, arms: 39, chest: 110, waist: 101, legs: 62, energy: 'Good', hunger: 'Normal to full', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 5, trainings: 5, foodChanges: 95, photos: {} },
-      { date: '2025-11-16', weight: 104, arms: 39, chest: 110, waist: 100, legs: 63, energy: 'Tired', hunger: 'Normal', tiredness: 'Tired, lower back pain', digestion: 'No problem', sleepHours: 7, cardio: 5, trainings: 3, foodChanges: 90, photos: {} },
-      { date: '2025-11-29', weight: 104, arms: 39, chest: 110, waist: 100, legs: 63, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 6, cardio: 0, trainings: 3, foodChanges: 0, photos: {} },
-      { date: '2025-12-09', weight: 104, arms: 38.5, chest: 109, waist: 103, legs: 64, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 6, cardio: 0, trainings: 3, foodChanges: 0, photos: {} },
-      { date: '2025-12-14', weight: 105, arms: 39.5, chest: 110.5, waist: 104, legs: 65, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 5, foodChanges: 100, photos: {} },
-      { date: '2025-12-21', weight: 105, arms: 39.5, chest: 111, waist: 104, legs: 65, energy: 'Tired a bit', hunger: 'Normal to hungry', tiredness: 'Tired during training', digestion: 'No problem', sleepHours: 6.5, cardio: 3, trainings: 5, foodChanges: 100, photos: {} },
-      { date: '2025-12-28', weight: 105, arms: 39, chest: 111, waist: 104, legs: 65, energy: 'Good', hunger: 'Hungry', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7.5, cardio: 3, trainings: 6, foodChanges: 90, photos: {} },
-      { date: '2026-01-04', weight: 105.7, arms: 39.5, chest: 111, waist: 104, legs: 66, energy: 'Good, but sore', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7.5, cardio: 6, trainings: 5, foodChanges: 90, photos: {} },
-      { date: '2026-01-11', weight: 108, arms: 39.5, chest: 114, waist: 105, legs: 67, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7.5, cardio: 6, trainings: 5, foodChanges: 80, photos: {} },
-      { date: '2026-01-18', weight: 109.4, arms: 40, chest: 115, waist: 106, legs: 67, energy: 'Tired', hunger: 'Full', tiredness: 'Tired', digestion: 'No problem', sleepHours: 7.5, cardio: 3, trainings: 3, foodChanges: 70, photos: {} },
-      { date: '2026-01-25', weight: 109.7, arms: 40, chest: 112, waist: 106, legs: 67, energy: 'Good', hunger: 'Full', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 2, foodChanges: 50, photos: {} },
-      { date: '2026-02-01', weight: 110.4, arms: 40, chest: 112, waist: 107, legs: 67, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 3, foodChanges: 80, photos: {} },
-      { date: '2026-02-08', weight: 110.4, arms: 40, chest: 112, waist: 107, legs: 67, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 4, foodChanges: 80, photos: {} },
-      { date: '2026-02-15', weight: 109.2, arms: 40, chest: 113, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 4, foodChanges: 95, photos: {} },
-      { date: '2026-02-22', weight: 109.8, arms: 40, chest: 114, waist: 106, legs: 66, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 5, trainings: 5, foodChanges: 95, photos: {} },
-      { date: '2026-03-03', weight: 110, arms: 41, chest: 112, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 3, foodChanges: 50, photos: {} },
-      {
-        date: '2026-03-08',
-        weight: 110.3, arms: 40, chest: 111, waist: 106, legs: 68,
-        energy: 'Sick all week', hunger: 'Good', tiredness: 'Good', digestion: 'No problem',
-        sleepHours: 7, cardio: 1, trainings: 0, foodChanges: 100,
-        photos: {
-          front: '/progress-photos/2026-03-08/front.jpeg',
-          sideLeft: '/progress-photos/2026-03-08/side-left.jpeg',
-          sideRight: '/progress-photos/2026-03-08/side-right.jpeg',
-          back: '/progress-photos/2026-03-08/back.jpeg',
-        },
-      },
-      { date: '2026-03-15', weight: 111.2, arms: 40, chest: 117, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 4, trainings: 1, foodChanges: 100, photos: {} },
-    ];
-    const batch = writeBatch(db);
-    historicalData.forEach(m => {
-      batch.set(doc(db, 'measurements', m.date), stripUndefined(m));
-    });
-    await batch.commit();
+// Sync queue flush — push pending changes to Firestore
+let flushing = false;
+
+export async function flushSyncQueue() {
+  if (typeof window === 'undefined' || !navigator.onLine || flushing) return;
+  flushing = true;
+
+  try {
+    // Flush pending data writes
+    const entries = await getAllPendingSync();
+    const sorted = entries.sort((a, b) => a.timestamp - b.timestamp);
+
+    for (const entry of sorted) {
+      try {
+        if (entry.operation === 'set') {
+          await setDoc(doc(db, entry.collection, entry.docId), entry.data);
+        } else if (entry.operation === 'delete') {
+          await deleteDoc(doc(db, entry.collection, entry.docId));
+        }
+        if (entry.id != null) await deletePendingSync(entry.id);
+      } catch (e) {
+        console.error('Sync failed for entry:', entry, e);
+        break; // Stop on failure, retry later
+      }
+    }
+
+    // Flush pending photos
+    const photos = await getAllPendingPhotos();
+    for (const photo of photos.sort((a, b) => a.timestamp - b.timestamp)) {
+      try {
+        const storageRef = ref(storage, `photos/${photo.measurementDate}/${photo.angle}.jpg`);
+        await uploadString(storageRef, photo.base64, 'data_url');
+        const url = await getDownloadURL(storageRef);
+
+        // Update measurement doc with photo URL
+        const measurementSnap = await getDoc(doc(db, 'measurements', photo.measurementDate));
+        if (measurementSnap.exists()) {
+          const data = measurementSnap.data() as Measurement;
+          const photos = { ...data.photos, [photo.angle]: url };
+          await setDoc(doc(db, 'measurements', photo.measurementDate), { ...data, photos });
+          // Also update IDB
+          await idbPutMeasurement({ ...data, photos });
+        }
+
+        if (photo.id != null) await deletePendingPhoto(photo.id);
+      } catch (e) {
+        console.error('Photo sync failed:', photo, e);
+        break;
+      }
+    }
+  } finally {
+    flushing = false;
   }
+}
+
+// Seed initial data — check IDB first
+export async function seedInitialData() {
+  const existing = await idbGetMeasurements();
+  if (existing.length > 0) return;
+
+  // Also check Firestore if online
+  if (navigator.onLine) {
+    try {
+      const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        // Firestore has data, pull into IDB
+        const items = snap.docs.map(d => d.data() as Measurement);
+        await bulkPutMeasurements(items);
+        return;
+      }
+    } catch (e) {
+      console.warn('Firestore check during seed failed:', e);
+    }
+  }
+
+  const historicalData: Measurement[] = [
+    { date: '2025-10-12', weight: 101, arms: 40, chest: 106, waist: 98, legs: 61, energy: 'Good', hunger: 'Normal, a bit hungry sometimes', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 5, foodChanges: 100, photos: {} },
+    { date: '2025-10-19', weight: 101, arms: 38, chest: 106, waist: 98, legs: 62, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 4, foodChanges: 80, photos: {} },
+    { date: '2025-10-26', weight: 102, arms: 38, chest: 107.5, waist: 101, legs: 61, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 1, trainings: 5, foodChanges: 60, photos: {} },
+    { date: '2025-11-01', weight: 101, arms: 38, chest: 110, waist: 100, legs: 62, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 4, trainings: 5, foodChanges: 100, photos: {} },
+    { date: '2025-11-09', weight: 102.4, arms: 39, chest: 110, waist: 101, legs: 62, energy: 'Good', hunger: 'Normal to full', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 5, trainings: 5, foodChanges: 95, photos: {} },
+    { date: '2025-11-16', weight: 104, arms: 39, chest: 110, waist: 100, legs: 63, energy: 'Tired', hunger: 'Normal', tiredness: 'Tired, lower back pain', digestion: 'No problem', sleepHours: 7, cardio: 5, trainings: 3, foodChanges: 90, photos: {} },
+    { date: '2025-11-29', weight: 104, arms: 39, chest: 110, waist: 100, legs: 63, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 6, cardio: 0, trainings: 3, foodChanges: 0, photos: {} },
+    { date: '2025-12-09', weight: 104, arms: 38.5, chest: 109, waist: 103, legs: 64, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 6, cardio: 0, trainings: 3, foodChanges: 0, photos: {} },
+    { date: '2025-12-14', weight: 105, arms: 39.5, chest: 110.5, waist: 104, legs: 65, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 5, foodChanges: 100, photos: {} },
+    { date: '2025-12-21', weight: 105, arms: 39.5, chest: 111, waist: 104, legs: 65, energy: 'Tired a bit', hunger: 'Normal to hungry', tiredness: 'Tired during training', digestion: 'No problem', sleepHours: 6.5, cardio: 3, trainings: 5, foodChanges: 100, photos: {} },
+    { date: '2025-12-28', weight: 105, arms: 39, chest: 111, waist: 104, legs: 65, energy: 'Good', hunger: 'Hungry', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7.5, cardio: 3, trainings: 6, foodChanges: 90, photos: {} },
+    { date: '2026-01-04', weight: 105.7, arms: 39.5, chest: 111, waist: 104, legs: 66, energy: 'Good, but sore', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7.5, cardio: 6, trainings: 5, foodChanges: 90, photos: {} },
+    { date: '2026-01-11', weight: 108, arms: 39.5, chest: 114, waist: 105, legs: 67, energy: 'Good', hunger: 'Normal', tiredness: 'Normal', digestion: 'No problem', sleepHours: 7.5, cardio: 6, trainings: 5, foodChanges: 80, photos: {} },
+    { date: '2026-01-18', weight: 109.4, arms: 40, chest: 115, waist: 106, legs: 67, energy: 'Tired', hunger: 'Full', tiredness: 'Tired', digestion: 'No problem', sleepHours: 7.5, cardio: 3, trainings: 3, foodChanges: 70, photos: {} },
+    { date: '2026-01-25', weight: 109.7, arms: 40, chest: 112, waist: 106, legs: 67, energy: 'Good', hunger: 'Full', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 2, foodChanges: 50, photos: {} },
+    { date: '2026-02-01', weight: 110.4, arms: 40, chest: 112, waist: 107, legs: 67, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 3, foodChanges: 80, photos: {} },
+    { date: '2026-02-08', weight: 110.4, arms: 40, chest: 112, waist: 107, legs: 67, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 2, trainings: 4, foodChanges: 80, photos: {} },
+    { date: '2026-02-15', weight: 109.2, arms: 40, chest: 113, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 4, foodChanges: 95, photos: {} },
+    { date: '2026-02-22', weight: 109.8, arms: 40, chest: 114, waist: 106, legs: 66, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 5, trainings: 5, foodChanges: 95, photos: {} },
+    { date: '2026-03-03', weight: 110, arms: 41, chest: 112, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 3, trainings: 3, foodChanges: 50, photos: {} },
+    {
+      date: '2026-03-08',
+      weight: 110.3, arms: 40, chest: 111, waist: 106, legs: 68,
+      energy: 'Sick all week', hunger: 'Good', tiredness: 'Good', digestion: 'No problem',
+      sleepHours: 7, cardio: 1, trainings: 0, foodChanges: 100,
+      photos: {
+        front: '/progress-photos/2026-03-08/front.jpeg',
+        sideLeft: '/progress-photos/2026-03-08/side-left.jpeg',
+        sideRight: '/progress-photos/2026-03-08/side-right.jpeg',
+        back: '/progress-photos/2026-03-08/back.jpeg',
+      },
+    },
+    { date: '2026-03-15', weight: 111.2, arms: 40, chest: 117, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 4, trainings: 1, foodChanges: 100, photos: {} },
+  ];
+
+  // Seed to IDB
+  await bulkPutMeasurements(historicalData);
+
+  // Queue for Firestore sync
+  for (const m of historicalData) {
+    await addPendingSync({
+      collection: 'measurements',
+      docId: m.date,
+      operation: 'set',
+      data: stripUndefined(m),
+      timestamp: Date.now(),
+    });
+  }
+  flushSyncQueue();
 }
 
 // Legacy (unused but kept for type compatibility)

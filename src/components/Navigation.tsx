@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useState, useEffect } from 'react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: '◉' },
@@ -14,6 +15,16 @@ const navItems = [
 export default function Navigation() {
   const pathname = usePathname();
   const { logout } = useAuth();
+  const [online, setOnline] = useState(true);
+
+  useEffect(() => {
+    setOnline(navigator.onLine);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
 
   return (
     <>
@@ -24,7 +35,10 @@ export default function Navigation() {
             <span className="text-va-red">MARK</span> ACTIVE
           </h1>
           <div className="h-0.5 w-12 bg-gradient-to-r from-va-red to-transparent mt-2 rounded-full" />
-          <p className="text-xs text-va-gray-dark mt-2 tracking-widest uppercase">Body Tracker</p>
+          <p className="text-xs text-va-gray-dark mt-2 tracking-widest uppercase flex items-center gap-2">
+            Body Tracker
+            <span className={`inline-block w-2 h-2 rounded-full ${online ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} title={online ? 'Online' : 'Offline'} />
+          </p>
         </div>
 
         <div className="flex-1 space-y-2">
@@ -56,31 +70,35 @@ export default function Navigation() {
         </button>
       </nav>
 
-      {/* Mobile bottom bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass-strong rounded-t-2xl rounded-b-none">
-        <div className="flex justify-around items-center py-3 px-2">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all ${
-                  isActive ? 'text-va-red' : 'text-white/40'
-                }`}
-              >
-                <span className="text-xl">{item.icon}</span>
-                <span className="text-[10px] font-medium">{item.label}</span>
-              </Link>
-            );
-          })}
-          <button
-            onClick={logout}
-            className="flex flex-col items-center gap-1 px-3 py-1 text-white/40"
-          >
-            <span className="text-xl">⎋</span>
-            <span className="text-[10px] font-medium">Logout</span>
-          </button>
+      {/* Mobile top bar */}
+      <nav className="md:hidden fixed top-0 left-0 right-0 z-50">
+        {/* Online/offline indicator line */}
+        <div className={`h-[3px] ${online ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
+        <div className="glass-strong">
+          <div className="flex justify-around items-center py-2 px-2">
+            {navItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all min-w-[50px] ${
+                    isActive ? 'text-va-red' : 'text-white/40'
+                  }`}
+                >
+                  <span className="text-lg">{item.icon}</span>
+                  <span className="text-[10px] font-medium">{item.label}</span>
+                </Link>
+              );
+            })}
+            <button
+              onClick={logout}
+              className="flex flex-col items-center gap-1 px-3 py-1 text-white/40 min-w-[50px]"
+            >
+              <span className="text-lg">⎋</span>
+              <span className="text-[10px] font-medium">Logout</span>
+            </button>
+          </div>
         </div>
       </nav>
     </>

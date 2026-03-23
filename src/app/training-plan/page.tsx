@@ -4,9 +4,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Navigation from '@/components/Navigation';
-import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession } from '@/utils/storage';
+import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, getMeasurements } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
+
+const workoutImages: Record<string, string> = {
+  'Shoulders + Abs': '/muscles/shoulders.png',
+  Legs: '/muscles/legs.png',
+  'Chest + Triceps': '/muscles/chest.png',
+  'Back + Biceps': '/muscles/back.png',
+};
 
 type View = 'select' | 'workout' | 'history';
 
@@ -23,6 +30,7 @@ export default function TrainingPlanPage() {
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [lastSessions, setLastSessions] = useState<Record<string, TrainingSession>>({});
+  const [measurementDates, setMeasurementDates] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -33,6 +41,7 @@ export default function TrainingPlanPage() {
   useEffect(() => {
     if (isAuthenticated) {
       getTrainingSessions().then(setSessions);
+      getMeasurements().then(ms => setMeasurementDates(ms.map(m => m.date)));
       // Load last session for each workout
       Promise.all(workouts.map(async w => {
         const last = await getLastSessionForWorkout(w.name);
@@ -156,9 +165,6 @@ export default function TrainingPlanPage() {
   };
 
   const finishWorkout = () => {
-    if (!saved) {
-      if (!confirm('You haven\'t saved yet. Discard this session?')) return;
-    }
     setView('select');
     setActiveWorkout(null);
     setExercises([]);
@@ -223,7 +229,7 @@ export default function TrainingPlanPage() {
     return (
       <div className="min-h-screen">
         <Navigation />
-        <main className="md:ml-64 p-6 pb-24 md:pb-6">
+        <main className="md:ml-64 p-6 pt-20 md:pt-6">
           <div className="max-w-5xl mx-auto">
             <div className="mb-8 relative">
               <DumbbellIcon className="absolute -top-2 right-0 w-24 h-24 text-white opacity-[0.04] pointer-events-none" />
@@ -242,7 +248,11 @@ export default function TrainingPlanPage() {
                     className="glass-card p-6 text-left transition-all active:scale-[0.98] relative"
                   >
                     <div className={`absolute inset-0 bg-gradient-to-br ${colors[i % 4]} to-transparent rounded-2xl opacity-50`} />
-                    <DumbbellIcon className="absolute bottom-3 right-3 w-14 h-14 text-white opacity-[0.06]" />
+                    {workoutImages[w.name] ? (
+                      <img src={workoutImages[w.name]} alt={w.name} className="absolute bottom-1 right-1 h-20 opacity-40 pointer-events-none" />
+                    ) : (
+                      <DumbbellIcon className="absolute bottom-3 right-3 w-14 h-14 text-white opacity-[0.15]" />
+                    )}
                     <div className="relative z-10">
                       <h3 className="text-xl font-bold text-white mb-1">{w.name}</h3>
                       <p className="text-sm text-white/40">{w.exercises.length} exercises</p>
@@ -262,13 +272,36 @@ export default function TrainingPlanPage() {
               <div>
                 <h2 className="text-lg font-semibold text-white mb-4">Recent Sessions</h2>
                 <div className="space-y-2">
-                  {[...sessions].sort((a, b) => (b.savedAt || b.date).localeCompare(a.savedAt || a.date)).slice(0, 10).map((s) => {
+                  {(() => {
+                    const sorted = [...sessions].sort((a, b) => (b.savedAt || b.date).localeCompare(a.savedAt || a.date)).slice(0, 20);
+                    const elements: React.ReactNode[] = [];
+
+                    sorted.forEach((s, sIdx) => {
+                      // Check if a measurement date falls between this session and the previous one
+                      if (sIdx > 0) {
+                        const prevDate = sorted[sIdx - 1].date;
+                        const currDate = s.date;
+                        // Find measurement dates where currDate < mDate <= prevDate
+                        const between = measurementDates.filter(md => md > currDate && md <= prevDate);
+                        between.sort((a, b) => b.localeCompare(a));
+                        for (const md of between) {
+                          elements.push(
+                            <div key={`divider-${md}`} className="flex items-center gap-3 py-1">
+                              <div className="flex-1 h-px bg-va-red/30" />
+                              <span className="text-[10px] text-va-red/50 uppercase tracking-widest shrink-0">
+                                Measurement {new Date(md + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                              </span>
+                              <div className="flex-1 h-px bg-va-red/30" />
+                            </div>
+                          );
+                        }
+                      }
+
                     const isExpanded = expandedSession === s.id;
                     const prevSessions = isExpanded ? getPreviousSessions(s) : [];
-                    // If any set in the session has done=true, use done-based filtering; otherwise treat all as done (legacy)
                     const hasDoneFlags = s.exercises.some(e => e.sets.some(set => set.done));
                     const doneExercises = s.exercises.filter(e => !e.skipped && (hasDoneFlags ? e.sets.some(set => set.done) : true));
-                    return (
+                    elements.push(
                       <div key={s.id} className="glass-card overflow-hidden">
                         <div
                           className="p-4 flex items-center justify-between cursor-pointer"
@@ -355,7 +388,9 @@ export default function TrainingPlanPage() {
                         )}
                       </div>
                     );
-                  })}
+                    });
+                    return elements;
+                  })()}
                 </div>
               </div>
             )}
@@ -372,15 +407,18 @@ export default function TrainingPlanPage() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-4 md:p-6 pb-32 md:pb-6">
+      <main className="md:ml-64 p-4 md:p-6 pt-20 md:pt-6">
         <div className="max-w-3xl mx-auto">
           {/* Workout header */}
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <button onClick={finishWorkout} className="text-sm text-white/30 hover:text-white/60 mb-1">&larr; Back</button>
-              <h1 className="text-2xl font-bold text-white">{activeWorkout}</h1>
-            </div>
+            <h1 className="text-2xl font-bold text-white">{activeWorkout}</h1>
             <div className="flex gap-2">
+              <button
+                onClick={finishWorkout}
+                className="text-sm px-4 py-2 rounded-xl font-semibold border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+              >
+                Cancel
+              </button>
               <button
                 onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }}
                 className={`btn-primary text-sm px-4 py-2 ${saved ? '!bg-green-700' : ''}`}
@@ -497,12 +535,22 @@ export default function TrainingPlanPage() {
                             })}
                           </div>
 
-                          <button
-                            onClick={() => addSet(exIdx)}
-                            className="text-xs text-va-red hover:text-va-red-light w-full text-center py-2"
-                          >
-                            + Add Set
-                          </button>
+                          <div className="flex gap-3 pt-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); addSet(exIdx); }}
+                              className="text-xs text-va-red hover:text-va-red-light py-2"
+                            >
+                              + Add Set
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); removeSet(exIdx, ex.sets.length - 1); }}
+                              className="text-xs text-white/30 hover:text-red-400 py-2"
+                              disabled={workingSets.length <= 1}
+                              style={{ opacity: workingSets.length <= 1 ? 0.3 : 1 }}
+                            >
+                              − Remove Set
+                            </button>
+                          </div>
                         </>
                       )}
                     </div>
@@ -511,6 +559,18 @@ export default function TrainingPlanPage() {
               );
             })}
           </div>
+
+          {/* Bottom save button */}
+          <button
+            onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }}
+            className={`w-full mt-6 mb-4 py-4 rounded-2xl font-bold text-lg transition-all ${
+              saved
+                ? 'bg-green-700 text-white'
+                : 'btn-primary'
+            }`}
+          >
+            {saved ? '✓ Saved' : 'Save Workout'}
+          </button>
 
         </div>
       </main>

@@ -38,6 +38,8 @@ export default function BodyMetrix() {
   const singlePhotoRef = useRef<HTMLInputElement>(null);
   const [singlePhotoTarget, setSinglePhotoTarget] = useState<'front' | 'sideLeft' | 'back' | 'sideRight'>('front');
   const [swapSource, setSwapSource] = useState<'front' | 'sideLeft' | 'back' | 'sideRight' | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const dragCounters = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -162,6 +164,27 @@ export default function BodyMetrix() {
     }
   };
 
+  const editMeasurement = (m: Measurement) => {
+    setDate(m.date);
+    setWeight(String(m.weight));
+    setBodyFat(m.bodyFat != null ? String(m.bodyFat) : '');
+    setArms(String(m.arms));
+    setChest(String(m.chest));
+    setWaist(String(m.waist));
+    setLegs(String(m.legs));
+    setEnergy(m.energy || '');
+    setHunger(m.hunger || '');
+    setTiredness(m.tiredness || '');
+    setDigestion(m.digestion || '');
+    setSleepHours(m.sleepHours ?? 7.5);
+    setCardio(m.cardio ?? 5);
+    setTrainings(m.trainings ?? 5);
+    setFoodChanges(m.foodChanges ?? 95);
+    setPhotos(m.photos || {});
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const formatChange = (val?: number) => {
     if (val === undefined || val === 0) return null;
     const sign = val > 0 ? '+' : '';
@@ -267,7 +290,7 @@ export default function BodyMetrix() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-6 pb-24 md:pb-6">
+      <main className="md:ml-64 p-6 pt-20 md:pt-6">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
@@ -275,21 +298,40 @@ export default function BodyMetrix() {
               <h1 className="text-3xl font-bold text-white">Body Metrix</h1>
               <p className="text-white/40 mt-1">Track your weekly measurements and progress photos</p>
             </div>
-            <button
-              onClick={() => {
-                if (!showForm) prefillFromLast();
-                setShowForm(!showForm);
-              }}
-              className="btn-primary"
-            >
-              {showForm ? 'Cancel' : '+ Add Entry'}
-            </button>
+            <div className="flex gap-2">
+              {showForm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForm(false);
+                  }}
+                  className="text-sm px-4 py-2 rounded-xl font-semibold border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (showForm) {
+                    const form = document.querySelector('form');
+                    if (form) form.requestSubmit();
+                  } else {
+                    prefillFromLast();
+                    setShowForm(true);
+                  }
+                }}
+                className="btn-primary"
+              >
+                {showForm ? 'Save' : '+ Add Entry'}
+              </button>
+            </div>
           </div>
 
           {/* Add Measurement Form */}
           {showForm && (
             <form onSubmit={handleSubmit} className="glass-strong p-6 mb-8">
-              <h2 className="text-lg font-semibold text-white mb-4">New Measurement</h2>
+              <h2 className="text-lg font-semibold text-white mb-4">{measurements.some(m => m.date === date) ? 'Edit Measurement' : 'New Measurement'}</h2>
 
               {/* Date */}
               <div className="mb-6">
@@ -437,11 +479,13 @@ export default function BodyMetrix() {
                       <label className="text-xs text-white/40 text-center">{angle.label}</label>
                       <div
                         className={`aspect-[3/4] rounded-xl overflow-hidden bg-white/5 border flex items-center justify-center cursor-pointer transition-colors relative ${
-                          swapSource === angle.key
-                            ? 'border-va-red ring-2 ring-va-red/30'
-                            : swapSource && photos[angle.key]
-                              ? 'border-white/20 hover:border-va-red/50'
-                              : 'border-white/10 hover:border-va-red/30'
+                          dragOver === angle.key
+                            ? 'border-va-red ring-2 ring-va-red/30 bg-va-red/10'
+                            : swapSource === angle.key
+                              ? 'border-va-red ring-2 ring-va-red/30'
+                              : swapSource && photos[angle.key]
+                                ? 'border-white/20 hover:border-va-red/50'
+                                : 'border-white/10 hover:border-va-red/30'
                         }`}
                         onClick={() => {
                           if (photos[angle.key] && (swapSource || Object.values(photos).filter(Boolean).length > 1)) {
@@ -449,6 +493,21 @@ export default function BodyMetrix() {
                           } else {
                             setSinglePhotoTarget(angle.key);
                             singlePhotoRef.current?.click();
+                          }
+                        }}
+                        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); dragCounters.current[angle.key] = (dragCounters.current[angle.key] || 0) + 1; setDragOver(angle.key); }}
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); dragCounters.current[angle.key] = (dragCounters.current[angle.key] || 0) - 1; if (dragCounters.current[angle.key] <= 0) { dragCounters.current[angle.key] = 0; setDragOver(null); } }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          dragCounters.current[angle.key] = 0;
+                          setDragOver(null);
+                          const files = e.dataTransfer.files;
+                          if (files.length === 1) {
+                            handlePhotoUpload(angle.key, files[0]);
+                          } else if (files.length > 1) {
+                            handleBulkUpload(files);
                           }
                         }}
                       >
@@ -464,7 +523,7 @@ export default function BodyMetrix() {
                         ) : (
                           <div className="text-white/20 text-center p-2">
                             <div className="text-2xl mb-1">+</div>
-                            <div className="text-xs">{angle.label}</div>
+                            <div className="text-xs">Drop or tap</div>
                           </div>
                         )}
                       </div>
@@ -505,12 +564,20 @@ export default function BodyMetrix() {
                         <span className={`text-white/30 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
                         <h3 className="text-white font-semibold text-lg">{formatDate(m.date)}</h3>
                       </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDelete(m.date); }}
-                        className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-red-400"
-                      >
-                        Delete
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); editMeasurement(m); }}
+                          className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-white/70"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(m.date); }}
+                          className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-red-400"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
 
                     {/* Measurement Values */}

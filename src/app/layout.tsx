@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/contexts/AuthContext";
 import BackgroundEffects from "@/components/BackgroundEffects";
+import PWAProvider from "@/components/PWAProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,6 +18,16 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Mark Active | Body Tracker",
   description: "Track your bodybuilding progress",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Mark Active',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0a0a0a',
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -31,6 +42,7 @@ export default function RootLayout({
     >
       <body className="min-h-screen">
         <BackgroundEffects />
+        <PWAProvider />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

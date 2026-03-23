@@ -220,7 +220,7 @@ export default function NutritionPlanPage() {
     return (
       <div className="min-h-screen">
         <Navigation />
-        <main className="md:ml-64 p-6 pb-24 md:pb-6">
+        <main className="md:ml-64 p-6 pt-20 md:pt-6">
           <div className="max-w-5xl mx-auto">
             <div className="mb-8">
               <h1 className="text-3xl font-bold text-white">Set Up Nutrition Plan</h1>
@@ -329,7 +329,7 @@ export default function NutritionPlanPage() {
               >+ Add Meal</button>
             </div>
 
-            <button onClick={handleSetupSubmit} className="btn-primary w-full text-lg py-3">
+            <button onClick={handleSetupSubmit} className="btn-primary w-full text-lg py-3 mb-8">
               Save Nutrition Plan
             </button>
           </div>
@@ -342,7 +342,7 @@ export default function NutritionPlanPage() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-6 pb-24 md:pb-6">
+      <main className="md:ml-64 p-6 pt-20 md:pt-6">
         <div className="max-w-5xl mx-auto">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-white">Nutrition Plan</h1>
