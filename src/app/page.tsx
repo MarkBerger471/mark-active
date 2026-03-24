@@ -413,13 +413,12 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* Latest Photos */}
-          {latestMeasurement?.photos && Object.values(latestMeasurement.photos).some(Boolean) && (
+          {/* Photo Comparison: Previous vs Current */}
+          {latestMeasurement?.photos && previousMeasurement?.photos &&
+            (latestMeasurement.photos.front || latestMeasurement.photos.back) && (
             <div className="glass p-6 mb-8">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-white">
-                  Latest Progress — {new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </h2>
+                <h2 className="text-lg font-semibold text-white">Progress Comparison</h2>
                 <button
                   onClick={() => setShowPhotos(!showPhotos)}
                   className="btn-secondary text-sm px-4 py-2"
@@ -428,20 +427,72 @@ export default function Dashboard() {
                 </button>
               </div>
               {showPhotos && (
-                <div className="photo-grid">
-                  {(['front', 'sideLeft', 'back', 'sideRight'] as const).map((angle) => {
-                    const src = latestMeasurement.photos[angle];
-                    if (!src) return null;
-                    return (
-                      <div key={angle} className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
-                        <img
-                          src={src}
-                          alt={angle}
-                          className="w-full h-full object-cover"
-                        />
+                <div className="space-y-6">
+                  {/* Front comparison */}
+                  {(previousMeasurement.photos.front || latestMeasurement.photos.front) && (
+                    <div>
+                      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider mb-3">Front</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-white/30 mb-2 text-center">
+                            {new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                          <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
+                            {previousMeasurement.photos.front ? (
+                              <img src={previousMeasurement.photos.front} alt="Front previous" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-white/30 mb-2 text-center">
+                            {new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                          <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
+                            {latestMeasurement.photos.front ? (
+                              <img src={latestMeasurement.photos.front} alt="Front current" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  )}
+
+                  {/* Back comparison */}
+                  {(previousMeasurement.photos.back || latestMeasurement.photos.back) && (
+                    <div>
+                      <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider mb-3">Back</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-white/30 mb-2 text-center">
+                            {new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                          <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
+                            {previousMeasurement.photos.back ? (
+                              <img src={previousMeasurement.photos.back} alt="Back previous" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-white/30 mb-2 text-center">
+                            {new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                          <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
+                            {latestMeasurement.photos.back ? (
+                              <img src={latestMeasurement.photos.back} alt="Back current" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
