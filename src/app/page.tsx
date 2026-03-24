@@ -297,9 +297,35 @@ export default function Dashboard() {
 
                 {/* Target info */}
                 {targetWeight !== null && projectionWeeks > 0 && (() => {
-                  const weightDiff = Math.round((endWeight - (previousMeasurement?.weight ?? endWeight)) * 10) / 10;
-                  const diffColor = weightDiff < 0 ? 'text-green-400' : weightDiff > 0 ? 'text-red-400' : 'text-white/40';
-                  const diffSign = weightDiff > 0 ? '+' : '';
+                  // Calculate previous projection (without last measurement) to show date shift
+                  let dateDiffWeeks = 0;
+                  if (measurements.length >= 3) {
+                    const prevMeasurements = measurements.slice(0, -1);
+                    const prevWeights = prevMeasurements.map(m => m.weight);
+                    const prevDates = prevMeasurements.map(m => new Date(m.date).getTime());
+                    const prevFirstDate = prevDates[0];
+                    const prevWeeksArr = prevDates.map(d => (d - prevFirstDate) / (7 * 24 * 60 * 60 * 1000));
+                    const pn = prevWeeksArr.length;
+                    const pSumX = prevWeeksArr.reduce((a, b) => a + b, 0);
+                    const pSumY = prevWeights.reduce((a, b) => a + b, 0);
+                    const pSumXY = prevWeeksArr.reduce((a, x, i) => a + x * prevWeights[i], 0);
+                    const pSumX2 = prevWeeksArr.reduce((a, x) => a + x * x, 0);
+                    const prevSlope = (pn * pSumXY - pSumX * pSumY) / (pn * pSumX2 - pSumX * pSumX);
+                    if (prevSlope !== 0) {
+                      const prevEndWeight = prevWeights[prevWeights.length - 1];
+                      const prevLastDate = new Date(prevMeasurements[prevMeasurements.length - 1].date);
+                      const prevWeeksToTarget = (targetWeight - prevEndWeight) / prevSlope;
+                      if (prevWeeksToTarget > 0) {
+                        const prevTargetDate = prevLastDate.getTime() + prevWeeksToTarget * 7 * 24 * 60 * 60 * 1000;
+                        const currentWeeksToTarget = (targetWeight - endWeight) / slope;
+                        const currentTargetDate = lastDate.getTime() + currentWeeksToTarget * 7 * 24 * 60 * 60 * 1000;
+                        dateDiffWeeks = Math.round((currentTargetDate - prevTargetDate) / (7 * 24 * 60 * 60 * 1000));
+                      }
+                    }
+                  }
+                  const dateDiffColor = dateDiffWeeks < 0 ? 'text-green-400' : dateDiffWeeks > 0 ? 'text-red-400' : 'text-white/40';
+                  const absDiff = Math.abs(dateDiffWeeks);
+                  const dateDiffLabel = absDiff === 1 ? '1 week' : `${absDiff} weeks`;
                   return (
                   <div className="rounded-xl px-4 py-2.5 mb-4 border bg-white/5 border-white/10">
                     <p className="text-sm text-white/60">
@@ -307,9 +333,9 @@ export default function Dashboard() {
                       {' — '}at current trend ({slope > 0 ? '+' : ''}{(slope).toFixed(2)}kg/week), reaching by{' '}
                       <span className="text-white font-semibold">{projectionLabel}</span>
                       {' '}(~{projectionWeeks} weeks)
-                      {weightDiff !== 0 && (
-                        <span className={`ml-2 font-semibold ${diffColor}`}>
-                          Last: {diffSign}{weightDiff}kg
+                      {dateDiffWeeks !== 0 && (
+                        <span className={`ml-2 font-semibold ${dateDiffColor}`}>
+                          {dateDiffWeeks < 0 ? `${dateDiffLabel} earlier` : `${dateDiffLabel} later`}
                         </span>
                       )}
                     </p>
