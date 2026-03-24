@@ -296,16 +296,26 @@ export default function Dashboard() {
                 </div>
 
                 {/* Target info */}
-                {targetWeight !== null && projectionWeeks > 0 && (
+                {targetWeight !== null && projectionWeeks > 0 && (() => {
+                  const weightDiff = Math.round((endWeight - (previousMeasurement?.weight ?? endWeight)) * 10) / 10;
+                  const diffColor = weightDiff < 0 ? 'text-green-400' : weightDiff > 0 ? 'text-red-400' : 'text-white/40';
+                  const diffSign = weightDiff > 0 ? '+' : '';
+                  return (
                   <div className="rounded-xl px-4 py-2.5 mb-4 border bg-white/5 border-white/10">
                     <p className="text-sm text-white/60">
                       Target <span className="text-white font-semibold">{targetWeight}kg</span>
                       {' — '}at current trend ({slope > 0 ? '+' : ''}{(slope).toFixed(2)}kg/week), reaching by{' '}
                       <span className="text-white font-semibold">{projectionLabel}</span>
                       {' '}(~{projectionWeeks} weeks)
+                      {weightDiff !== 0 && (
+                        <span className={`ml-2 font-semibold ${diffColor}`}>
+                          Last: {diffSign}{weightDiff}kg
+                        </span>
+                      )}
                     </p>
                   </div>
-                )}
+                  );
+                })()}
                 {targetWeight !== null && projectionWeeks === 0 && slope !== 0 && (
                   <div className="rounded-xl px-4 py-2.5 mb-4 border bg-yellow-500/10 border-yellow-500/20">
                     <p className="text-sm text-yellow-400">
