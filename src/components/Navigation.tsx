@@ -72,8 +72,6 @@ export default function Navigation() {
 
       {/* Mobile top bar */}
       <nav className="md:hidden fixed top-0 left-0 right-0 z-50">
-        {/* Online/offline indicator line */}
-        <div className={`h-[3px] ${online ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
         <div className="glass-strong">
           <div className="flex justify-around items-center py-2 px-2">
             {navItems.map((item) => {
