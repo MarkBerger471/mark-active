@@ -5,11 +5,17 @@ import { flushSyncQueue } from '@/utils/storage';
 
 export default function PWAProvider() {
   useEffect(() => {
-    // Register service worker
+    // Unregister service worker in development
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((e) => {
-        console.warn('SW registration failed:', e);
-      });
+      if (process.env.NODE_ENV === 'development') {
+        navigator.serviceWorker.getRegistrations().then(regs =>
+          regs.forEach(r => r.unregister())
+        );
+      } else {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((e) => {
+          console.warn('SW registration failed:', e);
+        });
+      }
     }
 
     // Flush pending sync on mount and when coming online

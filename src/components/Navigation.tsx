@@ -71,8 +71,8 @@ export default function Navigation() {
       </nav>
 
       {/* Mobile top bar */}
-      <nav className="md:hidden fixed top-0 left-0 right-0 z-50">
-        <div className="glass-strong">
+      <nav className="md:hidden fixed top-0 left-0 right-0 z-50 flex justify-center px-6 pt-2">
+        <div className="glass-strong rounded-2xl max-w-5xl w-full">
           <div className="flex justify-around items-center py-2 px-2">
             {navItems.map((item) => {
               const isActive = pathname === item.href;

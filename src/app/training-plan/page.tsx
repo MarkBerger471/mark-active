@@ -69,11 +69,13 @@ export default function TrainingPlanPage() {
     // Load from last session if available, otherwise use preset
     const lastSession = await getLastSessionForWorkout(workoutName);
     const exerciseData: TrainingExercise[] = lastSession
-      ? lastSession.exercises.map(e => ({
-          ...e,
-          sets: e.sets.map(s => ({ ...s, done: true })),
-          skipped: false,
-        }))
+      ? lastSession.exercises
+          .filter(e => workoutName === 'Cardio' || e.name !== 'Cardio')
+          .map(e => ({
+            ...e,
+            sets: e.sets.map(s => ({ ...s, done: true })),
+            skipped: false,
+          }))
       : preset.exercises.map(e => ({
           ...e,
           sets: e.sets.map(s => ({ ...s, done: true })),
@@ -82,7 +84,7 @@ export default function TrainingPlanPage() {
     setExercises(exerciseData);
     setActiveWorkout(workoutName);
     setSessionId(Date.now().toString());
-    setExpandedExercise(0);
+    setExpandedExercise(null);
     setSaved(false);
     setView('workout');
   };
@@ -240,14 +242,14 @@ export default function TrainingPlanPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
               {workouts.map((w, i) => {
                 const lastSession = lastSessions[w.name];
-                const colors = ['from-red-500/10', 'from-blue-500/10', 'from-amber-500/10', 'from-green-500/10'];
+                const colors = ['from-red-500/10', 'from-blue-500/10', 'from-amber-500/10', 'from-green-500/10', 'from-purple-500/10'];
                 return (
                   <button
                     key={w.name}
                     onClick={() => startWorkout(w.name)}
-                    className="glass-card p-6 text-left transition-all active:scale-[0.98] relative"
+                    className={`glass-card p-6 text-left transition-all active:scale-[0.98] relative${w.name === 'Cardio' ? ' sm:col-span-2' : ''}`}
                   >
-                    <div className={`absolute inset-0 bg-gradient-to-br ${colors[i % 4]} to-transparent rounded-2xl opacity-50`} />
+                    <div className={`absolute inset-0 bg-gradient-to-br ${colors[i % 5]} to-transparent rounded-2xl opacity-50`} />
                     {workoutImages[w.name] ? (
                       <img src={workoutImages[w.name]} alt={w.name} className="absolute bottom-1 right-1 h-20 opacity-40 pointer-events-none" />
                     ) : (
@@ -334,7 +336,27 @@ export default function TrainingPlanPage() {
                             </button>
                           </div>
                         </div>
-                        {isExpanded && doneExercises.length > 0 && (
+                        {isExpanded && doneExercises.length > 0 && s.workoutName === 'Cardio' && (
+                          <div className="px-4 pb-3 border-t border-white/5">
+                            <table className="w-full text-xs mt-2">
+                              <thead>
+                                <tr className="text-white/30 text-left">
+                                  <th className="pb-1 font-normal">Activity</th>
+                                  <th className="pb-1 font-normal text-right">Duration</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {doneExercises.map((ex, i) => (
+                                  <tr key={i} className="text-white/70 border-t border-white/5">
+                                    <td className="py-1 pr-2">{ex.name}</td>
+                                    <td className="py-1 text-right">{ex.targetReps}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {isExpanded && doneExercises.length > 0 && s.workoutName !== 'Cardio' && (
                           <div className="px-4 pb-3 border-t border-white/5">
                             <table className="w-full text-xs mt-2">
                               <thead>
@@ -401,8 +423,105 @@ export default function TrainingPlanPage() {
   }
 
   // Active workout view
+  const isCardio = activeWorkout === 'Cardio';
   const completedSets = exercises.reduce((acc, ex) => acc + ex.sets.filter(s => s.done).length, 0);
   const totalSets = exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
+
+  const updateCardioName = (name: string) => {
+    setExercises(prev => {
+      const updated = [...prev];
+      updated[0] = { ...updated[0], name };
+      return updated;
+    });
+  };
+
+  const updateCardioDuration = (mins: number) => {
+    setExercises(prev => {
+      const updated = [...prev];
+      updated[0] = { ...updated[0], targetReps: `${mins} min` };
+      return updated;
+    });
+  };
+
+  const getCardioDuration = (): number => {
+    if (!exercises[0]) return 30;
+    return parseInt(exercises[0].targetReps) || 30;
+  };
+
+  if (isCardio) {
+    const duration = getCardioDuration();
+    return (
+      <div className="min-h-screen">
+        <Navigation />
+        <main className="md:ml-64 p-4 md:p-6 pt-20 md:pt-6">
+          <div className="max-w-3xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl font-bold text-white">Cardio</h1>
+              <div className="flex gap-2">
+                <button onClick={finishWorkout} className="text-sm px-4 py-2 rounded-xl font-semibold border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all">Cancel</button>
+                <button onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }} className={`btn-primary text-sm px-4 py-2 ${saved ? '!bg-green-700' : ''}`}>{saved ? 'Saved' : 'Save'}</button>
+              </div>
+            </div>
+
+            <div className="glass-card p-6 space-y-6">
+              {/* Activity name */}
+              <div>
+                <label className="text-[10px] text-white/25 uppercase tracking-widest mb-2 block">Activity</label>
+                <input
+                  type="text"
+                  value={exercises[0]?.name === 'Cardio' ? '' : exercises[0]?.name || ''}
+                  onChange={e => updateCardioName(e.target.value || 'Cardio')}
+                  placeholder="e.g. Running, Rowing, Cycling..."
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-lg placeholder:text-white/20 focus:outline-none focus:border-va-red/50"
+                />
+              </div>
+
+              {/* Duration */}
+              <div>
+                <label className="text-[10px] text-white/25 uppercase tracking-widest mb-2 block">Duration</label>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => updateCardioDuration(Math.max(5, duration - 5))}
+                    className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 text-white text-xl font-bold hover:bg-white/10 transition-all"
+                  >−</button>
+                  <span className="text-3xl font-bold text-white min-w-[100px] text-center">{duration} min</span>
+                  <button
+                    onClick={() => updateCardioDuration(duration + 5)}
+                    className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 text-white text-xl font-bold hover:bg-white/10 transition-all"
+                  >+</button>
+                </div>
+              </div>
+
+              {/* Target heart rate */}
+              <div>
+                <label className="text-[10px] text-white/25 uppercase tracking-widest mb-2 block">Target Heart Rate</label>
+                <p className="text-xl text-white font-semibold">120–130 <span className="text-sm text-white/40 font-normal">bpm</span></p>
+              </div>
+
+              {/* Done toggle */}
+              <button
+                onClick={() => toggleSetDone(0, 0)}
+                className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
+                  exercises[0]?.sets[0]?.done
+                    ? 'bg-green-700 text-white'
+                    : 'bg-white/5 border border-white/10 text-white/60 hover:bg-white/10'
+                }`}
+              >
+                {exercises[0]?.sets[0]?.done ? '✓ Done' : 'Mark as Done'}
+              </button>
+            </div>
+
+            <button
+              onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }}
+              className={`w-full mt-6 mb-4 py-4 rounded-2xl font-bold text-lg transition-all ${saved ? 'bg-green-700 text-white' : 'btn-primary'}`}
+            >
+              {saved ? '✓ Saved' : 'Save Workout'}
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">

@@ -169,6 +169,10 @@ export default function BodyMetrix() {
       foodChanges,
       photos,
     };
+    // If editing and date changed, delete the old entry first
+    if (editingDate && editingDate !== date) {
+      await deleteMeasurement(editingDate);
+    }
     await saveMeasurement(measurement);
     setMeasurements(await getMeasurements());
     setShowForm(false);

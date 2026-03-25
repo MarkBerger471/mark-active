@@ -1,7 +1,13 @@
-const CACHE_NAME = 'bb-shell-v2';
+const CACHE_NAME = 'bb-shell-v3';
+const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan'];
 
 self.addEventListener('install', (event) => {
+  if (IS_LOCALHOST) {
+    // In development, skip caching entirely
+    self.skipWaiting();
+    return;
+  }
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(PAGES);
@@ -14,7 +20,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+        keys.filter((k) => k !== CACHE_NAME || IS_LOCALHOST).map((k) => caches.delete(k))
       )
     )
   );
@@ -22,6 +28,9 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // In development, never intercept — let everything go to the dev server
+  if (IS_LOCALHOST) return;
+
   const url = new URL(event.request.url);
 
   // Skip non-GET requests
