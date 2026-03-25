@@ -1,4 +1,4 @@
-import { Measurement, TrainingDay, NutritionPlan, Workout, TrainingSession } from '@/types';
+import { Measurement, TrainingDay, NutritionPlan, NutritionPlanVersion, DayPlan, Workout, TrainingSession } from '@/types';
 import { db, storage } from '@/lib/firebase';
 import {
   collection,
@@ -92,8 +92,11 @@ function backgroundRefreshNutrition() {
     try {
       const snap = await getDoc(doc(db, 'nutrition', 'plan'));
       if (snap.exists()) {
+        const data = snap.data();
+        // Only accept new format (has 'current' key); skip legacy data
+        if (!data.current) return;
         const pending = await hasPendingSyncFor('nutrition', 'plan');
-        if (!pending) await idbPutNutrition(snap.data() as NutritionPlan);
+        if (!pending) await idbPutNutrition(data as NutritionPlan);
       }
     } catch (e) {
       console.warn('Background refresh nutrition failed:', e);
@@ -449,6 +452,79 @@ export function getPresetWorkouts(): Workout[] {
       ],
     },
   ];
+}
+
+// Default nutrition plans
+export function getDefaultNutritionPlan(): NutritionPlanVersion {
+  const f = (name: string, amount?: string) => ({ name, amount });
+
+  const trainingDay: DayPlan = {
+    meals: [
+      {
+        name: 'Meal 1', subtitle: 'pre workout meal',
+        items: [f('Greek yogurt', '250 gr'), f('Whey', '25 gr'), f('Oatmeal', '100 gr'), f('Berries'), f('Cheese', '40 gr')],
+        supplements: ['Krill oil 500mg', 'Omega 3 1000 mg', 'D3+K2 1000 iu', 'CoQ10 100 mg', 'Daflon 500mg', 'Vitamin C 1000mg'],
+      },
+      {
+        name: 'Intra workout drink',
+        items: [f('Creatine', '5 gr'), f('EAA or BCAA', '5 gr')],
+      },
+      {
+        name: 'Meal 2', subtitle: 'post workout meal',
+        items: [f('Cream of rice (or flakes without sugar)', '70 gr'), f('Whey', '45 gr')],
+      },
+      {
+        name: 'Meal 3',
+        items: [f('Chicken / white fish / tuna / turkey', '150 gr'), f('Whole rye bread', '150 gr'), f('Feta', '90 gr')],
+      },
+      {
+        name: 'Meal 4',
+        items: [f('Red fish / lean beef', '150 gr'), f('Rice', '250 gr'), f('Olive oil', '7 gr'), f('Veggies')],
+      },
+      {
+        name: 'Meal 5',
+        items: [f('Egg white', '150 gr'), f('Egg', '2'), f('Whole rye bread', '200 gr'), f('Whey', '25 gr')],
+        supplements: ['Krill oil 500mg', 'Omega 3 2000 mg', 'D3+K2 1000 iu', 'Glutamine 5 gr', 'Magnesium 400 mg'],
+      },
+    ],
+    macros: { kcal: 3429, protein: 265, carbs: 416, fat: 79 },
+  };
+
+  const restDay: DayPlan = {
+    meals: [
+      {
+        name: 'Meal 1',
+        items: [f('Greek yogurt', '200 gr'), f('Whey', '25 gr'), f('Nuts', '25 gr'), f('Oatmeal', '90 gr'), f('Berries'), f('Cottage cheese 5%', '200 gr')],
+        supplements: ['Krill oil 500mg', 'Omega 3 1000 mg', 'D3+K2 1000 iu', 'CoQ10 100 mg', 'Daflon 500mg', 'Vitamin C 1000mg'],
+      },
+      {
+        name: 'Meal 2',
+        items: [f('Chicken / white fish / tuna / turkey', '150 gr'), f('Rice', '200 gr'), f('Olive oil', '7 gr'), f('Veggies'), f('Whole rye bread', '150 gr')],
+      },
+      {
+        name: 'Meal 3',
+        items: [f('Greek yogurt', '200 gr'), f('Nuts', '15 gr'), f('Whey', '25 gr'), f('Oatmeal', '60 gr')],
+      },
+      {
+        name: 'Meal 4',
+        items: [f('Red fish / lean beef', '150 gr'), f('Rice', '200 gr')],
+      },
+      {
+        name: 'Meal 5',
+        items: [f('Egg white', '150 gr'), f('Egg', '2'), f('Nuts', '20 gr'), f('Whey 25 gr OR egg white', '170 ml')],
+        supplements: ['Krill oil 500mg', 'Omega 3 2000 mg', 'D3+K2 1000 iu', 'Glutamine 5 gr', 'Magnesium 400 mg'],
+      },
+    ],
+    macros: { kcal: 3429, protein: 257, carbs: 346, fat: 89 },
+  };
+
+  return {
+    id: Date.now().toString(),
+    startDate: new Date().toISOString().split('T')[0],
+    trainingDay,
+    restDay,
+    emptyStomach: ['Glutamine 5 gr', 'Greens superfood 1 scoop', 'Lemon juice 20 ml', 'Apple vinegar 10 ml', 'NAC 600 mg', 'BCAA 1 scoop'],
+  };
 }
 
 // Nutrition — offline-first

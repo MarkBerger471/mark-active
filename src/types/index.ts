@@ -65,21 +65,64 @@ export interface TrainingSession {
   exercises: TrainingExercise[];
 }
 
-export interface NutritionPlan {
+// Legacy types kept for migration
+export interface NutritionPlanLegacy {
   dailyCalories: number;
   protein: number;
   carbs: number;
   fat: number;
-  meals: Meal[];
+  meals: MealLegacy[];
 }
 
-export interface Meal {
+export interface MealLegacy {
   name: string;
   time: string;
   foods: string[];
   calories?: number;
   protein?: number;
 }
+
+// New nutrition plan types
+export interface FoodItem {
+  name: string;        // "Greek yogurt", "Whey"
+  amount?: string;     // "250 gr", "25 gr", "2", "30 min"
+}
+
+export interface NutritionMeal {
+  name: string;        // "Meal 1", "Intra workout drink", "Before bed"
+  subtitle?: string;   // "pre workout meal", "post workout meal"
+  items: FoodItem[];
+  supplements?: string[]; // "Krill oil 500mg", "Omega 3 1000 mg"
+}
+
+export interface NutritionMacros {
+  kcal: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+export interface DayPlan {
+  meals: NutritionMeal[];
+  macros: NutritionMacros;
+}
+
+export interface NutritionPlanVersion {
+  id: string;
+  startDate: string;
+  endDate?: string; // undefined = current active version
+  trainingDay: DayPlan;
+  restDay: DayPlan;
+  emptyStomach?: string[]; // shared "any day, empty stomach" items
+}
+
+export interface NutritionPlan {
+  current: NutritionPlanVersion;
+  history: NutritionPlanVersion[];
+}
+
+// Keep Meal alias for any remaining references
+export type Meal = MealLegacy;
 
 export interface UserCredentials {
   username: string;
