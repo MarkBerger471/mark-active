@@ -69,7 +69,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-6 pt-28 md:pt-6">
+      <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
           <div className="mb-8 relative">
             <DumbbellIcon className="absolute -top-2 right-0 w-24 h-24 text-white opacity-[0.04] pointer-events-none" />

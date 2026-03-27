@@ -423,7 +423,7 @@ export default function BodyMetrix() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-6 pt-28 md:pt-6">
+      <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
           <div className="flex items-center justify-between mb-8">

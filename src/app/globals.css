@@ -17,6 +17,13 @@
 :root {
   --background: #0f0f1a;
   --foreground: #f1f5f9;
+  --pwa-top-offset: 8rem; /* pt-32 */
+}
+
+@media all and (display-mode: standalone) {
+  :root {
+    --pwa-top-offset: 10rem;
+  }
 }
 
 body {
@@ -325,4 +332,11 @@ body {
   height: 100%;
   border-radius: 3px 0 0 3px;
   background: linear-gradient(to bottom, #b90a0a, transparent);
+}
+
+/* Mobile PWA content offset — taller in standalone mode due to safe area */
+@media (max-width: 767px) {
+  .pwa-main {
+    padding-top: var(--pwa-top-offset) !important;
+  }
 }
