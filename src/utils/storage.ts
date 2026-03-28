@@ -551,6 +551,20 @@ export async function saveNutritionPlan(plan: NutritionPlan) {
   flushSyncQueue();
 }
 
+// Blood tests — stored as JSON in settings
+export async function getBloodTests(): Promise<import('@/types').BloodTest[]> {
+  try {
+    const json = await getSetting('bloodTests');
+    return json ? JSON.parse(json) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveBloodTests(tests: import('@/types').BloodTest[]) {
+  await saveSetting('bloodTests', JSON.stringify(tests));
+}
+
 // File to base64 (client-side utility)
 export function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

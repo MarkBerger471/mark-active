@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import Navigation from '@/components/Navigation';
-import { getMeasurements, saveMeasurement, deleteMeasurement, fileToBase64 } from '@/utils/storage';
+import { getMeasurements, saveMeasurement, deleteMeasurement, fileToBase64, getTrainingSessions } from '@/utils/storage';
 import { Measurement } from '@/types';
 import SliderField from '@/components/SliderField';
 
@@ -30,6 +30,7 @@ export default function BodyMetrix() {
   const [tiredness, setTiredness] = useState('');
   const [digestion, setDigestion] = useState('');
   const [sleepHours, setSleepHours] = useState(7.5);
+  const [ouraLinked, setOuraLinked] = useState(false);
   const [cardio, setCardio] = useState(5);
   const [trainings, setTrainings] = useState(5);
   const [foodChanges, setFoodChanges] = useState(95);
@@ -129,24 +130,79 @@ export default function BodyMetrix() {
   const prefillFromLast = async () => {
     const all = await getMeasurements();
     const last = all.length > 0 ? all[all.length - 1] : null;
-    setDate(new Date().toISOString().split('T')[0]);
+    const today = new Date().toISOString().split('T')[0];
+    setDate(today);
     setArms(last ? String(last.arms) : '');
     setChest(last ? String(last.chest) : '');
     setWaist(last ? String(last.waist) : '');
     setLegs(last ? String(last.legs) : '');
     setWeight(last ? String(last.weight) : '');
     setBodyFat(last?.bodyFat != null ? String(last.bodyFat) : '');
-    setEnergy(last?.energy || '');
     setHunger(last?.hunger || '');
-    setTiredness(last?.tiredness || '');
     setDigestion(last?.digestion || '');
-    setSleepHours(7.5);
-    setCardio(5);
-    setTrainings(5);
+    // Count training sessions since last measurement
+    try {
+      const sessions = await getTrainingSessions();
+      const sinceDate = last ? last.date : '2000-01-01';
+      const recent = sessions.filter(s => s.date >= sinceDate && s.date <= today);
+      const cardioCount = recent.filter(s => s.workoutName === 'Cardio').length;
+      const trainingCount = recent.filter(s => s.workoutName !== 'Cardio').length;
+      setCardio(cardioCount);
+      setTrainings(trainingCount);
+    } catch {
+      setCardio(0);
+      setTrainings(0);
+    }
     setFoodChanges(95);
     setPhotos({});
     if (bulkPhotoRef.current) bulkPhotoRef.current.value = '';
     if (singlePhotoRef.current) singlePhotoRef.current.value = '';
+
+    // Fetch Oura data to prefill sleep, energy, tiredness
+    const startDate = last ? last.date : new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    try {
+      const res = await fetch(`/api/oura?start_date=${startDate}&end_date=${today}`);
+      const json = await res.json();
+      if (json.data && json.data.length > 0) {
+        setOuraLinked(true);
+        // Average sleep hours
+        const sleepDays = json.data.filter((d: { totalSleep?: number }) => d.totalSleep);
+        if (sleepDays.length > 0) {
+          const avgSleepSec = sleepDays.reduce((sum: number, d: { totalSleep: number }) => sum + d.totalSleep, 0) / sleepDays.length;
+          const avgSleepHours = Math.round((avgSleepSec / 3600) * 2) / 2; // round to 0.5
+          setSleepHours(avgSleepHours);
+        } else {
+          setSleepHours(7.5);
+        }
+
+        // Average readiness score → map to energy/tiredness labels
+        const readinessDays = json.data.filter((d: { readinessScore?: number }) => d.readinessScore);
+        if (readinessDays.length > 0) {
+          const avgReadiness = Math.round(readinessDays.reduce((sum: number, d: { readinessScore: number }) => sum + d.readinessScore, 0) / readinessDays.length);
+          // Map readiness to energy label
+          if (avgReadiness >= 85) setEnergy('very good');
+          else if (avgReadiness >= 70) setEnergy('good');
+          else if (avgReadiness >= 55) setEnergy('moderate');
+          else setEnergy('low');
+          // Map readiness to tiredness label (inverse)
+          if (avgReadiness >= 85) setTiredness('not tired');
+          else if (avgReadiness >= 70) setTiredness('slightly tired');
+          else if (avgReadiness >= 55) setTiredness('tired');
+          else setTiredness('very tired');
+        } else {
+          setEnergy(last?.energy || '');
+          setTiredness(last?.tiredness || '');
+        }
+      } else {
+        setSleepHours(7.5);
+        setEnergy(last?.energy || '');
+        setTiredness(last?.tiredness || '');
+      }
+    } catch {
+      setSleepHours(7.5);
+      setEnergy(last?.energy || '');
+      setTiredness(last?.tiredness || '');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -363,13 +419,16 @@ export default function BodyMetrix() {
       {/* Text status fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {([
-          { label: 'Energy levels', value: energy, setValue: setEnergy, placeholder: 'feel good, tired etc' },
-          { label: 'Hunger', value: hunger, setValue: setHunger, placeholder: 'normal, hungry, too full' },
-          { label: 'Tiredness', value: tiredness, setValue: setTiredness, placeholder: 'normal, too much etc' },
+          { label: 'Energy levels', value: energy, setValue: setEnergy, placeholder: 'feel good, tired etc', oura: true },
+          { label: 'Tiredness', value: tiredness, setValue: setTiredness, placeholder: 'normal, too much etc', oura: true },
+          { label: 'Hunger', value: hunger, setValue: setHunger, placeholder: 'normal, hungry, too full', oura: false },
           { label: 'Digestion', value: digestion, setValue: setDigestion, placeholder: 'no problem, issues etc' },
         ]).map(field => (
           <div key={field.label}>
-            <label className="block text-sm text-white/60 mb-2">{field.label}</label>
+            <label className="block text-sm text-white/60 mb-2">
+              {field.label}
+              {field.oura && ouraLinked && <span className="text-[10px] text-cyan-400/60 ml-2">via Oura</span>}
+            </label>
             <input type="text" value={field.value} onChange={e => field.setValue(e.target.value)} placeholder={field.placeholder} className="glass-input w-full px-4 py-3" />
           </div>
         ))}
@@ -377,9 +436,12 @@ export default function BodyMetrix() {
 
       {/* Slider fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        <SliderField label="Sleep (hours/night)" value={sleepHours} onChange={setSleepHours} min={5} max={10} step={0.5} targetMin={7} targetMax={8} unit="h" />
-        <SliderField label="Cardio (sessions/week)" value={cardio} onChange={setCardio} min={0} max={7} step={1} targetMin={4} targetMax={6} unit="x" />
-        <SliderField label="Trainings (sessions/week)" value={trainings} onChange={setTrainings} min={0} max={7} step={1} targetMin={4} targetMax={6} unit="x" />
+        <div>
+          <SliderField label="Sleep (hours/night)" value={sleepHours} onChange={setSleepHours} min={5} max={10} step={0.5} targetMin={7} targetMax={8} unit="h" />
+          {ouraLinked && <span className="text-[10px] text-cyan-400/60 mt-1 block">via Oura</span>}
+        </div>
+        <SliderField label="Cardio (sessions)" value={cardio} onChange={setCardio} min={0} max={14} step={1} targetMin={4} targetMax={6} unit="x" />
+        <SliderField label="Trainings (sessions)" value={trainings} onChange={setTrainings} min={0} max={14} step={1} targetMin={4} targetMax={6} unit="x" />
         <SliderField label="Food adherence" value={foodChanges} onChange={setFoodChanges} min={0} max={100} step={5} targetMin={95} targetMax={100} unit="%" />
       </div>
 

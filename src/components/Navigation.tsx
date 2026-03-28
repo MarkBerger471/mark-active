@@ -10,6 +10,7 @@ const navItems = [
   { href: '/training-plan', label: 'Training', icon: '◆' },
   { href: '/body-metrix', label: 'Body Metrix', icon: '◎' },
   { href: '/nutrition-plan', label: 'Nutrition', icon: '◇' },
+  { href: '/vitals', label: 'Vitals', icon: '♡' },
 ];
 
 export default function Navigation() {
@@ -61,13 +62,6 @@ export default function Navigation() {
           })}
         </div>
 
-        <button
-          onClick={logout}
-          className="flex items-center gap-3 px-4 py-3 rounded-xl text-white/40 hover:text-white/80 hover:bg-white/5 transition-all"
-        >
-          <span className="text-lg">⎋</span>
-          <span className="font-medium">Logout</span>
-        </button>
       </nav>
 
       {/* Mobile top bar */}
@@ -89,13 +83,6 @@ export default function Navigation() {
                 </Link>
               );
             })}
-            <button
-              onClick={logout}
-              className="flex flex-col items-center gap-1 px-3 py-1 text-white/40 min-w-[50px]"
-            >
-              <span className="text-lg">⎋</span>
-              <span className="text-[10px] font-medium">Logout</span>
-            </button>
           </div>
         </div>
       </nav>

@@ -124,6 +124,24 @@ export interface NutritionPlan {
 // Keep Meal alias for any remaining references
 export type Meal = MealLegacy;
 
+export interface BloodTestValue {
+  name: string;      // e.g. "Hemoglobin", "Testosterone"
+  value: number;
+  unit: string;      // e.g. "g/dL", "ng/dL"
+  textValue?: string; // for non-numeric results like "Adequate", "Normal"
+  refMin?: number;
+  refMax?: number;
+  flag?: string;     // "H" (high) or "L" (low) from lab report
+}
+
+export interface BloodTest {
+  id: string;
+  date: string;       // ISO date
+  label?: string;     // e.g. "Routine checkup"
+  rawText?: string;   // original pasted/extracted text
+  values: BloodTestValue[];
+}
+
 export interface UserCredentials {
   username: string;
   passwordHash: string;

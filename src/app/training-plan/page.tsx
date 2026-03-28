@@ -13,6 +13,7 @@ const workoutImages: Record<string, string> = {
   Legs: '/muscles/legs.png',
   'Chest + Triceps': '/muscles/chest.png',
   'Back + Biceps': '/muscles/back.png',
+  Cardio: '/muscles/cardio.png',
 };
 
 type View = 'select' | 'workout' | 'history';
@@ -176,7 +177,7 @@ export default function TrainingPlanPage() {
     setExercises(session.exercises.map(e => ({ ...e, sets: e.sets.map(s => ({ ...s })) })));
     setActiveWorkout(session.workoutName);
     setSessionId(session.id);
-    setExpandedExercise(0);
+    setExpandedExercise(null);
     setSaved(false);
     setView('workout');
   };
@@ -242,12 +243,12 @@ export default function TrainingPlanPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
               {workouts.map((w, i) => {
                 const lastSession = lastSessions[w.name];
-                const colors = ['from-red-500/10', 'from-blue-500/10', 'from-amber-500/10', 'from-green-500/10', 'from-purple-500/10'];
+                const colors = ['from-red-500/10', 'from-blue-500/10', 'from-amber-500/10', 'from-green-500/10', 'from-rose-600/20'];
                 return (
                   <button
                     key={w.name}
                     onClick={() => startWorkout(w.name)}
-                    className={`glass-card p-6 text-left transition-all active:scale-[0.98] relative${w.name === 'Cardio' ? ' sm:col-span-2' : ''}`}
+                    className={`glass-card p-6 text-left transition-all active:scale-[0.98] relative${w.name === 'Cardio' ? ' sm:col-span-2 border border-rose-500/20' : ''}`}
                   >
                     <div className={`absolute inset-0 bg-gradient-to-br ${colors[i % 5]} to-transparent rounded-2xl opacity-50`} />
                     {workoutImages[w.name] ? (
@@ -310,7 +311,7 @@ export default function TrainingPlanPage() {
                           onClick={() => setExpandedSession(isExpanded ? null : s.id)}
                         >
                           <div className="flex-1 min-w-0">
-                            <span className="text-white font-medium">{s.workoutName}</span>
+                            <span className={`font-medium ${s.workoutName === 'Cardio' ? 'text-rose-400' : 'text-white'}`}>{s.workoutName}</span>
                             <span className="text-white/30 text-sm ml-3">
                               {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                               {s.savedAt && (

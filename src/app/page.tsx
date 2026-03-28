@@ -11,8 +11,52 @@ import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundE
 
 type Phase = 'bulking' | 'cutting';
 
+interface SleepDay {
+  day: string;
+  score: number;
+  totalSleep?: number;
+  deepSleep?: number;
+  remSleep?: number;
+  lightSleep?: number;
+  awakeTime?: number;
+  efficiency?: number;
+  avgHr?: number;
+  avgHrv?: number;
+  lowestHr?: number;
+  bedtimeStart?: string;
+  bedtimeEnd?: string;
+}
+
+function formatDuration(seconds?: number): string {
+  if (!seconds) return '—';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+function SleepScoreRing({ score }: { score: number }) {
+  const radius = 36;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score / 100) * circumference;
+  const color = score >= 85 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#ef4444';
+
+  return (
+    <div className="relative w-24 h-24">
+      <svg className="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r={radius} fill="none" stroke="white" strokeOpacity="0.08" strokeWidth="7" />
+        <circle cx="50" cy="50" r={radius} fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
+          strokeDasharray={circumference} strokeDashoffset={offset} className="transition-all duration-700" />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-bold text-white">{score}</span>
+        <span className="text-[9px] text-white/30 uppercase">Score</span>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, logout } = useAuth();
   const router = useRouter();
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [latestMeasurement, setLatestMeasurement] = useState<Measurement | null>(null);
@@ -22,6 +66,8 @@ export default function Dashboard() {
   const [targetWeight, setTargetWeight] = useState<number | null>(null);
   const [showTargetInput, setShowTargetInput] = useState(false);
   const [targetInput, setTargetInput] = useState('');
+  const [sleepData, setSleepData] = useState<SleepDay[]>([]);
+  const [sleepExpanded, setSleepExpanded] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -42,6 +88,9 @@ export default function Dashboard() {
       });
       getSetting('phase').then(v => { if (v) setPhase(v as Phase); });
       getSetting('targetWeight').then(v => { if (v) setTargetWeight(parseFloat(v)); });
+      fetch('/api/oura?days=7').then(r => r.json()).then(d => {
+        if (d.data) setSleepData(d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)));
+      }).catch(() => {});
     }
   }, [isAuthenticated]);
 
@@ -73,8 +122,15 @@ export default function Dashboard() {
         <div className="max-w-5xl mx-auto">
           <div className="mb-8 relative">
             <DumbbellIcon className="absolute -top-2 right-0 w-24 h-24 text-white opacity-[0.04] pointer-events-none" />
-            <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-            <p className="text-white/40 mt-1">Your bodybuilding progress at a glance</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+                <p className="text-white/40 mt-1">Your bodybuilding progress at a glance</p>
+              </div>
+              <button onClick={logout} className="text-xs text-white/20 hover:text-white/50 transition-all px-3 py-1.5 rounded-lg hover:bg-white/5">
+                Logout
+              </button>
+            </div>
           </div>
 
           {/* Quick Stats */}
@@ -105,6 +161,101 @@ export default function Dashboard() {
               })}
             </div>
           )}
+
+          {/* Sleep Widget */}
+          {sleepData.length > 0 && (() => {
+            const last = sleepData[0];
+            return (
+              <div className="glass-card p-5 mb-8">
+                <button
+                  onClick={() => setSleepExpanded(!sleepExpanded)}
+                  className="w-full flex items-center justify-between text-left"
+                >
+                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                    <span className="text-xl">&#9790;</span> Sleep
+                  </h2>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-white/30">{formatDuration(last.totalSleep)}</span>
+                    <span className={`text-white/20 transition-transform duration-200 ${sleepExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                  </div>
+                </button>
+
+                {/* Compact view: last night */}
+                <div className="flex items-center gap-5 mt-4">
+                  <SleepScoreRing score={last.score} />
+                  <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-1.5">
+                    <div>
+                      <span className="text-[10px] text-white/30 uppercase">Total</span>
+                      <p className="text-sm font-semibold text-white">{formatDuration(last.totalSleep)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/30 uppercase">Deep</span>
+                      <p className="text-sm font-semibold text-indigo-400">{formatDuration(last.deepSleep)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/30 uppercase">REM</span>
+                      <p className="text-sm font-semibold text-cyan-400">{formatDuration(last.remSleep)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/30 uppercase">Avg HR</span>
+                      <p className="text-sm font-semibold text-red-400">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/30 uppercase">HRV</span>
+                      <p className="text-sm font-semibold text-green-400">{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/30 uppercase">Efficiency</span>
+                      <p className="text-sm font-semibold text-white/70">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sleep stage bar */}
+                {last.totalSleep && last.deepSleep && last.remSleep && last.lightSleep && (
+                  <div className="mt-4">
+                    <div className="flex rounded-full overflow-hidden h-2.5">
+                      <div className="bg-indigo-500" style={{ width: `${(last.deepSleep / last.totalSleep) * 100}%` }} title="Deep" />
+                      <div className="bg-cyan-500" style={{ width: `${(last.remSleep / last.totalSleep) * 100}%` }} title="REM" />
+                      <div className="bg-blue-300/40" style={{ width: `${(last.lightSleep / last.totalSleep) * 100}%` }} title="Light" />
+                    </div>
+                    <div className="flex gap-4 mt-1.5">
+                      <span className="text-[10px] text-indigo-400">Deep {Math.round((last.deepSleep / last.totalSleep) * 100)}%</span>
+                      <span className="text-[10px] text-cyan-400">REM {Math.round((last.remSleep / last.totalSleep) * 100)}%</span>
+                      <span className="text-[10px] text-blue-300/50">Light {Math.round((last.lightSleep / last.totalSleep) * 100)}%</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Expanded: 7-day history */}
+                {sleepExpanded && (
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <h3 className="text-xs text-white/30 uppercase tracking-wider mb-3">Last 7 days</h3>
+                    <div className="space-y-2">
+                      {sleepData.map(d => (
+                        <div key={d.day} className="flex items-center gap-3 text-sm">
+                          <span className="text-white/30 w-16 text-xs">
+                            {new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+                          </span>
+                          <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${d.score}%`,
+                                backgroundColor: d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444',
+                              }}
+                            />
+                          </div>
+                          <span className="text-white/50 w-8 text-right text-xs font-semibold">{d.score}</span>
+                          <span className="text-white/30 w-14 text-right text-xs">{formatDuration(d.totalSleep)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {
