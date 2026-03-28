@@ -589,9 +589,11 @@ export default function VitalsPage() {
     setParsedValues(prev => {
       const updated = [...prev];
       if (field === 'value' || field === 'refMin' || field === 'refMax') {
-        (updated[idx] as Record<string, unknown>)[field] = val ? parseFloat(val) : undefined;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (updated[idx] as any)[field] = val ? parseFloat(val) : undefined;
       } else {
-        (updated[idx] as Record<string, unknown>)[field] = val;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (updated[idx] as any)[field] = val;
       }
       return updated;
     });
@@ -657,9 +659,11 @@ export default function VitalsPage() {
     setEditValues(prev => {
       const updated = [...prev];
       if (field === 'value' || field === 'refMin' || field === 'refMax') {
-        (updated[idx] as Record<string, unknown>)[field] = val ? parseFloat(val) : undefined;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (updated[idx] as any)[field] = val ? parseFloat(val) : undefined;
       } else {
-        (updated[idx] as Record<string, unknown>)[field] = val;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (updated[idx] as any)[field] = val;
       }
       return updated;
     });
