@@ -148,11 +148,11 @@ function parseMultiLineFormat(text: string): BloodTestValue[] {
 
   // Step 1: Collect marker names, values, units, and ranges
   const markers: string[] = [];
-  const results: { value: number; flag?: string; unit: string; refMin?: number; refMax?: number }[] = [];
+  const results: { value: number; textValue?: string; flag?: string; unit: string; refMin?: number; refMax?: number }[] = [];
 
   // Identify marker names: lines that match known markers or look like test names
   const nameLines: { idx: number; name: string }[] = [];
-  const dataChunks: { value: number; flag?: string; unit: string; refMin?: number; refMax?: number }[] = [];
+  const dataChunks: { value: number; textValue?: string; flag?: string; unit: string; refMin?: number; refMax?: number }[] = [];
 
   // Pass 1: Tag each line
   type TaggedLine = { type: 'name' | 'value' | 'flagunit' | 'range' | 'skip'; text: string; idx: number };
@@ -250,7 +250,7 @@ function parseMultiLineFormat(text: string): BloodTestValue[] {
   // Step 2: Pair names with their data
   // Strategy: collect all names first, then all value+unit+range groups, and zip them
   const names: string[] = [];
-  const dataGroups: { value: number; flag?: string; unit: string; refMin?: number; refMax?: number }[] = [];
+  const dataGroups: { value: number; textValue?: string; flag?: string; unit: string; refMin?: number; refMax?: number }[] = [];
 
   // Extract just names in order
   for (const t of tagged) {
