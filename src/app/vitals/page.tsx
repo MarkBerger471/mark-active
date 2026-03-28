@@ -868,9 +868,10 @@ export default function VitalsPage() {
 
           {/* Comparison view */}
           {showComparison && tests.length >= 2 && (
-            <div className="glass-card p-5 mb-6 overflow-x-auto">
+            <div className="glass-card p-5 mb-6">
               <h2 className="text-lg font-semibold text-white mb-4">Comparison Over Time</h2>
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto -mx-5 px-5">
+              <table className="min-w-max text-sm">
                 <thead>
                   <tr className="text-white/30 text-left border-b border-white/5">
                     <th className="pb-2 pr-4 font-normal">Marker</th>
@@ -923,6 +924,7 @@ export default function VitalsPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
