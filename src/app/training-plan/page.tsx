@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import Navigation from '@/components/Navigation';
 import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, getMeasurements } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet } from '@/types';
@@ -32,6 +32,63 @@ export default function TrainingPlanPage() {
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [lastSessions, setLastSessions] = useState<Record<string, TrainingSession>>({});
   const [measurementDates, setMeasurementDates] = useState<string[]>([]);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const exercisesRef = useRef(exercises);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionIdRef = useRef(sessionId);
+  const activeWorkoutRef = useRef(activeWorkout);
+
+  // Keep refs in sync
+  exercisesRef.current = exercises;
+  sessionIdRef.current = sessionId;
+  activeWorkoutRef.current = activeWorkout;
+
+  const flushSave = useCallback(async () => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (!activeWorkoutRef.current || !sessionIdRef.current) return;
+    const session: TrainingSession = {
+      id: sessionIdRef.current,
+      date: new Date().toISOString().split('T')[0],
+      workoutName: activeWorkoutRef.current,
+      exercises: exercisesRef.current,
+    };
+    await saveTrainingSession(session);
+  }, []);
+
+  const triggerAutoSave = useCallback(() => {
+    if (!activeWorkoutRef.current) return;
+    setSaveStatus('saving');
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      await flushSave();
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 2000);
+    }, 1000);
+  }, [flushSave]);
+
+  // Flush save on unmount or navigation away
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        // Fire-and-forget save on cleanup
+        const id = sessionIdRef.current;
+        const workout = activeWorkoutRef.current;
+        const exs = exercisesRef.current;
+        if (id && workout) {
+          saveTrainingSession({
+            id,
+            date: new Date().toISOString().split('T')[0],
+            workoutName: workout,
+            exercises: exs,
+          });
+        }
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -82,12 +139,25 @@ export default function TrainingPlanPage() {
           sets: e.sets.map(s => ({ ...s, done: true })),
         }));
 
+    const newId = Date.now().toString();
     setExercises(exerciseData);
     setActiveWorkout(workoutName);
-    setSessionId(Date.now().toString());
+    setSessionId(newId);
     setExpandedExercise(null);
-    setSaved(false);
+    setSaved(true);
+    setSaveStatus('saving');
     setView('workout');
+
+    // Save immediately
+    const session: TrainingSession = {
+      id: newId,
+      date: new Date().toISOString().split('T')[0],
+      workoutName,
+      exercises: exerciseData,
+    };
+    await saveTrainingSession(session);
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 2000);
   };
 
   const updateSetWeight = (exIdx: number, setIdx: number, weight: string) => {
@@ -100,6 +170,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
+    triggerAutoSave();
   };
 
   const updateSetReps = (exIdx: number, setIdx: number, reps: string) => {
@@ -112,6 +183,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
+    triggerAutoSave();
   };
 
   const toggleSetDone = (exIdx: number, setIdx: number) => {
@@ -124,6 +196,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
+    triggerAutoSave();
   };
 
   const toggleSkipExercise = (exIdx: number) => {
@@ -132,6 +205,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = { ...updated[exIdx], skipped: !updated[exIdx].skipped };
       return updated;
     });
+    triggerAutoSave();
   };
 
   const addSet = (exIdx: number) => {
@@ -143,6 +217,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
+    triggerAutoSave();
   };
 
   const removeSet = (exIdx: number, setIdx: number) => {
@@ -153,24 +228,15 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
+    triggerAutoSave();
   };
 
-  const saveWorkout = async () => {
-    if (!activeWorkout) return;
-    const session: TrainingSession = {
-      id: sessionId,
-      date: new Date().toISOString().split('T')[0],
-      workoutName: activeWorkout,
-      exercises,
-    };
-    await saveTrainingSession(session);
-    setSaved(true);
-  };
-
-  const finishWorkout = () => {
+  const finishWorkout = async () => {
+    await flushSave();
     setView('select');
     setActiveWorkout(null);
     setExercises([]);
+    setSaveStatus('idle');
   };
 
   const editSession = (session: TrainingSession) => {
@@ -178,7 +244,8 @@ export default function TrainingPlanPage() {
     setActiveWorkout(session.workoutName);
     setSessionId(session.id);
     setExpandedExercise(null);
-    setSaved(false);
+    setSaved(true);
+    setSaveStatus('idle');
     setView('workout');
   };
 
@@ -234,10 +301,9 @@ export default function TrainingPlanPage() {
         <Navigation />
         <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
           <div className="max-w-5xl mx-auto">
-            <div className="mb-8 relative">
+            <div className="mb-4 relative">
               <DumbbellIcon className="absolute -top-2 right-0 w-24 h-24 text-white opacity-[0.04] pointer-events-none" />
               <h1 className="text-3xl font-bold text-white">Training</h1>
-              <p className="text-white/40 mt-1">Choose your workout</p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
@@ -276,29 +342,21 @@ export default function TrainingPlanPage() {
                 <h2 className="text-lg font-semibold text-white mb-4">Recent Sessions</h2>
                 <div className="space-y-2">
                   {(() => {
-                    const sorted = [...sessions].sort((a, b) => (b.savedAt || b.date).localeCompare(a.savedAt || a.date)).slice(0, 20);
+                    const sessionTs = (s: TrainingSession) => s.savedAt || s.date + 'T23:59:59.999Z';
+                    const sorted = [...sessions].sort((a, b) => sessionTs(b).localeCompare(sessionTs(a))).slice(0, 20);
                     const elements: React.ReactNode[] = [];
 
+                    const renderMeasurementDivider = (md: string) => (
+                      <div key={`divider-${md}`} className="flex items-center gap-3 py-1">
+                        <div className="flex-1 h-px bg-va-red/30" />
+                        <span className="text-[10px] text-va-red/50 uppercase tracking-widest shrink-0">
+                          Measurement {new Date(md + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        </span>
+                        <div className="flex-1 h-px bg-va-red/30" />
+                      </div>
+                    );
+
                     sorted.forEach((s, sIdx) => {
-                      // Check if a measurement date falls between this session and the previous one
-                      if (sIdx > 0) {
-                        const prevDate = sorted[sIdx - 1].date;
-                        const currDate = s.date;
-                        // Find measurement dates where currDate < mDate <= prevDate
-                        const between = measurementDates.filter(md => md > currDate && md <= prevDate);
-                        between.sort((a, b) => b.localeCompare(a));
-                        for (const md of between) {
-                          elements.push(
-                            <div key={`divider-${md}`} className="flex items-center gap-3 py-1">
-                              <div className="flex-1 h-px bg-va-red/30" />
-                              <span className="text-[10px] text-va-red/50 uppercase tracking-widest shrink-0">
-                                Measurement {new Date(md + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                              </span>
-                              <div className="flex-1 h-px bg-va-red/30" />
-                            </div>
-                          );
-                        }
-                      }
 
                     const isExpanded = expandedSession === s.id;
                     const prevSessions = isExpanded ? getPreviousSessions(s) : [];
@@ -411,6 +469,17 @@ export default function TrainingPlanPage() {
                         )}
                       </div>
                     );
+
+                    // Show measurement lines below this session if they belong here
+                    // A measurement for date X goes below the last session on date X (or the first session after date X)
+                    const nextSessionDate = sIdx < sorted.length - 1 ? sorted[sIdx + 1].date : '';
+                    // Only insert measurements here if the next session is from an earlier date
+                    if (nextSessionDate !== s.date) {
+                      const between = measurementDates
+                        .filter(md => md <= s.date && md > nextSessionDate)
+                        .sort((a, b) => b.localeCompare(a));
+                      for (const md of between) elements.push(renderMeasurementDivider(md));
+                    }
                     });
                     return elements;
                   })()}
@@ -459,8 +528,9 @@ export default function TrainingPlanPage() {
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-2xl font-bold text-white">Cardio</h1>
               <div className="flex gap-2">
-                <button onClick={finishWorkout} className="text-sm px-4 py-2 rounded-xl font-semibold border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all">Cancel</button>
-                <button onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }} className={`btn-primary text-sm px-4 py-2 ${saved ? '!bg-green-700' : ''}`}>{saved ? 'Saved' : 'Save'}</button>
+                {saveStatus === 'saving' && <span className="text-xs text-white/30 self-center">Saving...</span>}
+                {saveStatus === 'saved' && <span className="text-xs text-green-400/60 self-center">Saved ✓</span>}
+                <button onClick={finishWorkout} className="btn-primary text-sm px-4 py-2">Finish</button>
               </div>
             </div>
 
@@ -513,10 +583,10 @@ export default function TrainingPlanPage() {
             </div>
 
             <button
-              onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }}
-              className={`w-full mt-6 mb-4 py-4 rounded-2xl font-bold text-lg transition-all ${saved ? 'bg-green-700 text-white' : 'btn-primary'}`}
+              onClick={finishWorkout}
+              className="w-full mt-6 mb-4 py-4 rounded-2xl font-bold text-lg transition-all btn-primary"
             >
-              {saved ? '✓ Saved' : 'Save Workout'}
+              Finish Workout
             </button>
           </div>
         </main>
@@ -533,17 +603,13 @@ export default function TrainingPlanPage() {
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-bold text-white">{activeWorkout}</h1>
             <div className="flex gap-2">
+              {saveStatus === 'saving' && <span className="text-xs text-white/30 self-center">Saving...</span>}
+              {saveStatus === 'saved' && <span className="text-xs text-green-400/60 self-center">Saved ✓</span>}
               <button
                 onClick={finishWorkout}
-                className="text-sm px-4 py-2 rounded-xl font-semibold border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+                className="btn-primary text-sm px-4 py-2"
               >
-                Cancel
-              </button>
-              <button
-                onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }}
-                className={`btn-primary text-sm px-4 py-2 ${saved ? '!bg-green-700' : ''}`}
-              >
-                {saved ? 'Saved' : 'Save'}
+                Finish
               </button>
             </div>
           </div>
@@ -680,16 +746,12 @@ export default function TrainingPlanPage() {
             })}
           </div>
 
-          {/* Bottom save button */}
+          {/* Bottom finish button */}
           <button
-            onClick={async () => { await saveWorkout(); setTimeout(() => setView('select'), 500); }}
-            className={`w-full mt-6 mb-4 py-4 rounded-2xl font-bold text-lg transition-all ${
-              saved
-                ? 'bg-green-700 text-white'
-                : 'btn-primary'
-            }`}
+            onClick={finishWorkout}
+            className="w-full mt-6 mb-4 py-4 rounded-2xl font-bold text-lg transition-all btn-primary"
           >
-            {saved ? '✓ Saved' : 'Save Workout'}
+            Finish Workout
           </button>
 
         </div>

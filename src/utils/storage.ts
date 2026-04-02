@@ -182,7 +182,7 @@ export async function getMeasurements(): Promise<Measurement[]> {
 }
 
 export async function saveMeasurement(measurement: Measurement) {
-  const toSave = { ...measurement };
+  const toSave = { ...measurement, savedAt: measurement.savedAt || new Date().toISOString() };
 
   // Queue base64 photos for background upload, but keep them in local data
   const localPhotos: Record<string, string> = {};

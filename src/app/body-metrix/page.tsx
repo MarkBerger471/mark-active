@@ -25,6 +25,7 @@ export default function BodyMetrix() {
   const [legs, setLegs] = useState('');
   const [weight, setWeight] = useState('');
   const [bodyFat, setBodyFat] = useState('');
+  const [muscleMass, setMuscleMass] = useState('');
   const [energy, setEnergy] = useState('');
   const [hunger, setHunger] = useState('');
   const [tiredness, setTiredness] = useState('');
@@ -138,6 +139,7 @@ export default function BodyMetrix() {
     setLegs(last ? String(last.legs) : '');
     setWeight(last ? String(last.weight) : '');
     setBodyFat(last?.bodyFat != null ? String(last.bodyFat) : '');
+    setMuscleMass(last?.muscleMass != null ? String(last.muscleMass) : '');
     setHunger(last?.hunger || '');
     setDigestion(last?.digestion || '');
     // Count training sessions since last measurement
@@ -207,14 +209,18 @@ export default function BodyMetrix() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Preserve savedAt when editing an existing measurement
+    const existing = editingDate ? measurements.find(m => m.date === editingDate) : null;
     const measurement: Measurement = {
       date,
+      savedAt: existing?.savedAt,
       arms: parseFloat(arms) || 0,
       chest: parseFloat(chest) || 0,
       waist: parseFloat(waist) || 0,
       legs: parseFloat(legs) || 0,
       weight: parseFloat(weight) || 0,
       bodyFat: bodyFat ? parseFloat(bodyFat) : undefined,
+      muscleMass: muscleMass ? parseFloat(muscleMass) : undefined,
       energy: energy || undefined,
       hunger: hunger || undefined,
       tiredness: tiredness || undefined,
@@ -236,7 +242,7 @@ export default function BodyMetrix() {
   };
 
   // Auto-calculate change vs previous measurement
-  const getChange = (current: Measurement, previous: Measurement | null, field: 'arms' | 'chest' | 'waist' | 'legs' | 'weight' | 'bodyFat'): number | undefined => {
+  const getChange = (current: Measurement, previous: Measurement | null, field: 'arms' | 'chest' | 'waist' | 'legs' | 'weight' | 'bodyFat' | 'muscleMass'): number | undefined => {
     if (!previous) return undefined;
     const curVal = current[field];
     const prevVal = previous[field];
@@ -252,10 +258,108 @@ export default function BodyMetrix() {
     }
   };
 
+  const buildReportText = (m: Measurement, previous: Measurement | null) => {
+    const date = formatDate(m.date);
+    const diff = (field: 'weight' | 'arms' | 'chest' | 'waist' | 'legs' | 'bodyFat' | 'muscleMass') => {
+      const change = getChange(m, previous, field);
+      if (change === undefined || change === 0) return '';
+      return ` (${change > 0 ? '+' : ''}${change})`;
+    };
+
+    let text = `📊 Body Metrix — ${date}\n\n`;
+    text += `⚖️ Weight: ${m.weight}kg${diff('weight')}${previous ? ` (prev: ${previous.weight}kg)` : ''}\n`;
+    if (m.bodyFat != null) text += `📉 Body Fat: ${m.bodyFat}%${diff('bodyFat')}\n`;
+    if (m.muscleMass != null) text += `💪 Muscle Mass: ${m.muscleMass}kg${diff('muscleMass')}\n`;
+    text += `💪 Arms: ${m.arms}cm${diff('arms')}\n`;
+    text += `🫁 Chest: ${m.chest}cm${diff('chest')}\n`;
+    text += `📏 Waist: ${m.waist}cm${diff('waist')}\n`;
+    text += `🦵 Legs: ${m.legs}cm${diff('legs')}\n`;
+
+    const statusFields = [
+      m.energy && `Energy: ${m.energy}`,
+      m.hunger && `Hunger: ${m.hunger}`,
+      m.tiredness && `Tiredness: ${m.tiredness}`,
+      m.digestion && `Digestion: ${m.digestion}`,
+      m.sleepHours != null && `Sleep: ${m.sleepHours}h`,
+      m.cardio != null && `Cardio: ${m.cardio}x`,
+      m.trainings != null && `Trainings: ${m.trainings}x`,
+      m.foodChanges != null && `Food adherence: ${m.foodChanges}%`,
+    ].filter(Boolean);
+
+    if (statusFields.length > 0) {
+      text += `\n${statusFields.join(' · ')}`;
+    }
+    return text;
+  };
+
+  const shareMeasurement = async (m: Measurement, previous: Measurement | null) => {
+    const text = buildReportText(m, previous);
+
+    // Share text immediately to preserve user gesture
+    if (navigator.share) {
+      try {
+        await navigator.share({ text });
+      } catch {
+        // User cancelled — do nothing
+      }
+      return;
+    }
+
+    // Fallback: copy to clipboard
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Report copied to clipboard!');
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      alert('Report copied to clipboard!');
+    }
+  };
+
+  const shareMeasurementWithPhotos = async (m: Measurement, previous: Measurement | null) => {
+    const text = buildReportText(m, previous);
+
+    // Convert photos to File objects
+    const files: File[] = [];
+    if (m.photos) {
+      const angles = ['front', 'sideLeft', 'back', 'sideRight'] as const;
+      for (const angle of angles) {
+        const src = m.photos[angle];
+        if (!src) continue;
+        try {
+          const res = await fetch(src);
+          const blob = await res.blob();
+          files.push(new File([blob], `${angle}.jpg`, { type: blob.type || 'image/jpeg' }));
+        } catch {
+          // Skip photos that can't be fetched
+        }
+      }
+    }
+
+    if (navigator.share && files.length > 0 && navigator.canShare?.({ files })) {
+      try {
+        await navigator.share({ text, files });
+      } catch {
+        // User cancelled — do nothing
+      }
+      return;
+    }
+
+    // No file sharing support or no photos — fall back to text-only share
+    shareMeasurement(m, previous);
+  };
+
   const editMeasurement = (m: Measurement) => {
     setDate(m.date);
     setWeight(String(m.weight));
     setBodyFat(m.bodyFat != null ? String(m.bodyFat) : '');
+    setMuscleMass(m.muscleMass != null ? String(m.muscleMass) : '');
     setArms(String(m.arms));
     setChest(String(m.chest));
     setWaist(String(m.waist));
@@ -400,6 +504,7 @@ export default function BodyMetrix() {
         {[
           { label: 'Weight (kg)', value: weight, setValue: setWeight, step: 0.1, req: true },
           { label: 'Body Fat (%)', value: bodyFat, setValue: setBodyFat, step: 0.1, req: false },
+          { label: 'Muscle Mass (kg)', value: muscleMass, setValue: setMuscleMass, step: 0.1, req: false },
           { label: 'Arms (cm)', value: arms, setValue: setArms, step: 0.5, req: true },
           { label: 'Chest (cm)', value: chest, setValue: setChest, step: 0.5, req: true },
           { label: 'Waist (cm)', value: waist, setValue: setWaist, step: 0.5, req: true },
@@ -488,11 +593,8 @@ export default function BodyMetrix() {
       <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h1 className="text-3xl font-bold text-white">Body Metrix</h1>
-              <p className="text-white/40 mt-1">Track your weekly measurements and progress photos</p>
-            </div>
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-3xl font-bold text-white">Body Metrix</h1>
             {!editingDate && (
               <button
                 type="button"
@@ -550,6 +652,12 @@ export default function BodyMetrix() {
                       </div>
                       <div className="flex gap-2">
                         <button
+                          onClick={(e) => { e.stopPropagation(); (m.photos && Object.values(m.photos).some(Boolean) ? shareMeasurementWithPhotos : shareMeasurement)(m, previous); }}
+                          className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-white/70"
+                        >
+                          Share
+                        </button>
+                        <button
                           onClick={(e) => { e.stopPropagation(); editMeasurement(m); }}
                           className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-white/70"
                         >
@@ -569,6 +677,7 @@ export default function BodyMetrix() {
                       {([
                         { label: 'Weight', value: `${m.weight}kg`, field: 'weight' as const, unit: 'kg' },
                         { label: 'Body Fat', value: m.bodyFat != null ? `${m.bodyFat}%` : '—', field: 'bodyFat' as const, unit: '%' },
+                        { label: 'Muscle Mass', value: m.muscleMass != null ? `${m.muscleMass}kg` : '—', field: 'muscleMass' as const, unit: 'kg' },
                         { label: 'Arms', value: `${m.arms}cm`, field: 'arms' as const, unit: 'cm' },
                         { label: 'Chest', value: `${m.chest}cm`, field: 'chest' as const, unit: 'cm' },
                         { label: 'Waist', value: `${m.waist}cm`, field: 'waist' as const, unit: 'cm' },

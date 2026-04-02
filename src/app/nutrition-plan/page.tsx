@@ -386,10 +386,7 @@ export default function NutritionPlanPage() {
       <Navigation />
       <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white">Nutrition</h1>
-            <p className="text-white/40 mt-1">Your meal plans for training and rest days</p>
-          </div>
+          <h1 className="text-3xl font-bold text-white mb-4">Nutrition</h1>
 
           {/* Empty stomach section */}
           {plan.current.emptyStomach && plan.current.emptyStomach.length > 0 && (

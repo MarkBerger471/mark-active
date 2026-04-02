@@ -120,13 +120,10 @@ export default function Dashboard() {
       <Navigation />
       <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
-          <div className="mb-8 relative">
+          <div className="mb-4 relative">
             <DumbbellIcon className="absolute -top-2 right-0 w-24 h-24 text-white opacity-[0.04] pointer-events-none" />
             <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-                <p className="text-white/40 mt-1">Your bodybuilding progress at a glance</p>
-              </div>
+              <h1 className="text-3xl font-bold text-white">Dashboard</h1>
               <button onClick={logout} className="text-xs text-white/20 hover:text-white/50 transition-all px-3 py-1.5 rounded-lg hover:bg-white/5">
                 Logout
               </button>
@@ -139,6 +136,7 @@ export default function Dashboard() {
               {([
                 { label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight' as const },
                 { label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat' as const },
+                { label: 'Muscle Mass', value: latestMeasurement.muscleMass != null ? `${latestMeasurement.muscleMass}kg` : '—', field: 'muscleMass' as const },
                 { label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' as const },
                 { label: 'Chest', value: `${latestMeasurement.chest}cm`, field: 'chest' as const },
                 { label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist' as const },
@@ -302,7 +300,10 @@ export default function Dashboard() {
             // Chart dimensions
             const chartWidth = 700;
             const chartHeight = 240;
-            const padding = { top: 30, right: 60, bottom: 44, left: 54 };
+            const hasBf = measurements.some(m => m.bodyFat != null);
+            const hasMm = measurements.some(m => m.muscleMass != null);
+            const hasSecondary = hasBf || hasMm;
+            const padding = { top: 30, right: (hasBf && hasMm) ? 110 : hasSecondary ? 80 : 60, bottom: 44, left: 54 };
             const innerWidth = chartWidth - padding.left - padding.right;
             const innerHeight = chartHeight - padding.top - padding.bottom;
 
@@ -530,7 +531,119 @@ export default function Dashboard() {
                         <stop offset="0%" stopColor={accentColor} stopOpacity="0.5" />
                         <stop offset="100%" stopColor={accentColor} stopOpacity="1" />
                       </linearGradient>
+                      <linearGradient id="dashBfGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#b90a0a" stopOpacity="0.25" />
+                        <stop offset="100%" stopColor="#b90a0a" stopOpacity="0" />
+                      </linearGradient>
+                      <linearGradient id="dashMmGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
+                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+                      </linearGradient>
                     </defs>
+
+                    {/* Body Fat % curve (secondary axis) */}
+                    {(() => {
+                      const bfData = measurements
+                        .map((m, i) => m.bodyFat != null ? { week: weeks[i], val: m.bodyFat, date: m.date } : null)
+                        .filter((d): d is { week: number; val: number; date: string } => d !== null);
+                      if (bfData.length < 2) return null;
+
+                      const bfMin = Math.min(...bfData.map(d => d.val)) - 0.5;
+                      const bfMax = Math.max(...bfData.map(d => d.val)) + 0.5;
+                      const bfRange = bfMax - bfMin || 1;
+                      const toBfY = (v: number) => padding.top + innerHeight - ((v - bfMin) / bfRange) * innerHeight;
+
+                      const bfPoints = bfData.map(d => ({ x: toX(d.week), y: toBfY(d.val), val: d.val }));
+                      const bfLine = bfPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+                      const bfColor = '#b90a0a';
+                      const bfTicks = 4;
+                      const bfLabels = Array.from({ length: bfTicks }, (_, i) => {
+                        const val = bfMin + (bfRange * i) / (bfTicks - 1);
+                        return { val: Math.round(val * 10) / 10, y: toBfY(val) };
+                      });
+
+                      return (
+                        <g>
+                          {/* Right Y-axis labels */}
+                          {bfLabels.map((tick, i) => (
+                            <text key={`bf-y-${i}`} x={chartWidth - padding.right + 10} y={tick.y + 4} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.6">{tick.val}%</text>
+                          ))}
+                          <text x={chartWidth - padding.right + 10} y={padding.top - 10} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.4">BF%</text>
+
+                          {/* Area fill */}
+                          <path d={`${bfLine} L ${bfPoints[bfPoints.length - 1].x} ${padding.top + innerHeight} L ${bfPoints[0].x} ${padding.top + innerHeight} Z`} fill="url(#dashBfGrad)" />
+
+                          {/* Line */}
+                          <path d={bfLine} fill="none" stroke={bfColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.7" />
+
+                          {/* Points */}
+                          {bfPoints.map((p, i) => {
+                            const isLast = i === bfPoints.length - 1;
+                            const isFirst = i === 0;
+                            return (
+                              <g key={`bf-${i}`}>
+                                <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2.5} fill={bfColor} stroke="#fff" strokeWidth={isLast ? 1.5 : 1} opacity="0.8" />
+                                {(isFirst || isLast) && (
+                                  <text x={p.x + (isLast ? -4 : 4)} y={p.y - 10} textAnchor={isLast ? 'end' : 'start'} fill={bfColor} fontSize="10" fontWeight="bold">{p.val}%</text>
+                                )}
+                              </g>
+                            );
+                          })}
+                        </g>
+                      );
+                    })()}
+
+                    {/* Muscle Mass curve (secondary axis) */}
+                    {(() => {
+                      const mmData = measurements
+                        .map((m, i) => m.muscleMass != null ? { week: weeks[i], val: m.muscleMass, date: m.date } : null)
+                        .filter((d): d is { week: number; val: number; date: string } => d !== null);
+                      if (mmData.length < 2) return null;
+
+                      const mmMin = Math.min(...mmData.map(d => d.val)) - 0.5;
+                      const mmMax = Math.max(...mmData.map(d => d.val)) + 0.5;
+                      const mmRange = mmMax - mmMin || 1;
+                      const toMmY = (v: number) => padding.top + innerHeight - ((v - mmMin) / mmRange) * innerHeight;
+
+                      const mmPoints = mmData.map(d => ({ x: toX(d.week), y: toMmY(d.val), val: d.val }));
+                      const mmLine = mmPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+                      const mmColor = '#3b82f6';
+                      const mmTicks = 4;
+                      const mmLabels = Array.from({ length: mmTicks }, (_, i) => {
+                        const val = mmMin + (mmRange * i) / (mmTicks - 1);
+                        return { val: Math.round(val * 10) / 10, y: toMmY(val) };
+                      });
+
+                      // Offset right axis if BF% is also shown
+                      const mmAxisX = hasBf ? chartWidth - padding.right + 45 : chartWidth - padding.right + 10;
+
+                      return (
+                        <g>
+                          {mmLabels.map((tick, i) => (
+                            <text key={`mm-y-${i}`} x={mmAxisX} y={tick.y + 4} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.6">{tick.val}</text>
+                          ))}
+                          <text x={mmAxisX} y={padding.top - 10} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.4">MM kg</text>
+
+                          <path d={`${mmLine} L ${mmPoints[mmPoints.length - 1].x} ${padding.top + innerHeight} L ${mmPoints[0].x} ${padding.top + innerHeight} Z`} fill="url(#dashMmGrad)" />
+                          <path d={mmLine} fill="none" stroke={mmColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.7" />
+
+                          {mmPoints.map((p, i) => {
+                            const isLast = i === mmPoints.length - 1;
+                            const isFirst = i === 0;
+                            return (
+                              <g key={`mm-${i}`}>
+                                <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2.5} fill={mmColor} stroke="#fff" strokeWidth={isLast ? 1.5 : 1} opacity="0.8" />
+                                {(isFirst || isLast) && (
+                                  <text x={p.x + (isLast ? -4 : 4)} y={p.y - 10} textAnchor={isLast ? 'end' : 'start'} fill={mmColor} fontSize="10" fontWeight="bold">{p.val}kg</text>
+                                )}
+                              </g>
+                            );
+                          })}
+                        </g>
+                      );
+                    })()}
 
                     {/* Area fill */}
                     <path d={areaPath} fill="url(#dashWeightGrad)" />

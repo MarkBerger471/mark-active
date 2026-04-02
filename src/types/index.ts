@@ -1,11 +1,13 @@
 export interface Measurement {
   date: string; // ISO date string
+  savedAt?: string; // ISO timestamp
   arms: number;
   chest: number;
   waist: number;
   legs: number;
   weight: number;
   bodyFat?: number;
+  muscleMass?: number;
   energy?: string;
   hunger?: string;
   tiredness?: string;

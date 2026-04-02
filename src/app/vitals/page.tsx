@@ -6,6 +6,38 @@ import { useEffect, useState, useRef } from 'react';
 import Navigation from '@/components/Navigation';
 import { getBloodTests, saveBloodTests } from '@/utils/storage';
 import { BloodTest, BloodTestValue } from '@/types';
+import ReactMarkdown from 'react-markdown';
+
+function MarkerPopup({ title, content, loading, onClose }: { title: string; content: string; loading: boolean; onClose: () => void }) {
+  // Remove redundant first line if it's just the marker name repeated
+  const cleanContent = content.replace(/^#+\s*.+\n+/, '').replace(/^\*\*.+\*\*\n+/, '').replace(/^.+:\s*.+You Need.+\n+/i, '').trim();
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative w-full sm:max-w-lg max-h-[80vh] overflow-y-auto glass-strong rounded-t-2xl sm:rounded-2xl p-0 m-0 sm:m-4"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 bg-[#1a1a2e] border-b border-white/10 px-5 py-4 rounded-t-2xl flex items-center justify-between">
+          <h3 className="text-lg font-bold text-white">{title}</h3>
+          <button onClick={onClose} className="text-white/40 hover:text-white/80 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 transition-all text-lg">x</button>
+        </div>
+        <div className="px-5 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <span className="text-white/40 text-sm">Loading explanation...</span>
+            </div>
+          ) : (
+            <div className="prose prose-invert prose-sm max-w-none [&_h1]:text-white/90 [&_h1]:text-base [&_h1]:mt-3 [&_h2]:text-white/90 [&_h2]:text-sm [&_h2]:mt-4 [&_h2]:mb-1 [&_h3]:text-white/80 [&_h3]:text-xs [&_h3]:mt-3 [&_h3]:mb-1 [&_strong]:text-white/80 [&_li]:text-white/55 [&_li]:text-sm [&_p]:text-white/55 [&_p]:text-sm [&_p]:leading-relaxed [&_ul]:my-1 [&_ol]:my-1">
+              <ReactMarkdown>{cleanContent}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Words/patterns that indicate junk lines (not blood test values)
 const JUNK_PATTERNS = [
@@ -459,8 +491,8 @@ function StatusDot({ value, refMin, refMax, flag }: { value: number; refMin?: nu
   if (!isLow && !isHigh && (refMin != null || refMax != null || flag)) {
     return <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />;
   }
-  if (isLow) return <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" />;
   if (isHigh) return <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />;
+  if (isLow) return <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" />;
   return null;
 }
 
@@ -477,6 +509,66 @@ export default function VitalsPage() {
   const [expandedTest, setExpandedTest] = useState<string | null>(null);
   const [showComparison, setShowComparison] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [popup, setPopup] = useState<{ title: string; content: string; loading: boolean } | null>(null);
+  const explanationCache = useRef<Record<string, string>>({});
+
+  // Initialize cache from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('markerExplanations');
+      if (stored) explanationCache.current = JSON.parse(stored);
+    } catch { /* ignore */ }
+  }, []);
+
+  const saveCache = (key: string, value: string) => {
+    explanationCache.current[key] = value;
+    try { localStorage.setItem('markerExplanations', JSON.stringify(explanationCache.current)); } catch { /* ignore */ }
+  };
+
+  const explainMarker = async (marker: string) => {
+    const cacheKey = `explain:${marker.toLowerCase()}`;
+    if (explanationCache.current[cacheKey]) {
+      setPopup({ title: marker, content: explanationCache.current[cacheKey], loading: false });
+      return;
+    }
+    setPopup({ title: marker, content: '', loading: true });
+    try {
+      const res = await fetch('/api/explain-marker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marker, mode: 'explain' }),
+      });
+      const json = await res.json();
+      const text = json.explanation || 'No explanation available.';
+      saveCache(cacheKey, text);
+      setPopup({ title: marker, content: text, loading: false });
+    } catch {
+      setPopup({ title: marker, content: 'Failed to load explanation.', loading: false });
+    }
+  };
+
+  const diagnoseValue = async (v: BloodTestValue) => {
+    const direction = v.flag === 'H' || (v.refMax != null && v.value > v.refMax) ? 'High' : 'Low';
+    const cacheKey = `diagnose:${v.name.toLowerCase()}:${direction}:${v.value}`;
+    if (explanationCache.current[cacheKey]) {
+      setPopup({ title: `${v.name} — ${direction}`, content: explanationCache.current[cacheKey], loading: false });
+      return;
+    }
+    setPopup({ title: `${v.name} — ${direction}`, content: '', loading: true });
+    try {
+      const res = await fetch('/api/explain-marker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marker: v.name, value: v.value, unit: v.unit, refMin: v.refMin, refMax: v.refMax, flag: v.flag, mode: 'diagnose' }),
+      });
+      const json = await res.json();
+      const text = json.explanation || 'No explanation available.';
+      saveCache(cacheKey, text);
+      setPopup({ title: `${v.name} — ${direction}`, content: text, loading: false });
+    } catch {
+      setPopup({ title: `${v.name} — ${direction}`, content: 'Failed to load explanation.', loading: false });
+    }
+  };
   const [editingTestId, setEditingTestId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<BloodTestValue[]>([]);
   const [editDate, setEditDate] = useState('');
@@ -585,6 +677,14 @@ export default function VitalsPage() {
     setProcessing(false);
   };
 
+  const computeFlag = (entry: BloodTestValue): string | undefined => {
+    const { value, refMin, refMax } = entry;
+    if (refMax != null && value > refMax) return 'H';
+    if (refMin != null && value < refMin) return 'L';
+    if (refMin != null || refMax != null) return undefined;
+    return entry.flag;
+  };
+
   const updateParsedValue = (idx: number, field: keyof BloodTestValue, val: string) => {
     setParsedValues(prev => {
       const updated = [...prev];
@@ -594,6 +694,9 @@ export default function VitalsPage() {
       } else {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (updated[idx] as any)[field] = val;
+      }
+      if (field === 'value' || field === 'refMin' || field === 'refMax') {
+        updated[idx].flag = computeFlag(updated[idx]);
       }
       return updated;
     });
@@ -664,6 +767,9 @@ export default function VitalsPage() {
       } else {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (updated[idx] as any)[field] = val;
+      }
+      if (field === 'value' || field === 'refMin' || field === 'refMax') {
+        updated[idx].flag = computeFlag(updated[idx]);
       }
       return updated;
     });
@@ -744,10 +850,7 @@ export default function VitalsPage() {
       <Navigation />
       <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white">Vitals</h1>
-            <p className="text-white/40 mt-1">Blood test results and trends</p>
-          </div>
+          <h1 className="text-3xl font-bold text-white mb-4">Vitals</h1>
 
           {/* Actions */}
           <div className="flex gap-3 mb-6">
@@ -997,10 +1100,16 @@ export default function VitalsPage() {
                               <tr key={i} className={`border-t border-white/5 ${rowColor}`}>
                                 <td className="py-1 w-6"><StatusDot value={v.value} refMin={v.refMin} refMax={v.refMax} flag={v.flag} /></td>
                                 <td className={`py-1 ${nameColor}`}>
-                                  {v.name}
+                                  <span onClick={() => explainMarker(v.name)} className="cursor-pointer underline decoration-dotted decoration-white/20 hover:decoration-white/50">{v.name}</span>
                                   {(isHigh || isLow) && <span className={`ml-1 text-[10px] font-bold ${isHigh ? 'text-red-400' : 'text-yellow-400'}`}>{isHigh ? 'H' : 'L'}</span>}
                                 </td>
-                                <td className={`py-1 text-right font-mono ${valColor}`}>{v.textValue || v.value}</td>
+                                <td className={`py-1 text-right font-mono ${valColor}`}>
+                                  {(isHigh || isLow) ? (
+                                    <span onClick={() => diagnoseValue(v)} className="cursor-pointer underline decoration-dotted hover:opacity-80">{v.textValue || v.value}</span>
+                                  ) : (
+                                    <span>{v.textValue || v.value}</span>
+                                  )}
+                                </td>
                                 <td className="py-1 text-right text-white/30 text-xs">{v.unit}</td>
                                 <td className="py-1 text-right text-white/20 text-xs">
                                   {v.refMin != null && v.refMax != null ? `${v.refMin}–${v.refMax}` : v.refMax != null ? `<${v.refMax}` : v.refMin != null ? `>${v.refMin}` : ''}
@@ -1065,6 +1174,14 @@ export default function VitalsPage() {
           </div>
         </div>
       </main>
+      {popup && (
+        <MarkerPopup
+          title={popup.title}
+          content={popup.content}
+          loading={popup.loading}
+          onClose={() => setPopup(null)}
+        />
+      )}
     </div>
   );
 }
