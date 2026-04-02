@@ -131,23 +131,14 @@ export default function Dashboard() {
           </div>
 
           {/* Quick Stats */}
-          {latestMeasurement && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-              {([
-                { label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight' as const },
-                { label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat' as const },
-                { label: 'Muscle Mass', value: latestMeasurement.muscleMass != null ? `${latestMeasurement.muscleMass}kg` : '—', field: 'muscleMass' as const },
-                { label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' as const },
-                { label: 'Chest', value: `${latestMeasurement.chest}cm`, field: 'chest' as const },
-                { label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist' as const },
-                { label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' as const },
-              ]).map((stat) => {
-                const curVal = latestMeasurement[stat.field];
-                const prevVal = previousMeasurement?.[stat.field];
-                const change = (curVal != null && prevVal != null)
-                  ? Math.round((curVal - prevVal) * 10) / 10
-                  : undefined;
-                return (
+          {latestMeasurement && (() => {
+            const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs' }) => {
+              const curVal = latestMeasurement[stat.field];
+              const prevVal = previousMeasurement?.[stat.field];
+              const change = (curVal != null && prevVal != null)
+                ? Math.round((curVal - prevVal) * 10) / 10
+                : undefined;
+              return (
                 <div key={stat.label} className="glass-card p-4 stat-accent">
                   <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
                   <p className="text-2xl font-bold text-white mt-1">{stat.value}</p>
@@ -155,10 +146,26 @@ export default function Dashboard() {
                     <p className="text-sm mt-1">{formatChange(change)}</p>
                   )}
                 </div>
-                );
-              })}
-            </div>
-          )}
+              );
+            };
+            return (
+              <div className="flex flex-col gap-4 mb-8">
+                {statCard({ label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight' })}
+                <div className="grid grid-cols-2 gap-4">
+                  {statCard({ label: 'Muscle Mass', value: latestMeasurement.muscleMass != null ? `${latestMeasurement.muscleMass}kg` : '—', field: 'muscleMass' })}
+                  {statCard({ label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat' })}
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {statCard({ label: 'Chest', value: `${latestMeasurement.chest}cm`, field: 'chest' })}
+                  {statCard({ label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist' })}
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {statCard({ label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' })}
+                  {statCard({ label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Sleep Widget */}
           {sleepData.length > 0 && (() => {
@@ -303,7 +310,7 @@ export default function Dashboard() {
             const hasBf = measurements.some(m => m.bodyFat != null);
             const hasMm = measurements.some(m => m.muscleMass != null);
             const hasSecondary = hasBf || hasMm;
-            const padding = { top: 30, right: (hasBf && hasMm) ? 110 : hasSecondary ? 80 : 60, bottom: 44, left: 54 };
+            const padding = { top: 30, right: (hasBf && hasMm) ? 140 : hasSecondary ? 80 : 60, bottom: 44, left: 54 };
             const innerWidth = chartWidth - padding.left - padding.right;
             const innerHeight = chartHeight - padding.top - padding.bottom;
 
@@ -551,7 +558,11 @@ export default function Dashboard() {
                       const bfMin = Math.min(...bfData.map(d => d.val)) - 0.5;
                       const bfMax = Math.max(...bfData.map(d => d.val)) + 0.5;
                       const bfRange = bfMax - bfMin || 1;
-                      const toBfY = (v: number) => padding.top + innerHeight - ((v - bfMin) / bfRange) * innerHeight;
+                      // When MM is also shown, BF% uses the top half of the chart
+                      const bfTop = padding.top;
+                      const bfBottom = hasMm ? padding.top + innerHeight * 0.45 : padding.top + innerHeight;
+                      const bfHeight = bfBottom - bfTop;
+                      const toBfY = (v: number) => bfBottom - ((v - bfMin) / bfRange) * bfHeight;
 
                       const bfPoints = bfData.map(d => ({ x: toX(d.week), y: toBfY(d.val), val: d.val }));
                       const bfLine = bfPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
@@ -572,7 +583,7 @@ export default function Dashboard() {
                           <text x={chartWidth - padding.right + 10} y={padding.top - 10} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.4">BF%</text>
 
                           {/* Area fill */}
-                          <path d={`${bfLine} L ${bfPoints[bfPoints.length - 1].x} ${padding.top + innerHeight} L ${bfPoints[0].x} ${padding.top + innerHeight} Z`} fill="url(#dashBfGrad)" />
+                          <path d={`${bfLine} L ${bfPoints[bfPoints.length - 1].x} ${bfBottom} L ${bfPoints[0].x} ${bfBottom} Z`} fill="url(#dashBfGrad)" />
 
                           {/* Line */}
                           <path d={bfLine} fill="none" stroke={bfColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.7" />
@@ -604,7 +615,11 @@ export default function Dashboard() {
                       const mmMin = Math.min(...mmData.map(d => d.val)) - 0.5;
                       const mmMax = Math.max(...mmData.map(d => d.val)) + 0.5;
                       const mmRange = mmMax - mmMin || 1;
-                      const toMmY = (v: number) => padding.top + innerHeight - ((v - mmMin) / mmRange) * innerHeight;
+                      // When BF% is also shown, MM uses the bottom half of the chart
+                      const mmTop = hasBf ? padding.top + innerHeight * 0.55 : padding.top;
+                      const mmBottom = padding.top + innerHeight;
+                      const mmHeight = mmBottom - mmTop;
+                      const toMmY = (v: number) => mmBottom - ((v - mmMin) / mmRange) * mmHeight;
 
                       const mmPoints = mmData.map(d => ({ x: toX(d.week), y: toMmY(d.val), val: d.val }));
                       const mmLine = mmPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
@@ -617,7 +632,7 @@ export default function Dashboard() {
                       });
 
                       // Offset right axis if BF% is also shown
-                      const mmAxisX = hasBf ? chartWidth - padding.right + 45 : chartWidth - padding.right + 10;
+                      const mmAxisX = hasBf ? chartWidth - padding.right + 75 : chartWidth - padding.right + 10;
 
                       return (
                         <g>
