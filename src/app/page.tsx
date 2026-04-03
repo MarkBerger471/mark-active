@@ -174,13 +174,13 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* Sleep + Calorie Balance Row */}
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            {/* Sleep Widget (compact) */}
+          {/* Calorie Balance + Sleep */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            {/* Sleep Widget — second on mobile, first on desktop */}
             {sleepData.length > 0 && (() => {
               const last = sleepData[0];
               return (
-                <div className="glass-card p-5">
+                <div className="glass-card p-5 order-2 md:order-1">
                   <button
                     onClick={() => setSleepExpanded(!sleepExpanded)}
                     className="w-full flex items-center justify-between text-left"
@@ -397,7 +397,7 @@ export default function Dashboard() {
               const targetH = (targetIntake / calMax) * barH;
 
               return (
-                <div className="glass-card p-5">
+                <div className="glass-card p-5 order-1 md:order-2">
                   <div className="flex items-center justify-between mb-2">
                     <h2 className="text-sm font-semibold text-white">Calorie Balance</h2>
                     <span className={`text-[10px] font-bold uppercase ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>{phase}</span>
@@ -428,20 +428,20 @@ export default function Dashboard() {
 
                     {/* Bar chart */}
                     <div className="flex-1">
-                      <svg viewBox={`0 0 140 ${barH + 34}`} className="w-full">
+                      <svg viewBox="0 0 160 130" className="w-full">
                         {/* Target line */}
                         {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; return (<>
-                        <line x1="10" y1={14 + barH - targetH} x2="100" y2={14 + barH - targetH} stroke={tColor} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
-                        <text x="102" y={14 + barH - targetH + 3} textAnchor="start" fill={tColor} fontSize="8" fontWeight="bold">{targetIntake}</text>
+                        <line x1="5" y1={18 + barH - targetH} x2="115" y2={18 + barH - targetH} stroke={tColor} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
+                        <text x="118" y={18 + barH - targetH + 4} textAnchor="start" fill={tColor} fontSize="10" fontWeight="bold">{targetIntake}</text>
                         </>); })()}
                         {/* Burn bar */}
-                        <rect x="15" y={14 + barH - burnH} width="35" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
-                        <text x="32" y={14 + barH - burnH - 4} textAnchor="middle" fill="white" fontSize="9" fontWeight="bold">{dailyBurn}</text>
-                        <text x="32" y={14 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.35" fontSize="8">Burn</text>
+                        <rect x="10" y={18 + barH - burnH} width="45" height={burnH} rx="5" fill="#f97316" fillOpacity="0.7" />
+                        <text x="32" y={18 + barH - burnH - 5} textAnchor="middle" fill="white" fontSize="12" fontWeight="bold">{dailyBurn}</text>
+                        <text x="32" y={18 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="10">Burn</text>
                         {/* Intake bar */}
-                        <rect x="55" y={14 + barH - intakeH} width="35" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
-                        <text x="72" y={14 + barH - intakeH - 4} textAnchor="middle" fill="white" fontSize="9" fontWeight="bold">{intake}</text>
-                        <text x="72" y={14 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.35" fontSize="8">Intake</text>
+                        <rect x="62" y={18 + barH - intakeH} width="45" height={intakeH} rx="5" fill={zoneColor} fillOpacity="0.7" />
+                        <text x="84" y={18 + barH - intakeH - 5} textAnchor="middle" fill="white" fontSize="12" fontWeight="bold">{intake}</text>
+                        <text x="84" y={18 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="10">Intake</text>
                       </svg>
                     </div>
                   </div>
