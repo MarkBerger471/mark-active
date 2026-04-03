@@ -7,6 +7,213 @@ import Navigation from '@/components/Navigation';
 import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan } from '@/utils/storage';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
 
+// Nutrition database: values per 100g
+const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
+  'greek yogurt': { kcal: 59, protein: 10, carbs: 3.6, fat: 0.4 },
+  'yogurt': { kcal: 59, protein: 10, carbs: 3.6, fat: 0.4 },
+  'whey': { kcal: 400, protein: 80, carbs: 10, fat: 5 },
+  'whey protein': { kcal: 400, protein: 80, carbs: 10, fat: 5 },
+  'oatmeal': { kcal: 389, protein: 17, carbs: 66, fat: 7 },
+  'oats': { kcal: 389, protein: 17, carbs: 66, fat: 7 },
+  'berries': { kcal: 57, protein: 1.2, carbs: 12, fat: 0.7 },
+  'blueberries': { kcal: 57, protein: 0.7, carbs: 14, fat: 0.3 },
+  'strawberries': { kcal: 32, protein: 0.7, carbs: 8, fat: 0.3 },
+  'banana': { kcal: 89, protein: 1.1, carbs: 23, fat: 0.3 },
+  'cheese': { kcal: 403, protein: 25, carbs: 1.3, fat: 33 },
+  'cottage cheese': { kcal: 98, protein: 11, carbs: 3.4, fat: 4.3 },
+  'cream cheese': { kcal: 342, protein: 6, carbs: 4, fat: 34 },
+  'rice': { kcal: 130, protein: 2.7, carbs: 28, fat: 0.3 },
+  'white rice': { kcal: 130, protein: 2.7, carbs: 28, fat: 0.3 },
+  'jasmine rice': { kcal: 130, protein: 2.7, carbs: 28, fat: 0.3 },
+  'brown rice': { kcal: 112, protein: 2.3, carbs: 24, fat: 0.8 },
+  'cream of rice': { kcal: 370, protein: 6, carbs: 83, fat: 0.5 },
+  'rice cakes': { kcal: 387, protein: 8, carbs: 82, fat: 3 },
+  'chicken': { kcal: 165, protein: 31, carbs: 0, fat: 3.6 },
+  'chicken breast': { kcal: 165, protein: 31, carbs: 0, fat: 3.6 },
+  'chicken thigh': { kcal: 209, protein: 26, carbs: 0, fat: 11 },
+  'turkey': { kcal: 135, protein: 30, carbs: 0, fat: 1 },
+  'turkey breast': { kcal: 135, protein: 30, carbs: 0, fat: 1 },
+  'beef': { kcal: 250, protein: 26, carbs: 0, fat: 15 },
+  'ground beef': { kcal: 250, protein: 26, carbs: 0, fat: 15 },
+  'steak': { kcal: 271, protein: 26, carbs: 0, fat: 18 },
+  'salmon': { kcal: 208, protein: 20, carbs: 0, fat: 13 },
+  'tuna': { kcal: 132, protein: 28, carbs: 0, fat: 1.3 },
+  'tilapia': { kcal: 96, protein: 20, carbs: 0, fat: 1.7 },
+  'shrimp': { kcal: 99, protein: 24, carbs: 0.2, fat: 0.3 },
+  'eggs': { kcal: 155, protein: 13, carbs: 1.1, fat: 11 },
+  'egg': { kcal: 155, protein: 13, carbs: 1.1, fat: 11 },
+  'egg whites': { kcal: 52, protein: 11, carbs: 0.7, fat: 0.2 },
+  'pasta': { kcal: 131, protein: 5, carbs: 25, fat: 1.1 },
+  'bread': { kcal: 265, protein: 9, carbs: 49, fat: 3.2 },
+  'sweet potato': { kcal: 86, protein: 1.6, carbs: 20, fat: 0.1 },
+  'potato': { kcal: 77, protein: 2, carbs: 17, fat: 0.1 },
+  'broccoli': { kcal: 34, protein: 2.8, carbs: 7, fat: 0.4 },
+  'spinach': { kcal: 23, protein: 2.9, carbs: 3.6, fat: 0.4 },
+  'avocado': { kcal: 160, protein: 2, carbs: 9, fat: 15 },
+  'olive oil': { kcal: 884, protein: 0, carbs: 0, fat: 100 },
+  'coconut oil': { kcal: 862, protein: 0, carbs: 0, fat: 100 },
+  'peanut butter': { kcal: 588, protein: 25, carbs: 20, fat: 50 },
+  'almond butter': { kcal: 614, protein: 21, carbs: 19, fat: 56 },
+  'almonds': { kcal: 579, protein: 21, carbs: 22, fat: 50 },
+  'walnuts': { kcal: 654, protein: 15, carbs: 14, fat: 65 },
+  'milk': { kcal: 42, protein: 3.4, carbs: 5, fat: 1 },
+  'whole milk': { kcal: 61, protein: 3.2, carbs: 4.8, fat: 3.3 },
+  'honey': { kcal: 304, protein: 0.3, carbs: 82, fat: 0 },
+  'jam': { kcal: 250, protein: 0.4, carbs: 63, fat: 0.1 },
+  'bagel': { kcal: 257, protein: 10, carbs: 50, fat: 1.6 },
+  'tortilla': { kcal: 312, protein: 8, carbs: 52, fat: 8 },
+  'granola': { kcal: 489, protein: 15, carbs: 64, fat: 20 },
+  'protein bar': { kcal: 350, protein: 30, carbs: 35, fat: 10 },
+  'casein': { kcal: 370, protein: 75, carbs: 12, fat: 3 },
+  'dextrose': { kcal: 400, protein: 0, carbs: 100, fat: 0 },
+  'maltodextrin': { kcal: 380, protein: 0, carbs: 95, fat: 0 },
+};
+
+// Supplements: fixed macros per serving (not per 100g)
+const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
+  'krill oil': { kcal: 5, protein: 0, carbs: 0, fat: 0.5 },
+  'omega 3': { kcal: 9, protein: 0, carbs: 0, fat: 1 },
+  'omega3': { kcal: 9, protein: 0, carbs: 0, fat: 1 },
+  'fish oil': { kcal: 9, protein: 0, carbs: 0, fat: 1 },
+  'd3': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'd3+k2': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'vitamin d': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'vitamin c': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'zinc': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'magnesium': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'creatine': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'glutamine': { kcal: 20, protein: 5, carbs: 0, fat: 0 },
+  'bcaa': { kcal: 20, protein: 5, carbs: 0, fat: 0 },
+  'eaa': { kcal: 20, protein: 5, carbs: 0, fat: 0 },
+  'multivitamin': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'ashwagandha': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'melatonin': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'probiotics': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'collagen': { kcal: 35, protein: 9, carbs: 0, fat: 0 },
+  'biotin': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'iron': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'calcium': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'tudca': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'nac': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'coq10': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+  'greens superfood': { kcal: 10, protein: 1, carbs: 2, fat: 0 },
+  'greens': { kcal: 10, protein: 1, carbs: 2, fat: 0 },
+  'apple vinegar': { kcal: 1, protein: 0, carbs: 0, fat: 0 },
+  'apple cider vinegar': { kcal: 1, protein: 0, carbs: 0, fat: 0 },
+  'lemon juice': { kcal: 3, protein: 0, carbs: 1, fat: 0 },
+};
+
+function lookupFood(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
+  const key = name.toLowerCase().trim();
+  if (FOOD_DB[key]) return FOOD_DB[key];
+  // Fuzzy: check if any DB key is contained in the name or vice versa
+  for (const [dbKey, val] of Object.entries(FOOD_DB)) {
+    if (key.includes(dbKey) || dbKey.includes(key)) return val;
+  }
+  return null;
+}
+
+// Weight per piece for countable foods (grams per 1 unit)
+const PIECE_WEIGHTS: Record<string, number> = {
+  'egg': 60,
+  'eggs': 60,
+  'egg whites': 33,
+  'banana': 120,
+  'avocado': 150,
+  'bagel': 100,
+  'tortilla': 45,
+  'rice cakes': 9,
+  'rice cake': 9,
+  'protein bar': 60,
+  'apple': 180,
+  'orange': 150,
+};
+
+function getPieceWeight(name: string): number | null {
+  const lower = name.toLowerCase().trim();
+  if (PIECE_WEIGHTS[lower]) return PIECE_WEIGHTS[lower];
+  for (const [key, weight] of Object.entries(PIECE_WEIGHTS)) {
+    if (lower.includes(key) || key.includes(lower)) return weight;
+  }
+  return null;
+}
+
+function parseGrams(amount: string | undefined, foodName: string): number | null {
+  if (!amount) return null;
+  // Explicit gram unit
+  const gMatch = amount.match(/([\d.]+)\s*(?:gr|g|grams?)$/i);
+  if (gMatch) return parseFloat(gMatch[1]);
+  // Explicit ml (treat as grams for liquids)
+  const mlMatch = amount.match(/([\d.]+)\s*ml$/i);
+  if (mlMatch) return parseFloat(mlMatch[1]);
+  // Bare number — check if this food is countable (pieces)
+  const bare = amount.match(/^([\d.]+)$/);
+  if (bare) {
+    const count = parseFloat(bare[1]);
+    const pieceWeight = getPieceWeight(foodName);
+    if (pieceWeight) return count * pieceWeight;
+    // Not a known countable food — assume grams
+    return count;
+  }
+  return null;
+}
+
+function calcItemMacros(item: FoodItem): FoodItem {
+  const db = lookupFood(item.name);
+  if (db) {
+    const grams = parseGrams(item.amount, item.name);
+    if (grams == null) return item;
+    const factor = grams / 100;
+    return {
+      ...item,
+      kcal: Math.round(db.kcal * factor),
+      protein: Math.round(db.protein * factor * 10) / 10,
+      carbs: Math.round(db.carbs * factor * 10) / 10,
+      fat: Math.round(db.fat * factor * 10) / 10,
+    };
+  }
+  // Try supplement DB (fixed per-serving macros)
+  const sup = lookupSupplement(item.name);
+  if (sup) {
+    return { ...item, kcal: sup.kcal, protein: sup.protein, carbs: sup.carbs, fat: sup.fat };
+  }
+  return item;
+}
+
+function lookupSupplement(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
+  const key = name.toLowerCase().trim();
+  // Strip dosage from the end: "Krill oil 500mg" -> "krill oil"
+  const stripped = key.replace(/\s+\d[\d.,]*\s*(?:mg|gr?|iu|mcg|ml|caps?|tablets?|scoops?)\s*$/i, '').trim();
+  if (SUPPLEMENT_DB[stripped]) return SUPPLEMENT_DB[stripped];
+  for (const [dbKey, val] of Object.entries(SUPPLEMENT_DB)) {
+    if (stripped.includes(dbKey) || dbKey.includes(stripped)) return val;
+  }
+  return null;
+}
+
+function sumMacros(meals: NutritionMeal[]): { kcal: number; protein: number; carbs: number; fat: number } {
+  let kcal = 0, protein = 0, carbs = 0, fat = 0;
+  for (const meal of meals) {
+    for (const item of meal.items) {
+      const computed = calcItemMacros(item as FoodItem);
+      kcal += computed.kcal || 0;
+      protein += computed.protein || 0;
+      carbs += computed.carbs || 0;
+      fat += computed.fat || 0;
+    }
+    for (const sup of meal.supplements || []) {
+      const sm = lookupSupplement(sup);
+      if (sm) {
+        kcal += sm.kcal;
+        protein += sm.protein;
+        carbs += sm.carbs;
+        fat += sm.fat;
+      }
+    }
+  }
+  return { kcal: Math.round(kcal), protein: Math.round(protein), carbs: Math.round(carbs), fat: Math.round(fat) };
+}
+
 function MacroBar({ label, value, unit, color }: { label: string; value: number; unit: string; color: string }) {
   return (
     <div className="flex items-center gap-1.5">
@@ -18,21 +225,37 @@ function MacroBar({ label, value, unit, color }: { label: string; value: number;
   );
 }
 
-function parseFoodItem(item: FoodItem | string): { name: string; amount?: string } {
+function parseSupplement(sup: string): { name: string; amount: string } {
+  const m = sup.match(/^(.+?)\s+(\d[\d.,]*\s*(?:mg|gr?|iu|mcg|ml|caps?|tablets?|scoops?).*)$/i);
+  if (m) return { name: m[1], amount: m[2] };
+  return { name: sup, amount: '' };
+}
+
+function joinSupplement(name: string, amount: string): string {
+  return amount.trim() ? `${name.trim()} ${amount.trim()}` : name.trim();
+}
+
+function parseFoodItem(item: FoodItem | string): FoodItem {
+  let parsed: FoodItem;
   if (typeof item === 'string') {
     // Legacy format: "Greek yogurt 250" or "Greek yogurt 250 gr"
     const matchWithUnit = item.match(/^(.+?)\s+(\d[\d.]*\s*(?:gr|g|mg|ml|iu|scoop).*)$/i);
-    if (matchWithUnit) return { name: matchWithUnit[1], amount: matchWithUnit[2] };
-    // Bare number at end — assume grams
-    const matchBare = item.match(/^(.+?)\s+(\d[\d.]*)$/);
-    if (matchBare) return { name: matchBare[1], amount: `${matchBare[2]} gr` };
-    return { name: item };
+    if (matchWithUnit) { parsed = { name: matchWithUnit[1], amount: matchWithUnit[2] }; }
+    else {
+      // Bare number at end — keep as-is (could be pieces or grams)
+      const matchBare = item.match(/^(.+?)\s+(\d[\d.]*)$/);
+      if (matchBare) { parsed = { name: matchBare[1], amount: matchBare[2] }; }
+      else { parsed = { name: item }; }
+    }
+  } else {
+    // Already a FoodItem — keep bare numbers as-is
+    if (item.amount) {
+      parsed = { ...item };
+    } else {
+      parsed = { ...item };
+    }
   }
-  // Already a FoodItem — add "gr" to bare numbers
-  if (item.amount && /^\d[\d.]*$/.test(item.amount.trim())) {
-    return { ...item, amount: `${item.amount.trim()} gr` };
-  }
-  return item;
+  return calcItemMacros(parsed);
 }
 
 function MealCard({ meal }: { meal: NutritionMeal }) {
@@ -48,11 +271,19 @@ function MealCard({ meal }: { meal: NutritionMeal }) {
         <table className="w-full">
           <tbody>
             {meal.items.map((rawItem, i) => {
-              const item = parseFoodItem(rawItem);
+              const item = calcItemMacros(parseFoodItem(rawItem));
+              const hasMacros = item.kcal != null && item.kcal > 0;
               return (
                 <tr key={i} className="text-sm">
                   <td className="py-0.5 text-white/60 pr-4">{item.name}</td>
                   <td className="py-0.5 text-white/40 text-right whitespace-nowrap font-mono text-xs">{item.amount || ''}</td>
+                  <td className="py-0.5 text-right whitespace-nowrap pl-3">
+                    {hasMacros && (
+                      <span className="text-[10px] text-white/25">
+                        {item.kcal} · {item.protein}p · {item.carbs}c · {item.fat}f
+                      </span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -61,9 +292,20 @@ function MealCard({ meal }: { meal: NutritionMeal }) {
       )}
       {meal.supplements && meal.supplements.length > 0 && (
         <div className="mt-2 pt-2 border-t border-white/5">
-          {meal.supplements.map((s, i) => (
-            <span key={i} className="text-[11px] text-amber-400/50 block">+ {s}</span>
-          ))}
+          {meal.supplements.map((s, i) => {
+            const sm = lookupSupplement(s);
+            const hasMacros = sm && (sm.kcal > 0 || sm.fat > 0 || sm.protein > 0);
+            return (
+              <div key={i} className="flex items-baseline justify-between">
+                <span className="text-[11px] text-amber-400/50">+ {s}</span>
+                {hasMacros && (
+                  <span className="text-[10px] text-white/25">
+                    {sm.kcal} · {sm.protein}p · {sm.carbs}c · {sm.fat}f
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -82,16 +324,28 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   setEditPlan: (p: DayPlan) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Parsed supplement state: avoids re-parsing joined strings on every keystroke
+  const [supState, setSupState] = useState<Record<string, { name: string; amount: string }>>({});
+
+  // Build a stable key for a supplement slot
+  const supKey = (mealIdx: number, supIdx: number) => `${mealIdx}-${supIdx}`;
+
+  // Get the parsed name/amount for a supplement, initializing from the string if needed
+  const getSupParts = (mealIdx: number, supIdx: number, raw: string) => {
+    const key = supKey(mealIdx, supIdx);
+    if (supState[key]) return supState[key];
+    return parseSupplement(raw);
+  };
 
   const updateMealItemName = (mealIdx: number, itemIdx: number, name: string) => {
     if (!editPlan) return;
-    const meals = editPlan.meals.map((m, mi) => mi === mealIdx ? { ...m, items: m.items.map((it, ii) => ii === itemIdx ? { ...it, name } : it) } : m);
+    const meals = editPlan.meals.map((m, mi) => mi === mealIdx ? { ...m, items: m.items.map((it, ii) => ii === itemIdx ? calcItemMacros({ ...it, name }) : it) } : m);
     setEditPlan({ ...editPlan, meals });
   };
 
   const updateMealItemAmount = (mealIdx: number, itemIdx: number, amount: string) => {
     if (!editPlan) return;
-    const meals = editPlan.meals.map((m, mi) => mi === mealIdx ? { ...m, items: m.items.map((it, ii) => ii === itemIdx ? { ...it, amount: amount || undefined } : it) } : m);
+    const meals = editPlan.meals.map((m, mi) => mi === mealIdx ? { ...m, items: m.items.map((it, ii) => ii === itemIdx ? calcItemMacros({ ...it, amount: amount || undefined }) : it) } : m);
     setEditPlan({ ...editPlan, meals });
   };
 
@@ -107,9 +361,20 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     setEditPlan({ ...editPlan, meals });
   };
 
-  const updateSupplement = (mealIdx: number, supIdx: number, value: string) => {
+  const updateSupplementField = (mealIdx: number, supIdx: number, field: 'name' | 'amount', value: string) => {
     if (!editPlan) return;
-    const meals = editPlan.meals.map((m, mi) => mi === mealIdx ? { ...m, supplements: (m.supplements || []).map((s, si) => si === supIdx ? value : s) } : m);
+    const key = supKey(mealIdx, supIdx);
+    const raw = (editPlan.meals[mealIdx]?.supplements || [])[supIdx] || '';
+    const current = getSupParts(mealIdx, supIdx, raw);
+    const updated = { ...current, [field]: value };
+    setSupState(prev => ({ ...prev, [key]: updated }));
+    const meals = editPlan.meals.map((m, mi) => {
+      if (mi !== mealIdx) return m;
+      const sups = (m.supplements || []).map((s, si) =>
+        si === supIdx ? joinSupplement(updated.name, updated.amount) : s
+      );
+      return { ...m, supplements: sups };
+    });
     setEditPlan({ ...editPlan, meals });
   };
 
@@ -147,12 +412,8 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     setEditPlan({ ...editPlan, meals: editPlan.meals.filter((_, i) => i !== mealIdx) });
   };
 
-  const updateMacro = (field: string, value: number) => {
-    if (!editPlan) return;
-    setEditPlan({ ...editPlan, macros: { ...editPlan.macros, [field]: value } });
-  };
-
   const plan = editing && editPlan ? editPlan : dayPlan;
+  const computedMacros = sumMacros(plan.meals);
 
   return (
     <div className="glass-card overflow-hidden">
@@ -165,40 +426,20 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
           <h2 className="text-lg font-bold text-white">{title}</h2>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-xs text-white/30">{plan.macros.kcal} kcal</span>
+          <span className="text-xs text-white/30">{computedMacros.kcal || plan.macros.kcal} kcal</span>
           <span className={`text-white/20 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
         </div>
       </button>
 
       {expanded && (
         <div className="px-5 pb-5">
-          {/* Macros */}
-          {!editing ? (
-            <div className="grid grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-white/5">
-              <MacroBar label="Kcal" value={plan.macros.kcal} unit="" color="#b90a0a" />
-              <MacroBar label="Protein" value={plan.macros.protein} unit="g" color="#3b82f6" />
-              <MacroBar label="Carbs" value={plan.macros.carbs} unit="g" color="#f59e0b" />
-              <MacroBar label="Fat" value={plan.macros.fat} unit="g" color="#10b981" />
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 rounded-xl bg-white/5">
-              {[
-                { key: 'kcal', label: 'Calories (kcal)' },
-                { key: 'protein', label: 'Protein (g)' },
-                { key: 'carbs', label: 'Carbs (g)' },
-                { key: 'fat', label: 'Fat (g)' },
-              ].map(m => (
-                <div key={m.key}>
-                  <label className="text-[10px] text-white/30 uppercase block mb-1">{m.label}</label>
-                  <input
-                    type="number" className="glass-input w-full text-sm"
-                    value={plan.macros[m.key as keyof typeof plan.macros]}
-                    onChange={e => updateMacro(m.key, Number(e.target.value))}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Macros — always computed from food items */}
+          <div className="grid grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-white/5">
+            <MacroBar label="Kcal" value={computedMacros.kcal || plan.macros.kcal} unit="" color="#b90a0a" />
+            <MacroBar label="Protein" value={computedMacros.protein || plan.macros.protein} unit="g" color="#3b82f6" />
+            <MacroBar label="Carbs" value={computedMacros.carbs || plan.macros.carbs} unit="g" color="#f59e0b" />
+            <MacroBar label="Fat" value={computedMacros.fat || plan.macros.fat} unit="g" color="#10b981" />
+          </div>
 
           {/* Meals */}
           {!editing ? (
@@ -231,39 +472,68 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                   </div>
 
                   <label className="text-[10px] text-white/25 uppercase block mb-1">Foods</label>
-                  {meal.items.map((item, itemIdx) => (
-                    <div key={itemIdx} className="flex gap-1.5 mb-1.5">
-                      <input
-                        type="text" className="glass-input flex-[2] text-sm"
-                        value={item.name} onChange={e => updateMealItemName(mealIdx, itemIdx, e.target.value)}
-                        placeholder="Food name"
-                      />
-                      <input
-                        type="text" className="glass-input flex-1 text-sm text-right"
-                        value={item.amount || ''} onChange={e => updateMealItemAmount(mealIdx, itemIdx, e.target.value)}
-                        placeholder="Amount"
-                      />
-                      {meal.items.length > 1 && (
-                        <button onClick={() => removeMealItem(mealIdx, itemIdx)} className="text-red-400/40 hover:text-red-400 px-1.5 text-xs">x</button>
+                  {meal.items.map((item, itemIdx) => {
+                    const hasMacros = item.kcal != null && item.kcal > 0;
+                    return (
+                    <div key={itemIdx} className="mb-1.5">
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text" className="glass-input flex-[2] text-sm"
+                          value={item.name} onChange={e => updateMealItemName(mealIdx, itemIdx, e.target.value)}
+                          placeholder="Food name"
+                        />
+                        <input
+                          type="text" className="glass-input flex-1 text-sm text-right"
+                          value={item.amount || ''} onChange={e => updateMealItemAmount(mealIdx, itemIdx, e.target.value)}
+                          placeholder="Amount"
+                        />
+                        {meal.items.length > 1 && (
+                          <button onClick={() => removeMealItem(mealIdx, itemIdx)} className="text-red-400/40 hover:text-red-400 px-1.5 text-xs">x</button>
+                        )}
+                      </div>
+                      {hasMacros && (
+                        <div className="text-[10px] text-white/25 mt-0.5 ml-1">
+                          {item.kcal} kcal · {item.protein}p · {item.carbs}c · {item.fat}f
+                        </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                   <button onClick={() => addMealItem(mealIdx)} className="text-[11px] text-white/30 hover:text-white/50 mt-1">+ Add food</button>
 
                   {/* Supplements */}
                   {(meal.supplements && meal.supplements.length > 0 || true) && (
                     <div className="mt-2">
                       <label className="text-[10px] text-white/25 uppercase block mb-1">Supplements</label>
-                      {(meal.supplements || []).map((sup, supIdx) => (
-                        <div key={supIdx} className="flex gap-1.5 mb-1.5">
-                          <input
-                            type="text" className="glass-input flex-1 text-sm"
-                            value={sup} onChange={e => updateSupplement(mealIdx, supIdx, e.target.value)}
-                            placeholder="Supplement"
-                          />
-                          <button onClick={() => removeSupplement(mealIdx, supIdx)} className="text-red-400/40 hover:text-red-400 px-1.5 text-xs">x</button>
+                      {(meal.supplements || []).map((sup, supIdx) => {
+                        const parts = getSupParts(mealIdx, supIdx, sup);
+                        const sm = lookupSupplement(sup);
+                        const hasMacros = sm && (sm.kcal > 0 || sm.fat > 0 || sm.protein > 0);
+                        return (
+                        <div key={supIdx} className="mb-1.5">
+                          <div className="flex gap-1.5">
+                            <input
+                              type="text" className="glass-input flex-[2] text-sm"
+                              value={parts.name}
+                              onChange={e => updateSupplementField(mealIdx, supIdx, 'name', e.target.value)}
+                              placeholder="Supplement name"
+                            />
+                            <input
+                              type="text" className="glass-input flex-1 text-sm text-right"
+                              value={parts.amount}
+                              onChange={e => updateSupplementField(mealIdx, supIdx, 'amount', e.target.value)}
+                              placeholder="Amount"
+                            />
+                            <button onClick={() => removeSupplement(mealIdx, supIdx)} className="text-red-400/40 hover:text-red-400 px-1.5 text-xs">x</button>
+                          </div>
+                          {hasMacros && (
+                            <div className="text-[10px] text-white/25 mt-0.5 ml-1">
+                              {sm.kcal} kcal · {sm.protein}p · {sm.carbs}c · {sm.fat}f
+                            </div>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                       <button onClick={() => addSupplement(mealIdx)} className="text-[11px] text-white/30 hover:text-white/50">+ Add supplement</button>
                     </div>
                   )}
@@ -321,6 +591,28 @@ export default function NutritionPlanPage() {
     await saveNutritionPlan(updated);
   }, []);
 
+  // Build "empty stomach" meal from the shared items
+  const emptyStomachItems = plan?.current.emptyStomach;
+  const buildEmptyStomachMeal = useCallback((): NutritionMeal | null => {
+    if (!emptyStomachItems || emptyStomachItems.length === 0) return null;
+    const foods: FoodItem[] = [];
+    const sups: string[] = [];
+    for (const s of emptyStomachItems) {
+      // If it matches the supplement DB, treat as supplement; otherwise as food
+      if (lookupSupplement(s)) {
+        sups.push(s);
+      } else {
+        foods.push(parseFoodItem(s));
+      }
+    }
+    return {
+      name: 'Empty Stomach',
+      subtitle: 'any day',
+      items: foods,
+      supplements: sups,
+    };
+  }, [emptyStomachItems]);
+
   const startEdit = (day: 'training' | 'rest') => {
     if (!plan) return;
     const source = day === 'training' ? plan.current.trainingDay : plan.current.restDay;
@@ -330,6 +622,11 @@ export default function NutritionPlanPage() {
       ...m,
       items: m.items.map((item: FoodItem | string) => parseFoodItem(item)),
     }));
+    // Prepend empty stomach meal so it's editable
+    const esMeal = buildEmptyStomachMeal();
+    if (esMeal) {
+      clone.meals = [JSON.parse(JSON.stringify(esMeal)), ...clone.meals];
+    }
     setEditPlan(clone);
     setEditingDay(day);
   };
@@ -339,7 +636,7 @@ export default function NutritionPlanPage() {
     setEditPlan(null);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!plan || !editPlan || !editingDay) return;
 
     // Archive current version
@@ -356,13 +653,38 @@ export default function NutritionPlanPage() {
       endDate: undefined,
     };
 
-    if (editingDay === 'training') {
-      newVersion.trainingDay = editPlan;
-    } else {
-      newVersion.restDay = editPlan;
+    // Separate the empty stomach meal (first meal) back out
+    // It's always the first meal if we prepended it in startEdit
+    const allMeals = [...editPlan.meals];
+    let updatedEmptyStomach: string[] | undefined = plan.current.emptyStomach;
+    if (plan.current.emptyStomach && plan.current.emptyStomach.length > 0 && allMeals.length > 0) {
+      const esMeal = allMeals.shift()!;
+      // Save both food items and supplements back to the flat emptyStomach array
+      const fromItems = esMeal.items
+        .filter(it => it.name.trim())
+        .map(it => {
+          const amount = it.amount ? ` ${it.amount}` : '';
+          return `${it.name}${amount}`;
+        });
+      const fromSupplements = (esMeal.supplements || [])
+        .filter(s => s.trim());
+      updatedEmptyStomach = [...fromItems, ...fromSupplements];
+      if (updatedEmptyStomach.length === 0) updatedEmptyStomach = undefined;
     }
 
-    persist({
+    // Update stored macros with computed sum (use allMeals which excludes empty stomach)
+    const computed = sumMacros(allMeals);
+    const savedPlan = { ...editPlan, meals: allMeals, macros: computed };
+
+    newVersion.emptyStomach = updatedEmptyStomach;
+
+    if (editingDay === 'training') {
+      newVersion.trainingDay = savedPlan;
+    } else {
+      newVersion.restDay = savedPlan;
+    }
+
+    await persist({
       current: newVersion,
       history: [archivedVersion, ...plan.history],
     });
@@ -381,6 +703,13 @@ export default function NutritionPlanPage() {
 
   if (!plan) return null;
 
+  const emptyStomachMeal = buildEmptyStomachMeal();
+
+  const withEmptyStomach = (dayPlan: DayPlan): DayPlan => {
+    if (!emptyStomachMeal) return dayPlan;
+    return { ...dayPlan, meals: [emptyStomachMeal, ...dayPlan.meals] };
+  };
+
   return (
     <div className="min-h-screen">
       <Navigation />
@@ -388,22 +717,10 @@ export default function NutritionPlanPage() {
         <div className="max-w-5xl mx-auto">
           <h1 className="text-3xl font-bold text-white mb-4">Nutrition</h1>
 
-          {/* Empty stomach section */}
-          {plan.current.emptyStomach && plan.current.emptyStomach.length > 0 && (
-            <div className="glass-card p-5 mb-4">
-              <h3 className="text-sm font-semibold text-white mb-3">Any day, empty stomach</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
-                {plan.current.emptyStomach.map((item, i) => (
-                  <span key={i} className="text-sm text-white/50">· {item}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Training Day */}
           <div className="mb-4">
             <DayPlanView
-              dayPlan={plan.current.trainingDay}
+              dayPlan={withEmptyStomach(plan.current.trainingDay)}
               title="Training Day"
               color="#22c55e"
               editing={editingDay === 'training'}
@@ -418,7 +735,7 @@ export default function NutritionPlanPage() {
           {/* Rest Day */}
           <div className="mb-6">
             <DayPlanView
-              dayPlan={plan.current.restDay}
+              dayPlan={withEmptyStomach(plan.current.restDay)}
               title="Rest Day"
               color="#ef4444"
               editing={editingDay === 'rest'}

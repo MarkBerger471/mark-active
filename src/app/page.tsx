@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Navigation from '@/components/Navigation';
 import Link from 'next/link';
-import { getMeasurements, getSetting, saveSetting } from '@/utils/storage';
-import { Measurement } from '@/types';
+import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
+import { Measurement, TrainingSession, NutritionPlan } from '@/types';
 import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
 
 type Phase = 'bulking' | 'cutting';
@@ -25,6 +25,9 @@ interface SleepDay {
   lowestHr?: number;
   bedtimeStart?: string;
   bedtimeEnd?: string;
+  steps?: number;
+  activeCalories?: number;
+  totalCalories?: number;
 }
 
 function formatDuration(seconds?: number): string {
@@ -68,6 +71,8 @@ export default function Dashboard() {
   const [targetInput, setTargetInput] = useState('');
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
   const [sleepExpanded, setSleepExpanded] = useState(false);
+  const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
+  const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -91,6 +96,8 @@ export default function Dashboard() {
       fetch('/api/oura?days=7').then(r => r.json()).then(d => {
         if (d.data) setSleepData(d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)));
       }).catch(() => {});
+      getTrainingSessions().then(setTrainingSessions);
+      getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
     }
   }, [isAuthenticated]);
 
@@ -167,100 +174,297 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* Sleep Widget */}
-          {sleepData.length > 0 && (() => {
-            const last = sleepData[0];
-            return (
-              <div className="glass-card p-5 mb-8">
-                <button
-                  onClick={() => setSleepExpanded(!sleepExpanded)}
-                  className="w-full flex items-center justify-between text-left"
-                >
-                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                    <span className="text-xl">&#9790;</span> Sleep
-                  </h2>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-white/30">{formatDuration(last.totalSleep)}</span>
-                    <span className={`text-white/20 transition-transform duration-200 ${sleepExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
-                  </div>
-                </button>
+          {/* Sleep + Calorie Balance Row */}
+          <div className="grid grid-cols-2 gap-4 mb-8">
+            {/* Sleep Widget (compact) */}
+            {sleepData.length > 0 && (() => {
+              const last = sleepData[0];
+              return (
+                <div className="glass-card p-5">
+                  <button
+                    onClick={() => setSleepExpanded(!sleepExpanded)}
+                    className="w-full flex items-center justify-between text-left"
+                  >
+                    <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <span className="text-lg">&#9790;</span> Sleep
+                    </h2>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-white/30">{formatDuration(last.totalSleep)}</span>
+                      <span className={`text-white/20 transition-transform duration-200 ${sleepExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                    </div>
+                  </button>
 
-                {/* Compact view: last night */}
-                <div className="flex items-center gap-5 mt-4">
-                  <SleepScoreRing score={last.score} />
-                  <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-1.5">
-                    <div>
-                      <span className="text-[10px] text-white/30 uppercase">Total</span>
-                      <p className="text-sm font-semibold text-white">{formatDuration(last.totalSleep)}</p>
+                  <div className="flex items-center gap-4 mt-3">
+                    <SleepScoreRing score={last.score} />
+                    <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-1">
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase">Total</span>
+                        <p className="text-xs font-semibold text-white">{formatDuration(last.totalSleep)}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase">Deep</span>
+                        <p className="text-xs font-semibold text-indigo-400">{formatDuration(last.deepSleep)}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase">REM</span>
+                        <p className="text-xs font-semibold text-cyan-400">{formatDuration(last.remSleep)}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase">Avg HR</span>
+                        <p className="text-xs font-semibold text-red-400">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase">HRV</span>
+                        <p className="text-xs font-semibold text-green-400">{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase">Efficiency</span>
+                        <p className="text-xs font-semibold text-white/70">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-white/30 uppercase">Deep</span>
-                      <p className="text-sm font-semibold text-indigo-400">{formatDuration(last.deepSleep)}</p>
+                  </div>
+
+                  {last.totalSleep && last.deepSleep && last.remSleep && last.lightSleep && (
+                    <div className="mt-3">
+                      <div className="flex rounded-full overflow-hidden h-2">
+                        <div className="bg-indigo-500" style={{ width: `${(last.deepSleep / last.totalSleep) * 100}%` }} />
+                        <div className="bg-cyan-500" style={{ width: `${(last.remSleep / last.totalSleep) * 100}%` }} />
+                        <div className="bg-blue-300/40" style={{ width: `${(last.lightSleep / last.totalSleep) * 100}%` }} />
+                      </div>
+                      <div className="flex gap-3 mt-1">
+                        <span className="text-[9px] text-indigo-400">Deep {Math.round((last.deepSleep / last.totalSleep) * 100)}%</span>
+                        <span className="text-[9px] text-cyan-400">REM {Math.round((last.remSleep / last.totalSleep) * 100)}%</span>
+                        <span className="text-[9px] text-blue-300/50">Light {Math.round((last.lightSleep / last.totalSleep) * 100)}%</span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-white/30 uppercase">REM</span>
-                      <p className="text-sm font-semibold text-cyan-400">{formatDuration(last.remSleep)}</p>
+                  )}
+
+                  {sleepExpanded && (
+                    <div className="mt-3 pt-3 border-t border-white/5">
+                      <div className="space-y-1.5">
+                        {sleepData.map(d => (
+                          <div key={d.day} className="flex items-center gap-2 text-xs">
+                            <span className="text-white/30 w-14">
+                              {new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+                            </span>
+                            <div className="flex-1 bg-white/5 rounded-full h-1.5 overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${d.score}%`, backgroundColor: d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444' }} />
+                            </div>
+                            <span className="text-white/50 w-6 text-right font-semibold">{d.score}</span>
+                            <span className="text-white/30 w-12 text-right">{formatDuration(d.totalSleep)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-white/30 uppercase">Avg HR</span>
-                      <p className="text-sm font-semibold text-red-400">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Calorie Balance Chart */}
+            {(() => {
+              const bmr = latestMeasurement?.bmr;
+              const bodyWeight = latestMeasurement?.weight || 80;
+              const trainingDayKcal = nutritionPlan?.current.trainingDay.macros.kcal;
+              if (!bmr || !trainingDayKcal || trainingSessions.length === 0) return null;
+
+              // Inline calorie calc (simplified MET-based)
+              const COMPOUND_KW = ['press', 'squat', 'deadlift', 'dead lift', 'lunge', 'row', 'pull down', 'pulldown', 'pull up', 'pullup', 'dip', 'leg press', 'pullover'];
+              const calcCals = (s: TrainingSession) => {
+                if (s.workoutName === 'Cardio') {
+                  let cal = 0;
+                  for (const ex of s.exercises) {
+                    if (ex.skipped) continue;
+                    const lower = ex.name.toLowerCase();
+                    const met = lower.includes('stair') ? 9 : lower.includes('run') ? 8 : lower.includes('row') ? 7 : lower.includes('cycling') || lower.includes('bike') ? 6.5 : lower.includes('walk') ? 3.8 : 6.5;
+                    const mMatch = ex.targetReps.match(/(\d+)\s*min/i);
+                    const mins = mMatch ? parseInt(mMatch[1]) : 30;
+                    cal += met * bodyWeight * (mins / 60);
+                  }
+                  return Math.round(cal || 6.5 * bodyWeight * 0.5);
+                }
+                let totalSets = 0, compSets = 0, isoSets = 0;
+                for (const ex of s.exercises) {
+                  if (ex.skipped) continue;
+                  const hasDone = ex.sets.some(st => st.done);
+                  const isComp = COMPOUND_KW.some(kw => ex.name.toLowerCase().includes(kw));
+                  for (const set of ex.sets) {
+                    if (hasDone && !set.done) continue;
+                    totalSets++; if (isComp) compSets++; else isoSets++;
+                  }
+                }
+                if (totalSets === 0) return 0;
+                const avgMET = (compSets * 6 + isoSets * 3.5) / totalSets;
+                const exCount = s.exercises.filter(e => !e.skipped).length;
+                const mins = (s.durationMinutes && s.durationMinutes > 5) ? s.durationMinutes : totalSets * 3.2 + exCount * 3;
+                let cal = avgMET * bodyWeight * (mins * 0.3 / 60) + 1.5 * bodyWeight * (mins * 0.7 / 60);
+                return Math.round(cal * 1.15);
+              };
+
+              // Get current week sessions
+              const today = new Date();
+              const dayOfWeek = today.getDay();
+              const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+              const monday = new Date(today);
+              monday.setDate(today.getDate() + mondayOffset);
+              const mondayStr = monday.toISOString().split('T')[0];
+              const weekSessions = trainingSessions.filter(s => s.date >= mondayStr);
+              const weekTrainingCals = weekSessions.reduce((sum, s) => sum + calcCals(s), 0);
+              const daysInWeek = Math.max(1, Math.min(7, Math.floor((today.getTime() - monday.getTime()) / 86400000) + 1));
+              const dailyBurn = bmr + Math.round(weekTrainingCals / daysInWeek);
+
+              // Calculate Sunday cheat meal adjustment
+              // Last meal replaced with 1300 kcal cheat on Sunday
+              // Meal 5: egg white 150g(78) + egg 2×60g(186) + rye bread 200g(530) + whey 25g(100) ≈ 894 kcal
+              const KCAL_PER_100G: Record<string, number> = {
+                'egg white': 52, 'egg': 155, 'whey': 400, 'bread': 265, 'rye bread': 265,
+                'whole rye bread': 265, 'chicken': 165, 'fish': 120, 'beef': 250, 'rice': 130,
+                'greek yogurt': 59, 'oatmeal': 389, 'cheese': 403, 'feta': 264, 'cottage cheese': 98,
+                'cream of rice': 370, 'olive oil': 884, 'nuts': 607, 'berries': 57, 'banana': 89,
+              };
+              const PIECE_G: Record<string, number> = { 'egg': 60, 'banana': 120 };
+              const meals = nutritionPlan?.current.trainingDay.meals || [];
+              let lastMealKcal = 0;
+              if (meals.length > 0) {
+                const lastMeal = meals[meals.length - 1];
+                for (const item of lastMeal.items) {
+                  const name = (item.name || '').toLowerCase().trim();
+                  const amount = item.amount || '';
+                  // Find kcal/100g
+                  let per100 = 0;
+                  for (const [key, val] of Object.entries(KCAL_PER_100G)) {
+                    if (name.includes(key) || key.includes(name)) { per100 = val; break; }
+                  }
+                  if (per100 === 0) continue;
+                  // Parse grams
+                  const gMatch = amount.match(/([\d.]+)\s*(?:gr?|ml)/i);
+                  const bare = amount.match(/^([\d.]+)$/);
+                  let grams = 0;
+                  if (gMatch) { grams = parseFloat(gMatch[1]); }
+                  else if (bare) {
+                    const pw = Object.entries(PIECE_G).find(([k]) => name.includes(k));
+                    grams = pw ? parseFloat(bare[1]) * pw[1] : parseFloat(bare[1]);
+                  }
+                  lastMealKcal += Math.round(per100 * grams / 100);
+                }
+              }
+              if (lastMealKcal === 0 && meals.length > 0) lastMealKcal = Math.round(trainingDayKcal / meals.length);
+              const cheatMealKcal = 1300;
+              const sundayDiff = cheatMealKcal - lastMealKcal;
+              // Weekly: 6 normal days + 1 Sunday with cheat
+              const weeklyIntake = trainingDayKcal * 7 + sundayDiff;
+              const intake = Math.round(weeklyIntake / 7);
+              const ratio = intake / dailyBurn;
+              const targetRatio = phase === 'bulking' ? 1.15 : 0.85; // +15% or -15%
+              const diff = ratio - targetRatio;
+              const absDiff = Math.abs(diff);
+
+              // Green: within ±2% of target, Yellow: ±2-5%, Red: beyond ±5%
+              const zoneColor = absDiff <= 0.02 ? '#22c55e' : absDiff <= 0.05 ? '#f59e0b' : '#ef4444';
+              const zoneLabel = absDiff <= 0.02 ? 'On Target' : absDiff <= 0.05 ? 'Slightly Off' : 'Off Target';
+              const surplusDeficit = intake - dailyBurn;
+              const surplusPct = Math.round((ratio - 1) * 100);
+
+              // Bar heights (normalized)
+              const maxVal = Math.max(intake, dailyBurn);
+              const burnPct = (dailyBurn / maxVal) * 100;
+              const intakePct = (intake / maxVal) * 100;
+
+              // Gauge: centered on target midpoint
+              const targetMid = phase === 'bulking' ? 15 : -15;
+              const targetIntake = Math.round(dailyBurn * (1 + targetMid / 100));
+              const distFromTarget = surplusPct - targetMid;
+              // Wider range so large deviations show clearly
+              const gaugeMin = -20, gaugeMax = 20;
+              const clampedDist = Math.max(gaugeMin, Math.min(gaugeMax, distFromTarget));
+              const gaugeAngle = ((clampedDist - gaugeMin) / (gaugeMax - gaugeMin)) * 270;
+              const gaugeRadius = 40;
+              const gaugeCirc = 2 * Math.PI * gaugeRadius;
+              const gaugeArc = (270 / 360) * gaugeCirc;
+              const gaugeOffset = gaugeArc - (gaugeAngle / 270) * gaugeArc;
+
+              // Green zone: ±2% from target center (mapped to gauge range)
+              const greenLow = -2, greenHigh = 2;
+              const greenStartAngle = ((greenLow - gaugeMin) / (gaugeMax - gaugeMin)) * 270;
+              const greenEndAngle = ((greenHigh - gaugeMin) / (gaugeMax - gaugeMin)) * 270;
+              const greenArcLen = ((greenEndAngle - greenStartAngle) / 360) * gaugeCirc;
+
+              // Bar chart dimensions
+              const barH = 80;
+              const calMax = Math.max(intake, dailyBurn, targetIntake) * 1.05;
+              const burnH = (dailyBurn / calMax) * barH;
+              const intakeH = (intake / calMax) * barH;
+              const targetH = (targetIntake / calMax) * barH;
+
+              return (
+                <div className="glass-card p-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <h2 className="text-sm font-semibold text-white">Calorie Balance</h2>
+                    <span className={`text-[10px] font-bold uppercase ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>{phase}</span>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    {/* Gauge */}
+                    <div className="relative w-28 h-28 shrink-0">
+                      <svg className="w-28 h-28" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
+                        {/* Background arc */}
+                        <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="8"
+                          strokeDasharray={`${gaugeArc} ${gaugeCirc}`} strokeLinecap="round" />
+                        {/* Green target zone (±2% from target) */}
+                        <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="#22c55e" strokeOpacity="0.25" strokeWidth="8"
+                          strokeDasharray={`${greenArcLen} ${gaugeCirc - greenArcLen}`}
+                          strokeDashoffset={-((greenStartAngle / 360) * gaugeCirc)} />
+                        {/* Value arc */}
+                        <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke={zoneColor} strokeWidth="8"
+                          strokeDasharray={`${gaugeArc} ${gaugeCirc}`} strokeDashoffset={gaugeOffset}
+                          strokeLinecap="round" className="transition-all duration-700" />
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-lg font-bold" style={{ color: zoneColor }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
+                        <span className="text-[7px] text-white/30">target {targetMid > 0 ? '+' : ''}{targetMid}%</span>
+                        <span className="text-[8px] uppercase" style={{ color: zoneColor }}>{zoneLabel}</span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-white/30 uppercase">HRV</span>
-                      <p className="text-sm font-semibold text-green-400">{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
+
+                    {/* Bar chart */}
+                    <div className="flex-1">
+                      <svg viewBox={`0 0 140 ${barH + 34}`} className="w-full">
+                        {/* Target line */}
+                        {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; return (<>
+                        <line x1="10" y1={14 + barH - targetH} x2="100" y2={14 + barH - targetH} stroke={tColor} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
+                        <text x="102" y={14 + barH - targetH + 3} textAnchor="start" fill={tColor} fontSize="8" fontWeight="bold">{targetIntake}</text>
+                        </>); })()}
+                        {/* Burn bar */}
+                        <rect x="15" y={14 + barH - burnH} width="35" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
+                        <text x="32" y={14 + barH - burnH - 4} textAnchor="middle" fill="white" fontSize="9" fontWeight="bold">{dailyBurn}</text>
+                        <text x="32" y={14 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.35" fontSize="8">Burn</text>
+                        {/* Intake bar */}
+                        <rect x="55" y={14 + barH - intakeH} width="35" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
+                        <text x="72" y={14 + barH - intakeH - 4} textAnchor="middle" fill="white" fontSize="9" fontWeight="bold">{intake}</text>
+                        <text x="72" y={14 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.35" fontSize="8">Intake</text>
+                      </svg>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-white/30 uppercase">Efficiency</span>
-                      <p className="text-sm font-semibold text-white/70">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
-                    </div>
+                  </div>
+
+                  {/* Status line */}
+                  <div className="text-center mt-2">
+                    <p className="text-[11px] text-white/40">
+                      {intake - targetIntake > 0 ? '+' : ''}{intake - targetIntake} kcal vs target
+                      <span className="text-white/25 ml-2">({phase === 'bulking' ? '+10% to +20%' : '-20% to -10%'})</span>
+                    </p>
+                  </div>
+
+                  {/* Details */}
+                  <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5 text-[10px] text-white/30">
+                    <div>BMR {bmr}</div>
+                    <div>Training +{Math.round(weekTrainingCals / daysInWeek)}/day</div>
+                    <div>{weekSessions.length} sessions/week</div>
+                    <div>{phase}</div>
                   </div>
                 </div>
-
-                {/* Sleep stage bar */}
-                {last.totalSleep && last.deepSleep && last.remSleep && last.lightSleep && (
-                  <div className="mt-4">
-                    <div className="flex rounded-full overflow-hidden h-2.5">
-                      <div className="bg-indigo-500" style={{ width: `${(last.deepSleep / last.totalSleep) * 100}%` }} title="Deep" />
-                      <div className="bg-cyan-500" style={{ width: `${(last.remSleep / last.totalSleep) * 100}%` }} title="REM" />
-                      <div className="bg-blue-300/40" style={{ width: `${(last.lightSleep / last.totalSleep) * 100}%` }} title="Light" />
-                    </div>
-                    <div className="flex gap-4 mt-1.5">
-                      <span className="text-[10px] text-indigo-400">Deep {Math.round((last.deepSleep / last.totalSleep) * 100)}%</span>
-                      <span className="text-[10px] text-cyan-400">REM {Math.round((last.remSleep / last.totalSleep) * 100)}%</span>
-                      <span className="text-[10px] text-blue-300/50">Light {Math.round((last.lightSleep / last.totalSleep) * 100)}%</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Expanded: 7-day history */}
-                {sleepExpanded && (
-                  <div className="mt-4 pt-4 border-t border-white/5">
-                    <h3 className="text-xs text-white/30 uppercase tracking-wider mb-3">Last 7 days</h3>
-                    <div className="space-y-2">
-                      {sleepData.map(d => (
-                        <div key={d.day} className="flex items-center gap-3 text-sm">
-                          <span className="text-white/30 w-16 text-xs">
-                            {new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
-                          </span>
-                          <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all"
-                              style={{
-                                width: `${d.score}%`,
-                                backgroundColor: d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444',
-                              }}
-                            />
-                          </div>
-                          <span className="text-white/50 w-8 text-right text-xs font-semibold">{d.score}</span>
-                          <span className="text-white/30 w-14 text-right text-xs">{formatDuration(d.totalSleep)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+              );
+            })()}
+          </div>
 
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {

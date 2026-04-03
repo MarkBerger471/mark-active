@@ -248,13 +248,34 @@ export async function getTrainingSessions(): Promise<TrainingSession[]> {
 }
 
 export async function saveTrainingSession(session: TrainingSession) {
-  // Check existing in IDB to preserve savedAt
   const allLocal = await idbGetSessions();
   const existing = allLocal.find(s => s.id === session.id);
+  const now = new Date().toISOString();
+  const today = now.split('T')[0];
+
   if (existing) {
-    session.savedAt = existing.savedAt || session.savedAt || new Date().toISOString();
+    // Preserve startedAt (first save time)
+    session.startedAt = existing.startedAt || existing.savedAt || now;
+
+    if (session.date < today && existing.durationMinutes != null) {
+      // Past day + already frozen — preserve both
+      session.savedAt = existing.savedAt;
+      session.durationMinutes = existing.durationMinutes;
+    } else if (session.date < today) {
+      // Past day + not yet frozen — freeze now
+      session.savedAt = existing.savedAt || now;
+      const dur = Math.round((new Date(session.savedAt).getTime() - new Date(session.startedAt).getTime()) / 60000);
+      session.durationMinutes = Math.max(dur, 0);
+    } else {
+      // Same day — update savedAt and live duration
+      session.savedAt = now;
+      const dur = Math.round((new Date(now).getTime() - new Date(session.startedAt).getTime()) / 60000);
+      session.durationMinutes = Math.max(dur, 0);
+    }
   } else {
-    session.savedAt = session.savedAt || new Date().toISOString();
+    session.startedAt = session.startedAt || now;
+    session.savedAt = now;
+    session.durationMinutes = 0;
   }
 
   await idbPutSession(session);

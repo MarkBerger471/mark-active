@@ -8,6 +8,8 @@ export interface Measurement {
   weight: number;
   bodyFat?: number;
   muscleMass?: number;
+  bmr?: number;           // Basal Metabolic Rate (kcal)
+  recommendedCalories?: number; // Recommended Calorie Intake (kcal)
   energy?: string;
   hunger?: string;
   tiredness?: string;
@@ -52,6 +54,7 @@ export interface TrainingExercise {
   sets: TrainingSet[];
   notes?: string;
   skipped?: boolean;
+  calories?: number; // manually entered calories (e.g. from cardio machine display)
 }
 
 export interface Workout {
@@ -63,6 +66,8 @@ export interface TrainingSession {
   id: string;
   date: string;
   savedAt?: string; // ISO timestamp
+  startedAt?: string; // ISO timestamp — first save time
+  durationMinutes?: number; // frozen after the session day
   workoutName: string;
   exercises: TrainingExercise[];
 }
@@ -88,6 +93,10 @@ export interface MealLegacy {
 export interface FoodItem {
   name: string;        // "Greek yogurt", "Whey"
   amount?: string;     // "250 gr", "25 gr", "2", "30 min"
+  kcal?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
 }
 
 export interface NutritionMeal {

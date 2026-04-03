@@ -19,10 +19,11 @@ export async function GET(request: Request) {
   const headers = { Authorization: `Bearer ${OURA_TOKEN}` };
 
   try {
-    const [dailyRes, detailRes, readinessRes] = await Promise.all([
+    const [dailyRes, detailRes, readinessRes, activityRes] = await Promise.all([
       fetch(`${OURA_BASE}/daily_sleep?start_date=${startDate}&end_date=${endDate}`, { headers }),
       fetch(`${OURA_BASE}/sleep?start_date=${startDate}&end_date=${endDate}`, { headers }),
       fetch(`${OURA_BASE}/daily_readiness?start_date=${startDate}&end_date=${endDate}`, { headers }),
+      fetch(`${OURA_BASE}/daily_activity?start_date=${startDate}&end_date=${endDate}`, { headers }),
     ]);
 
     if (!dailyRes.ok || !detailRes.ok) {
@@ -32,11 +33,22 @@ export async function GET(request: Request) {
     const daily = await dailyRes.json();
     const detail = await detailRes.json();
     const readiness = readinessRes.ok ? await readinessRes.json() : { data: [] };
+    const activity = activityRes.ok ? await activityRes.json() : { data: [] };
 
     // Build readiness lookup by day
     const readinessMap: Record<string, number> = {};
     for (const r of readiness.data) {
       readinessMap[r.day] = r.score;
+    }
+
+    // Build activity lookup by day
+    const activityMap: Record<string, { steps: number; activeCalories: number; totalCalories: number }> = {};
+    for (const a of activity.data) {
+      activityMap[a.day] = {
+        steps: a.steps || 0,
+        activeCalories: a.active_calories || 0,
+        totalCalories: a.total_calories || 0,
+      };
     }
 
     // Combine daily scores with detailed sleep data
@@ -62,10 +74,19 @@ export async function GET(request: Request) {
         bedtimeStart: details?.bedtime_start,
         bedtimeEnd: details?.bedtime_end,
         readinessScore: readinessMap[d.day] ?? null,
+        steps: activityMap[d.day]?.steps ?? null,
+        activeCalories: activityMap[d.day]?.activeCalories ?? null,
+        totalCalories: activityMap[d.day]?.totalCalories ?? null,
       };
     });
 
-    return NextResponse.json({ data: sleepData });
+    // Also return activity-only days not in sleep data
+    const sleepDays = new Set(sleepData.map((d: { day: string }) => d.day));
+    const activityOnly = Object.entries(activityMap)
+      .filter(([day]) => !sleepDays.has(day))
+      .map(([day, a]) => ({ day, steps: a.steps, activeCalories: a.activeCalories, totalCalories: a.totalCalories }));
+
+    return NextResponse.json({ data: sleepData, activity: activityOnly });
   } catch (e) {
     console.error('Oura API error:', e);
     return NextResponse.json({ error: 'Failed to fetch sleep data' }, { status: 500 });

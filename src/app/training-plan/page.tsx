@@ -5,8 +5,147 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Navigation from '@/components/Navigation';
 import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, getMeasurements } from '@/utils/storage';
-import { Workout, TrainingExercise, TrainingSession, TrainingSet } from '@/types';
+import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
+
+// MET values for cardio activities (HR 120-130 range)
+const CARDIO_METS: Record<string, number> = {
+  'stairmaster': 9.0,
+  'stair': 9.0,
+  'running': 8.0,
+  'run': 8.0,
+  'jogging': 7.0,
+  'jog': 7.0,
+  'rowing': 7.0,
+  'row': 7.0,
+  'elliptical': 5.0,
+  'cycling': 6.5,
+  'bike': 6.5,
+  'swimming': 7.0,
+  'walking': 3.8,
+  'walk': 3.8,
+  'incline walk': 5.5,
+  'hiit': 10.0,
+  'jump rope': 10.0,
+  'cardio': 6.5, // generic fallback
+};
+
+// MET values for resistance exercises by category
+// Compound multi-joint = higher MET, isolation single-joint = lower
+const COMPOUND_KEYWORDS = [
+  'press', 'squat', 'deadlift', 'dead lift', 'lunge', 'row', 'pull down',
+  'pulldown', 'pull up', 'pullup', 'dip', 'leg press', 'clean', 'snatch',
+  'thrust', 'pullover',
+];
+
+function getExerciseMET(name: string): number {
+  const lower = name.toLowerCase();
+  // Compound movements: MET ~6
+  if (COMPOUND_KEYWORDS.some(kw => lower.includes(kw))) return 6.0;
+  // Isolation movements: MET ~3.5
+  return 3.5;
+}
+
+function getCardioMET(name: string): number {
+  const lower = name.toLowerCase();
+  for (const [key, met] of Object.entries(CARDIO_METS)) {
+    if (lower.includes(key)) return met;
+  }
+  return 6.5; // default moderate cardio
+}
+
+function parseDurationMinutes(targetReps: string): number {
+  // Parse "30 min", "45min", "1h", "1h 30min", "60 min" etc.
+  const hMatch = targetReps.match(/(\d+)\s*h/i);
+  const mMatch = targetReps.match(/(\d+)\s*min/i);
+  let mins = 0;
+  if (hMatch) mins += parseInt(hMatch[1]) * 60;
+  if (mMatch) mins += parseInt(mMatch[1]);
+  if (mins > 0) return mins;
+  // Try bare number — assume minutes
+  const bare = targetReps.match(/(\d+)/);
+  if (bare) return parseInt(bare[1]);
+  return 30; // default
+}
+
+// Calories = MET × bodyWeight (kg) × duration (hours)
+function calcSessionCalories(session: TrainingSession, bodyWeight: number): number {
+  if (session.workoutName === 'Cardio') {
+    let totalCals = 0;
+    for (const ex of session.exercises) {
+      if (ex.skipped) continue;
+      if (ex.calories && ex.calories > 0) {
+        // Use manually entered calories from machine
+        totalCals += ex.calories;
+      } else {
+        // Fallback: MET-based estimate
+        const met = getCardioMET(ex.name);
+        const mins = parseDurationMinutes(ex.targetReps);
+        totalCals += met * bodyWeight * (mins / 60);
+      }
+    }
+    return Math.round(totalCals || 6.5 * bodyWeight * 0.5);
+  }
+
+  // Weight training: use actual session duration if available
+  const duration = session.durationMinutes;
+
+  // Count sets to determine work vs rest split
+  let totalSets = 0;
+  let compoundSets = 0;
+  let isolationSets = 0;
+  for (const ex of session.exercises) {
+    if (ex.skipped) continue;
+    const hasDone = ex.sets.some(s => s.done);
+    const isCompound = COMPOUND_KEYWORDS.some(kw => ex.name.toLowerCase().includes(kw));
+    for (const set of ex.sets) {
+      if (hasDone && !set.done) continue;
+      totalSets++;
+      if (isCompound) compoundSets++; else isolationSets++;
+    }
+  }
+
+  if (totalSets === 0) return 0;
+
+  // Weighted average MET based on compound/isolation ratio
+  const avgMET = totalSets > 0
+    ? (compoundSets * 6.0 + isolationSets * 3.5) / totalSets
+    : 4.5;
+
+  // Use actual duration, or estimate from sets (~3.2 min per set + ~3 min per exercise transition)
+  const exerciseCount = session.exercises.filter(e => !e.skipped).length;
+  const sessionMins = (duration && duration > 5) ? duration : totalSets * 3.2 + exerciseCount * 3;
+
+  // Work time is ~30% of session, rest/transition ~70%
+  const workMins = sessionMins * 0.3;
+  const restMins = sessionMins * 0.7;
+
+  let totalCals = 0;
+  totalCals += avgMET * bodyWeight * (workMins / 60);    // work phase
+  totalCals += 1.5 * bodyWeight * (restMins / 60);       // rest phase (elevated)
+
+  // +15% EPOC
+  totalCals *= 1.15;
+
+  return Math.round(totalCals);
+}
+
+function getWeekKey(dateStr: string): string {
+  const d = new Date(dateStr);
+  // Get Monday of the week
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().split('T')[0];
+}
+
+function getWeekLabel(weekKey: string): string {
+  const monday = new Date(weekKey + 'T00:00:00');
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return `${fmt(monday)} – ${fmt(sunday)}`;
+}
 
 const workoutImages: Record<string, string> = {
   'Shoulders + Abs': '/muscles/shoulders.png',
@@ -32,6 +171,9 @@ export default function TrainingPlanPage() {
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [lastSessions, setLastSessions] = useState<Record<string, TrainingSession>>({});
   const [measurementDates, setMeasurementDates] = useState<string[]>([]);
+  const [latestBmr, setLatestBmr] = useState<number>(0);
+  const [latestWeight, setLatestWeight] = useState<number>(80);
+  const [dailyActivity, setDailyActivity] = useState<Record<string, { steps: number; activeCalories: number }>>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const exercisesRef = useRef(exercises);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -99,7 +241,25 @@ export default function TrainingPlanPage() {
   useEffect(() => {
     if (isAuthenticated) {
       getTrainingSessions().then(setSessions);
-      getMeasurements().then(ms => setMeasurementDates(ms.map(m => m.date)));
+      getMeasurements().then(ms => {
+        setMeasurementDates(ms.map(m => m.date));
+        if (ms.length > 0) {
+          setLatestWeight(ms[ms.length - 1].weight);
+        }
+        for (let i = ms.length - 1; i >= 0; i--) {
+          if (ms[i].bmr) { setLatestBmr(ms[i].bmr!); break; }
+        }
+      });
+      // Fetch activity data from Oura (last 60 days)
+      fetch('/api/oura?days=60').then(r => r.json()).then(d => {
+        const act: Record<string, { steps: number; activeCalories: number }> = {};
+        const addDay = (day: string, steps?: number, activeCal?: number) => {
+          if (steps || activeCal) act[day] = { steps: steps || 0, activeCalories: activeCal || 0 };
+        };
+        if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
+        if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
+        setDailyActivity(act);
+      }).catch(() => {});
       // Load last session for each workout
       Promise.all(workouts.map(async w => {
         const last = await getLastSessionForWorkout(w.name);
@@ -336,6 +496,65 @@ export default function TrainingPlanPage() {
               })}
             </div>
 
+            {/* Weekly Calorie Averages */}
+            {latestBmr > 0 && sessions.length > 0 && (() => {
+              const sessionTs = (s: TrainingSession) => s.savedAt || s.date + 'T23:59:59.999Z';
+              const allSorted = [...sessions].sort((a, b) => sessionTs(b).localeCompare(sessionTs(a)));
+
+              const weekMap = new Map<string, TrainingSession[]>();
+              for (const s of allSorted) {
+                const wk = getWeekKey(s.date);
+                if (!weekMap.has(wk)) weekMap.set(wk, []);
+                weekMap.get(wk)!.push(s);
+              }
+
+              const weeks = [...weekMap.entries()]
+                .sort((a, b) => b[0].localeCompare(a[0]))
+                .slice(0, 8);
+
+              return (
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-white/60 mb-3">Weekly TDEE</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {weeks.map(([weekKey, weekSessions]) => {
+                      const trainingCals = weekSessions.reduce((sum, s) => sum + calcSessionCalories(s, latestWeight), 0);
+                      const dailyTrainingAvg = Math.round(trainingCals / 7);
+
+                      // NEAT from Oura activeCalories (ring off during gym = no overlap)
+                      const monday = new Date(weekKey + 'T00:00:00');
+                      let totalActiveCals = 0, actDays = 0;
+                      for (let i = 0; i < 7; i++) {
+                        const d = new Date(monday);
+                        d.setDate(d.getDate() + i);
+                        const dayStr = d.toISOString().split('T')[0];
+                        const act = dailyActivity[dayStr];
+                        if (act && act.activeCalories > 0) { totalActiveCals += act.activeCalories; actDays++; }
+                      }
+                      const dailyNeat = actDays > 0 ? Math.round(totalActiveCals / actDays) : 0;
+
+                      const dailyTotal = latestBmr + dailyTrainingAvg + dailyNeat;
+                      const isCurrentWeek = weekKey === getWeekKey(new Date().toISOString().split('T')[0]);
+                      return (
+                        <div key={weekKey} className={`glass-card p-4 ${isCurrentWeek ? 'border border-green-500/30' : ''}`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs text-white/40">{getWeekLabel(weekKey)}</span>
+                            {isCurrentWeek && <span className="text-[10px] text-green-400 uppercase">Current</span>}
+                          </div>
+                          <div className="text-xl font-bold text-white">{dailyTotal} <span className="text-xs text-white/30 font-normal">kcal/day</span></div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px] text-white/30">
+                            <span>BMR {latestBmr}</span>
+                            <span>Training +{dailyTrainingAvg}</span>
+                            {dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}
+                            <span>{weekSessions.length} sessions</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Recent sessions */}
             {sessions.length > 0 && (
               <div>
@@ -345,6 +564,9 @@ export default function TrainingPlanPage() {
                     const sessionTs = (s: TrainingSession) => s.savedAt || s.date + 'T23:59:59.999Z';
                     const sorted = [...sessions].sort((a, b) => sessionTs(b).localeCompare(sessionTs(a))).slice(0, 20);
                     const elements: React.ReactNode[] = [];
+
+                    // Only show measurement dividers within the range of recorded sessions
+                    const oldestSessionDate = sorted.length > 0 ? sorted[sorted.length - 1].date : '';
 
                     const renderMeasurementDivider = (md: string) => (
                       <div key={`divider-${md}`} className="flex items-center gap-3 py-1">
@@ -378,6 +600,24 @@ export default function TrainingPlanPage() {
                             </span>
                             <span className="text-xs text-white/20 ml-2">
                               {doneExercises.length}/{s.exercises.length}
+                            </span>
+                            {(() => {
+                              if (s.durationMinutes != null && s.durationMinutes > 0) {
+                                return <span className="text-xs text-blue-400/70 ml-2">{s.durationMinutes} min</span>;
+                              }
+                              if (s.workoutName === 'Cardio') {
+                                // Parse duration from exercise targetReps
+                                const mins = doneExercises.reduce((t, ex) => t + parseDurationMinutes(ex.targetReps), 0);
+                                if (mins > 0) return <span className="text-xs text-blue-400/50 ml-2">{mins} min</span>;
+                              } else {
+                                const sets = doneExercises.reduce((n, ex) => n + ex.sets.length, 0);
+                                const exCount = doneExercises.length;
+                                if (sets > 0) return <span className="text-xs text-blue-400/40 ml-2">~{Math.round(sets * 3.2 + exCount * 3)} min</span>;
+                              }
+                              return null;
+                            })()}
+                            <span className="text-xs text-orange-400/80 ml-2">
+                              {calcSessionCalories(s, latestWeight)} kcal
                             </span>
                           </div>
                           <div className="flex gap-2 ml-2 shrink-0">
@@ -470,13 +710,11 @@ export default function TrainingPlanPage() {
                       </div>
                     );
 
-                    // Show measurement lines below this session if they belong here
-                    // A measurement for date X goes below the last session on date X (or the first session after date X)
+                    // Show measurement dividers between sessions (only within session date range)
                     const nextSessionDate = sIdx < sorted.length - 1 ? sorted[sIdx + 1].date : '';
-                    // Only insert measurements here if the next session is from an earlier date
                     if (nextSessionDate !== s.date) {
                       const between = measurementDates
-                        .filter(md => md <= s.date && md > nextSessionDate)
+                        .filter(md => md <= s.date && md > nextSessionDate && md >= oldestSessionDate)
                         .sort((a, b) => b.localeCompare(a));
                       for (const md of between) elements.push(renderMeasurementDivider(md));
                     }
@@ -484,6 +722,7 @@ export default function TrainingPlanPage() {
                     return elements;
                   })()}
                 </div>
+
               </div>
             )}
           </div>
@@ -511,6 +750,15 @@ export default function TrainingPlanPage() {
       updated[0] = { ...updated[0], targetReps: `${mins} min` };
       return updated;
     });
+  };
+
+  const updateCardioCalories = (cals: number | undefined) => {
+    setExercises(prev => {
+      const updated = [...prev];
+      updated[0] = { ...updated[0], calories: cals };
+      return updated;
+    });
+    triggerAutoSave();
   };
 
   const getCardioDuration = (): number => {
@@ -567,6 +815,19 @@ export default function TrainingPlanPage() {
               <div>
                 <label className="text-[10px] text-white/25 uppercase tracking-widest mb-2 block">Target Heart Rate</label>
                 <p className="text-xl text-white font-semibold">120–130 <span className="text-sm text-white/40 font-normal">bpm</span></p>
+              </div>
+
+              {/* Calories from machine */}
+              <div>
+                <label className="text-[10px] text-white/25 uppercase tracking-widest mb-2 block">Calories (from machine)</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={exercises[0]?.calories || ''}
+                  onChange={e => updateCardioCalories(e.target.value ? parseInt(e.target.value) : undefined)}
+                  placeholder="Optional — enter machine reading"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-lg placeholder:text-white/20 focus:outline-none focus:border-va-red/50"
+                />
               </div>
 
               {/* Done toggle */}
