@@ -277,28 +277,21 @@ export default function Dashboard() {
               const trainingDayKcal = nutritionPlan?.current.trainingDay.macros.kcal;
               if (!bmr || !trainingDayKcal || trainingSessions.length === 0) return null;
 
-              // Exact same logic as training page getWeekKey + TDEE calc
-              const getWk = (dateStr: string) => {
-                const dd = new Date(dateStr);
-                const day = dd.getDay();
-                const diff = dd.getDate() - day + (day === 0 ? -6 : 1);
-                const mon = new Date(dd.setDate(diff));
-                return mon.toISOString().split('T')[0];
-              };
+              // Rolling 7-day TDEE (same as training page)
               const now = new Date();
               const todayStr = now.toISOString().split('T')[0];
-              const currentWeekKey = getWk(todayStr);
-              const wkMonday = new Date(currentWeekKey + 'T00:00:00');
-              const daysInWeek = Math.max(1, Math.min(7, Math.floor((now.getTime() - wkMonday.getTime()) / 86400000) + 1));
+              const rollingStart = new Date(now);
+              rollingStart.setDate(rollingStart.getDate() - 6);
+              const rollingStartStr = rollingStart.toISOString().split('T')[0];
 
-              const weekSessions = trainingSessions.filter(s => getWk(s.date) === currentWeekKey);
+              const weekSessions = trainingSessions.filter(s => s.date >= rollingStartStr && s.date <= todayStr);
               const weekTrainingCals = weekSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
-              const dailyTrainingAvg = Math.round(weekTrainingCals / daysInWeek);
+              const dailyTrainingAvg = Math.round(weekTrainingCals / 7);
 
               // NEAT from Oura activeCalories
               let totalActiveCals = 0, actDays = 0;
-              for (let i = 0; i < daysInWeek; i++) {
-                const d = new Date(wkMonday);
+              for (let i = 0; i < 7; i++) {
+                const d = new Date(rollingStart);
                 d.setDate(d.getDate() + i);
                 const dayStr = d.toISOString().split('T')[0];
                 const act = dailyActivity[dayStr];
@@ -451,7 +444,7 @@ export default function Dashboard() {
                   {/* Details */}
                   <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5 text-[10px] text-white/30">
                     <div>BMR {bmr}</div>
-                    <div>Training +{Math.round(weekTrainingCals / daysInWeek)}</div>
+                    <div>Training +{dailyTrainingAvg}</div>
                     {dailyNeat > 0 && <div>NEAT +{dailyNeat}</div>}
                     <div>{weekSessions.length} sessions</div>
                   </div>

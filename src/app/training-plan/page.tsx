@@ -500,63 +500,80 @@ export default function TrainingPlanPage() {
 
             {/* Weekly Calorie Averages */}
             {latestBmr > 0 && sessions.length > 0 && (() => {
-              const sessionTs = (s: TrainingSession) => s.savedAt || s.date + 'T23:59:59.999Z';
-              const allSorted = [...sessions].sort((a, b) => sessionTs(b).localeCompare(sessionTs(a)));
+              const now = new Date();
+              const todayStr = now.toISOString().split('T')[0];
 
-              const weekMap = new Map<string, TrainingSession[]>();
-              for (const s of allSorted) {
-                const wk = getWeekKey(s.date);
-                if (!weekMap.has(wk)) weekMap.set(wk, []);
-                weekMap.get(wk)!.push(s);
+              // Current week: rolling 7-day window (today - 6 days through today)
+              const rollingStart = new Date(now);
+              rollingStart.setDate(rollingStart.getDate() - 6);
+              const rollingStartStr = rollingStart.toISOString().split('T')[0];
+
+              const rollingSessions = sessions.filter(s => s.date >= rollingStartStr && s.date <= todayStr);
+              const rollingTrainingCals = rollingSessions.reduce((sum, s) => sum + calcSessionCalories(s, latestWeight), 0);
+              const rollingDailyTraining = Math.round(rollingTrainingCals / 7);
+
+              let rollingActiveCals = 0, rollingActDays = 0;
+              for (let i = 0; i < 7; i++) {
+                const d = new Date(rollingStart);
+                d.setDate(d.getDate() + i);
+                const dayStr = d.toISOString().split('T')[0];
+                const act = dailyActivity[dayStr];
+                if (act && act.activeCalories > 0) { rollingActiveCals += act.activeCalories; rollingActDays++; }
               }
+              const rollingNeat = rollingActDays > 0 ? Math.round(rollingActiveCals / rollingActDays) : 0;
+              const rollingTotal = latestBmr + rollingDailyTraining + rollingNeat;
 
-              const weeks = [...weekMap.entries()]
-                .sort((a, b) => b[0].localeCompare(a[0]))
-                .slice(0, 8);
+              const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+              const rollingLabel = `${fmt(rollingStart)} – ${fmt(now)}`;
+
+              // Previous week: last completed Monday–Sunday
+              const prevMonday = new Date(getWeekKey(todayStr) + 'T00:00:00');
+              prevMonday.setDate(prevMonday.getDate() - 7);
+              const prevSunday = new Date(prevMonday);
+              prevSunday.setDate(prevSunday.getDate() + 6);
+              const prevMondayStr = prevMonday.toISOString().split('T')[0];
+              const prevSundayStr = prevSunday.toISOString().split('T')[0];
+
+              const prevSessions = sessions.filter(s => s.date >= prevMondayStr && s.date <= prevSundayStr);
+              const prevTrainingCals = prevSessions.reduce((sum, s) => sum + calcSessionCalories(s, latestWeight), 0);
+              const prevDailyTraining = Math.round(prevTrainingCals / 7);
+
+              let prevActiveCals = 0, prevActDays = 0;
+              for (let i = 0; i < 7; i++) {
+                const d = new Date(prevMonday);
+                d.setDate(d.getDate() + i);
+                const dayStr = d.toISOString().split('T')[0];
+                const act = dailyActivity[dayStr];
+                if (act && act.activeCalories > 0) { prevActiveCals += act.activeCalories; prevActDays++; }
+              }
+              const prevNeat = prevActDays > 0 ? Math.round(prevActiveCals / prevActDays) : 0;
+              const prevTotal = latestBmr + prevDailyTraining + prevNeat;
+              const prevLabel = `${fmt(prevMonday)} – ${fmt(prevSunday)}`;
+
+              const cards = [
+                { key: 'rolling', label: rollingLabel, total: rollingTotal, training: rollingDailyTraining, neat: rollingNeat, count: rollingSessions.length, isCurrent: true },
+                { key: 'prev', label: prevLabel, total: prevTotal, training: prevDailyTraining, neat: prevNeat, count: prevSessions.length, isCurrent: false },
+              ];
 
               return (
                 <div className="mb-6">
                   <h3 className="text-sm font-semibold text-white/60 mb-3">Weekly TDEE</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {weeks.map(([weekKey, weekSessions]) => {
-                      const isCurrentWeek = weekKey === getWeekKey(new Date().toISOString().split('T')[0]);
-                      const wkMonday = new Date(weekKey + 'T00:00:00');
-                      const now = new Date();
-                      const daysInWk = isCurrentWeek
-                        ? Math.max(1, Math.min(7, Math.floor((now.getTime() - wkMonday.getTime()) / 86400000) + 1))
-                        : 7;
-
-                      const trainingCals = weekSessions.reduce((sum, s) => sum + calcSessionCalories(s, latestWeight), 0);
-                      const dailyTrainingAvg = Math.round(trainingCals / daysInWk);
-
-                      // NEAT from Oura activeCalories (ring off during gym = no overlap)
-                      let totalActiveCals = 0, actDays = 0;
-                      for (let i = 0; i < daysInWk; i++) {
-                        const d = new Date(wkMonday);
-                        d.setDate(d.getDate() + i);
-                        const dayStr = d.toISOString().split('T')[0];
-                        const act = dailyActivity[dayStr];
-                        if (act && act.activeCalories > 0) { totalActiveCals += act.activeCalories; actDays++; }
-                      }
-                      const dailyNeat = actDays > 0 ? Math.round(totalActiveCals / actDays) : 0;
-
-                      const dailyTotal = latestBmr + dailyTrainingAvg + dailyNeat;
-                      return (
-                        <div key={weekKey} className={`glass-card p-4 ${isCurrentWeek ? 'border border-green-500/30' : ''}`}>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs text-white/40">{getWeekLabel(weekKey)}</span>
-                            {isCurrentWeek && <span className="text-[10px] text-green-400 uppercase">Current</span>}
-                          </div>
-                          <div className="text-xl font-bold text-white">{dailyTotal} <span className="text-xs text-white/30 font-normal">kcal/day</span></div>
-                          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px] text-white/30">
-                            <span>BMR {latestBmr}</span>
-                            <span>Training +{dailyTrainingAvg}</span>
-                            {dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}
-                            <span>{weekSessions.length} sessions</span>
-                          </div>
+                    {cards.map(c => (
+                      <div key={c.key} className={`glass-card p-4 ${c.isCurrent ? 'border border-green-500/30' : ''}`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-white/40">{c.label}</span>
+                          {c.isCurrent && <span className="text-[10px] text-green-400 uppercase">Current</span>}
                         </div>
-                      );
-                    })}
+                        <div className="text-xl font-bold text-white">{c.total} <span className="text-xs text-white/30 font-normal">kcal/day</span></div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px] text-white/30">
+                          <span>BMR {latestBmr}</span>
+                          <span>Training +{c.training}</span>
+                          {c.neat > 0 && <span>NEAT +{c.neat}</span>}
+                          <span>{c.count} sessions</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               );
