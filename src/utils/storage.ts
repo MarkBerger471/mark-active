@@ -257,8 +257,8 @@ export async function saveTrainingSession(session: TrainingSession) {
     // Preserve startedAt (first save time)
     session.startedAt = existing.startedAt || existing.savedAt || now;
 
-    if (session.date < today && existing.durationMinutes != null) {
-      // Past day + already frozen — preserve both
+    if (existing.durationMinutes != null && existing.durationMinutes > 0) {
+      // Already completed — preserve original savedAt and duration
       session.savedAt = existing.savedAt;
       session.durationMinutes = existing.durationMinutes;
     } else if (session.date < today) {
@@ -267,7 +267,7 @@ export async function saveTrainingSession(session: TrainingSession) {
       const dur = Math.round((new Date(session.savedAt).getTime() - new Date(session.startedAt).getTime()) / 60000);
       session.durationMinutes = Math.max(dur, 0);
     } else {
-      // Same day — update savedAt and live duration
+      // Same day, still in progress — update savedAt and live duration
       session.savedAt = now;
       const dur = Math.round((new Date(now).getTime() - new Date(session.startedAt).getTime()) / 60000);
       session.durationMinutes = Math.max(dur, 0);
