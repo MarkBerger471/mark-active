@@ -7,6 +7,7 @@ import Navigation from '@/components/Navigation';
 import Link from 'next/link';
 import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
+import { calcSessionCalories } from '@/utils/calories';
 import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
 
 type Phase = 'bulking' | 'cutting';
@@ -73,6 +74,7 @@ export default function Dashboard() {
   const [sleepExpanded, setSleepExpanded] = useState(false);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
+  const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number }>>({});
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -98,6 +100,13 @@ export default function Dashboard() {
       }).catch(() => {});
       getTrainingSessions().then(setTrainingSessions);
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
+      // Fetch activity data (same as training page - 60 days)
+      fetch('/api/oura?days=60').then(r => r.json()).then(d => {
+        const act: Record<string, { activeCalories: number }> = {};
+        if (d.data) for (const day of d.data) { if (day.activeCalories) act[day.day] = { activeCalories: day.activeCalories }; }
+        if (d.activity) for (const day of d.activity) { if (day.activeCalories) act[day.day] = { activeCalories: day.activeCalories }; }
+        setDailyActivity(act);
+      }).catch(() => {});
     }
   }, [isAuthenticated]);
 
@@ -268,50 +277,35 @@ export default function Dashboard() {
               const trainingDayKcal = nutritionPlan?.current.trainingDay.macros.kcal;
               if (!bmr || !trainingDayKcal || trainingSessions.length === 0) return null;
 
-              // Inline calorie calc (simplified MET-based)
-              const COMPOUND_KW = ['press', 'squat', 'deadlift', 'dead lift', 'lunge', 'row', 'pull down', 'pulldown', 'pull up', 'pullup', 'dip', 'leg press', 'pullover'];
-              const calcCals = (s: TrainingSession) => {
-                if (s.workoutName === 'Cardio') {
-                  let cal = 0;
-                  for (const ex of s.exercises) {
-                    if (ex.skipped) continue;
-                    const lower = ex.name.toLowerCase();
-                    const met = lower.includes('stair') ? 9 : lower.includes('run') ? 8 : lower.includes('row') ? 7 : lower.includes('cycling') || lower.includes('bike') ? 6.5 : lower.includes('walk') ? 3.8 : 6.5;
-                    const mMatch = ex.targetReps.match(/(\d+)\s*min/i);
-                    const mins = mMatch ? parseInt(mMatch[1]) : 30;
-                    cal += met * bodyWeight * (mins / 60);
-                  }
-                  return Math.round(cal || 6.5 * bodyWeight * 0.5);
-                }
-                let totalSets = 0, compSets = 0, isoSets = 0;
-                for (const ex of s.exercises) {
-                  if (ex.skipped) continue;
-                  const hasDone = ex.sets.some(st => st.done);
-                  const isComp = COMPOUND_KW.some(kw => ex.name.toLowerCase().includes(kw));
-                  for (const set of ex.sets) {
-                    if (hasDone && !set.done) continue;
-                    totalSets++; if (isComp) compSets++; else isoSets++;
-                  }
-                }
-                if (totalSets === 0) return 0;
-                const avgMET = (compSets * 6 + isoSets * 3.5) / totalSets;
-                const exCount = s.exercises.filter(e => !e.skipped).length;
-                const mins = (s.durationMinutes && s.durationMinutes > 5) ? s.durationMinutes : totalSets * 3.2 + exCount * 3;
-                let cal = avgMET * bodyWeight * (mins * 0.3 / 60) + 1.5 * bodyWeight * (mins * 0.7 / 60);
-                return Math.round(cal * 1.15);
+              // Exact same logic as training page getWeekKey + TDEE calc
+              const getWk = (dateStr: string) => {
+                const dd = new Date(dateStr);
+                const day = dd.getDay();
+                const diff = dd.getDate() - day + (day === 0 ? -6 : 1);
+                const mon = new Date(dd.setDate(diff));
+                return mon.toISOString().split('T')[0];
               };
+              const now = new Date();
+              const todayStr = now.toISOString().split('T')[0];
+              const currentWeekKey = getWk(todayStr);
+              const wkMonday = new Date(currentWeekKey + 'T00:00:00');
+              const daysInWeek = Math.max(1, Math.min(7, Math.floor((now.getTime() - wkMonday.getTime()) / 86400000) + 1));
 
-              // Get current week sessions
-              const today = new Date();
-              const dayOfWeek = today.getDay();
-              const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-              const monday = new Date(today);
-              monday.setDate(today.getDate() + mondayOffset);
-              const mondayStr = monday.toISOString().split('T')[0];
-              const weekSessions = trainingSessions.filter(s => s.date >= mondayStr);
-              const weekTrainingCals = weekSessions.reduce((sum, s) => sum + calcCals(s), 0);
-              const daysInWeek = Math.max(1, Math.min(7, Math.floor((today.getTime() - monday.getTime()) / 86400000) + 1));
-              const dailyBurn = bmr + Math.round(weekTrainingCals / daysInWeek);
+              const weekSessions = trainingSessions.filter(s => getWk(s.date) === currentWeekKey);
+              const weekTrainingCals = weekSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
+              const dailyTrainingAvg = Math.round(weekTrainingCals / daysInWeek);
+
+              // NEAT from Oura activeCalories
+              let totalActiveCals = 0, actDays = 0;
+              for (let i = 0; i < daysInWeek; i++) {
+                const d = new Date(wkMonday);
+                d.setDate(d.getDate() + i);
+                const dayStr = d.toISOString().split('T')[0];
+                const act = dailyActivity[dayStr];
+                if (act && act.activeCalories > 0) { totalActiveCals += act.activeCalories; actDays++; }
+              }
+              const dailyNeat = actDays > 0 ? Math.round(totalActiveCals / actDays) : 0;
+              const dailyBurn = bmr + dailyTrainingAvg + dailyNeat;
 
               // Calculate Sunday cheat meal adjustment
               // Last meal replaced with 1300 kcal cheat on Sunday
@@ -403,7 +397,7 @@ export default function Dashboard() {
                     <span className={`text-[10px] font-bold uppercase ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>{phase}</span>
                   </div>
 
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 max-h-48">
                     {/* Gauge */}
                     <div className="relative w-28 h-28 shrink-0">
                       <svg className="w-28 h-28" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
@@ -428,7 +422,7 @@ export default function Dashboard() {
 
                     {/* Bar chart */}
                     <div className="flex-1">
-                      <svg viewBox="0 0 160 130" className="w-full">
+                      <svg viewBox="0 0 160 130" className="w-full max-h-40">
                         {/* Target line */}
                         {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; return (<>
                         <line x1="5" y1={18 + barH - targetH} x2="115" y2={18 + barH - targetH} stroke={tColor} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
@@ -457,9 +451,9 @@ export default function Dashboard() {
                   {/* Details */}
                   <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5 text-[10px] text-white/30">
                     <div>BMR {bmr}</div>
-                    <div>Training +{Math.round(weekTrainingCals / daysInWeek)}/day</div>
-                    <div>{weekSessions.length} sessions/week</div>
-                    <div>{phase}</div>
+                    <div>Training +{Math.round(weekTrainingCals / daysInWeek)}</div>
+                    {dailyNeat > 0 && <div>NEAT +{dailyNeat}</div>}
+                    <div>{weekSessions.length} sessions</div>
                   </div>
                 </div>
               );
