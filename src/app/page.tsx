@@ -502,7 +502,7 @@ export default function Dashboard() {
             const hasBf = measurements.some(m => m.bodyFat != null);
             const hasMm = measurements.some(m => m.muscleMass != null);
             const hasSecondary = hasBf || hasMm;
-            const padding = { top: 30, right: (hasBf && hasMm) ? 140 : hasSecondary ? 80 : 60, bottom: 44, left: 54 };
+            const padding = { top: 30, right: hasSecondary ? 80 : 60, bottom: 44, left: 54 };
             const innerWidth = chartWidth - padding.left - padding.right;
             const innerHeight = chartHeight - padding.top - padding.bottom;
 
@@ -701,7 +701,7 @@ export default function Dashboard() {
                           {bfLabels.map((tick, i) => (
                             <text key={`bf-y-${i}`} x={chartWidth - padding.right + 10} y={tick.y + 4} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.6">{tick.val}%</text>
                           ))}
-                          <text x={chartWidth - padding.right + 10} y={padding.top - 10} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.4">BF%</text>
+                          <text x={chartWidth - padding.right + 10} y={padding.top - 10} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.4">{hasMm ? 'BF%  MM kg' : 'BF%'}</text>
 
                           {/* Area fill */}
                           <path d={`${bfLine} L ${bfPoints[bfPoints.length - 1].x} ${bfBottom} L ${bfPoints[0].x} ${bfBottom} Z`} fill="url(#dashBfGrad)" />
@@ -752,15 +752,14 @@ export default function Dashboard() {
                         return { val: Math.round(val * 10) / 10, y: toMmY(val) };
                       });
 
-                      // Offset right axis if BF% is also shown
-                      const mmAxisX = hasBf ? chartWidth - padding.right + 75 : chartWidth - padding.right + 10;
+                      const mmAxisX = chartWidth - padding.right + 10;
 
                       return (
                         <g>
                           {mmLabels.map((tick, i) => (
                             <text key={`mm-y-${i}`} x={mmAxisX} y={tick.y + 4} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.6">{tick.val}</text>
                           ))}
-                          <text x={mmAxisX} y={padding.top - 10} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.4">MM kg</text>
+                          {!hasBf && <text x={mmAxisX} y={padding.top - 10} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.4">MM kg</text>}
 
                           <path d={`${mmLine} L ${mmPoints[mmPoints.length - 1].x} ${padding.top + innerHeight} L ${mmPoints[0].x} ${padding.top + innerHeight} Z`} fill="url(#dashMmGrad)" />
                           <path d={mmLine} fill="none" stroke={mmColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.7" />
