@@ -50,9 +50,13 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'pasta dry': { kcal: 371, protein: 13, carbs: 74, fat: 1.5 },
   'dry pasta': { kcal: 371, protein: 13, carbs: 74, fat: 1.5 },
   'bread': { kcal: 265, protein: 9, carbs: 49, fat: 3.2 },
+  'rye bread': { kcal: 259, protein: 8.5, carbs: 48, fat: 3.3 },
+  'whole rye bread': { kcal: 259, protein: 8.5, carbs: 48, fat: 3.3 },
   'sweet potato': { kcal: 86, protein: 1.6, carbs: 20, fat: 0.1 },
   'potato': { kcal: 77, protein: 2, carbs: 17, fat: 0.1 },
   'broccoli': { kcal: 34, protein: 2.8, carbs: 7, fat: 0.4 },
+  'veggies': { kcal: 25, protein: 2, carbs: 4, fat: 0.3 },
+  'vegetables': { kcal: 25, protein: 2, carbs: 4, fat: 0.3 },
   'spinach': { kcal: 23, protein: 2.9, carbs: 3.6, fat: 0.4 },
   'avocado': { kcal: 160, protein: 2, carbs: 9, fat: 15 },
   'olive oil': { kcal: 884, protein: 0, carbs: 0, fat: 100 },
@@ -60,6 +64,7 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'peanut butter': { kcal: 588, protein: 25, carbs: 20, fat: 50 },
   'almond butter': { kcal: 614, protein: 21, carbs: 19, fat: 56 },
   'almonds': { kcal: 579, protein: 21, carbs: 22, fat: 50 },
+  'nuts': { kcal: 607, protein: 20, carbs: 21, fat: 54 },
   'walnuts': { kcal: 654, protein: 15, carbs: 14, fat: 65 },
   'milk': { kcal: 42, protein: 3.4, carbs: 5, fat: 1 },
   'whole milk': { kcal: 61, protein: 3.2, carbs: 4.8, fat: 3.3 },
@@ -691,8 +696,12 @@ export default function NutritionPlanPage() {
 
     if (editingDay === 'training') {
       newVersion.trainingDay = savedPlan;
+      // Recompute rest day macros in case FOOD_DB values changed
+      newVersion.restDay = { ...newVersion.restDay, macros: sumMacros(newVersion.restDay.meals) };
     } else {
       newVersion.restDay = savedPlan;
+      // Recompute training day macros in case FOOD_DB values changed
+      newVersion.trainingDay = { ...newVersion.trainingDay, macros: sumMacros(newVersion.trainingDay.meals) };
     }
 
     await persist({
