@@ -124,10 +124,11 @@ export default function Dashboard() {
     );
   }
 
-  const formatChange = (val?: number) => {
+  const formatChange = (val?: number, lowerIsBetter = false) => {
     if (val === undefined || val === 0) return null;
     const sign = val > 0 ? '+' : '';
-    const colorClass = val > 0 ? 'change-positive' : 'change-negative';
+    const isGood = lowerIsBetter ? val < 0 : val > 0;
+    const colorClass = isGood ? 'change-positive' : 'change-negative';
     return <span className={colorClass}>{sign}{val}</span>;
   };
 
@@ -148,7 +149,7 @@ export default function Dashboard() {
 
           {/* Quick Stats */}
           {latestMeasurement && (() => {
-            const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs' }) => {
+            const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean }) => {
               const curVal = latestMeasurement[stat.field];
               const prevVal = previousMeasurement?.[stat.field];
               const change = (curVal != null && prevVal != null)
@@ -159,7 +160,7 @@ export default function Dashboard() {
                   <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
                   <p className="text-2xl font-bold text-white mt-1">{stat.value}</p>
                   {change !== undefined && change !== 0 && (
-                    <p className="text-sm mt-1">{formatChange(change)}</p>
+                    <p className="text-sm mt-1">{formatChange(change, stat.lowerIsBetter)}</p>
                   )}
                 </div>
               );
@@ -169,11 +170,11 @@ export default function Dashboard() {
                 {statCard({ label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight' })}
                 <div className="grid grid-cols-2 gap-4">
                   {statCard({ label: 'Muscle Mass', value: latestMeasurement.muscleMass != null ? `${latestMeasurement.muscleMass}kg` : '—', field: 'muscleMass' })}
-                  {statCard({ label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat' })}
+                  {statCard({ label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat', lowerIsBetter: true })}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   {statCard({ label: 'Chest', value: `${latestMeasurement.chest}cm`, field: 'chest' })}
-                  {statCard({ label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist' })}
+                  {statCard({ label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist', lowerIsBetter: true })}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   {statCard({ label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' })}

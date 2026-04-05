@@ -21,6 +21,7 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'banana': { kcal: 89, protein: 1.1, carbs: 23, fat: 0.3 },
   'cheese': { kcal: 403, protein: 25, carbs: 1.3, fat: 33 },
   'cottage cheese': { kcal: 98, protein: 11, carbs: 3.4, fat: 4.3 },
+  'feta': { kcal: 264, protein: 14, carbs: 4, fat: 21 },
   'cream cheese': { kcal: 342, protein: 6, carbs: 4, fat: 34 },
   'rice': { kcal: 130, protein: 2.7, carbs: 28, fat: 0.3 },
   'white rice': { kcal: 130, protein: 2.7, carbs: 28, fat: 0.3 },
@@ -67,6 +68,7 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'casein': { kcal: 370, protein: 75, carbs: 12, fat: 3 },
   'dextrose': { kcal: 400, protein: 0, carbs: 100, fat: 0 },
   'maltodextrin': { kcal: 380, protein: 0, carbs: 95, fat: 0 },
+  'cluster dextrin': { kcal: 380, protein: 0, carbs: 95, fat: 0 },
 };
 
 // Supplements: fixed macros per serving (not per 100g)
@@ -106,11 +108,16 @@ const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: numb
 function lookupFood(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
   const key = name.toLowerCase().trim();
   if (FOOD_DB[key]) return FOOD_DB[key];
-  // Fuzzy: check if any DB key is contained in the name or vice versa
+  // Fuzzy: find the longest (most specific) matching DB key
+  let bestKey = '';
+  let bestVal: { kcal: number; protein: number; carbs: number; fat: number } | null = null;
   for (const [dbKey, val] of Object.entries(FOOD_DB)) {
-    if (key.includes(dbKey) || dbKey.includes(key)) return val;
+    if ((key.includes(dbKey) || dbKey.includes(key)) && dbKey.length > bestKey.length) {
+      bestKey = dbKey;
+      bestVal = val;
+    }
   }
-  return null;
+  return bestVal;
 }
 
 // Weight per piece for countable foods (grams per 1 unit)

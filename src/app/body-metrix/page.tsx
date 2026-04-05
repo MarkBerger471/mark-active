@@ -458,8 +458,8 @@ export default function BodyMetrix() {
           <SliderField label="Sleep (hours/night)" value={sleepHours} onChange={setSleepHours} min={5} max={10} step={0.5} targetMin={7} targetMax={8} unit="h" />
           {ouraLinked && <span className="text-[10px] text-cyan-400/60 mt-1 block">via Oura</span>}
         </div>
-        <SliderField label="Cardio (sessions)" value={cardio} onChange={setCardio} min={0} max={14} step={1} targetMin={4} targetMax={6} unit="x" />
-        <SliderField label="Trainings (sessions)" value={trainings} onChange={setTrainings} min={0} max={14} step={1} targetMin={4} targetMax={6} unit="x" />
+        <SliderField label="Cardio (sessions)" value={cardio} onChange={setCardio} min={0} max={7} step={1} targetMin={4} targetMax={6} unit="x" />
+        <SliderField label="Trainings (sessions)" value={trainings} onChange={setTrainings} min={0} max={7} step={1} targetMin={4} targetMax={6} unit="x" />
         <SliderField label="Food adherence" value={foodChanges} onChange={setFoodChanges} min={0} max={100} step={5} targetMin={95} targetMax={100} unit="%" />
       </div>
 
