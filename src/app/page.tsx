@@ -305,8 +305,8 @@ export default function Dashboard() {
               // Last meal replaced with 1300 kcal cheat on Sunday
               // Meal 5: egg white 150g(78) + egg 2×60g(186) + rye bread 200g(530) + whey 25g(100) ≈ 894 kcal
               const KCAL_PER_100G: Record<string, number> = {
-                'egg white': 52, 'egg': 155, 'whey': 400, 'bread': 265, 'rye bread': 265,
-                'whole rye bread': 265, 'chicken': 165, 'fish': 120, 'beef': 250, 'rice': 130,
+                'egg white': 52, 'egg': 143, 'whey': 400, 'bread': 265, 'rye bread': 265,
+                'whole rye bread': 265, 'chicken': 165, 'fish': 120, 'beef': 254, 'rice': 130,
                 'greek yogurt': 59, 'oatmeal': 389, 'cheese': 403, 'feta': 264, 'cottage cheese': 98,
                 'cream of rice': 370, 'olive oil': 884, 'nuts': 607, 'berries': 57, 'banana': 89,
               };
