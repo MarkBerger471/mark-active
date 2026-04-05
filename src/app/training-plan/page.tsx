@@ -167,6 +167,7 @@ export default function TrainingPlanPage() {
   const [activeWorkout, setActiveWorkout] = useState<string | null>(null);
   const [exercises, setExercises] = useState<TrainingExercise[]>([]);
   const [sessionId, setSessionId] = useState('');
+  const [sessionDate, setSessionDate] = useState('');
   const [expandedExercise, setExpandedExercise] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
@@ -180,11 +181,13 @@ export default function TrainingPlanPage() {
   const exercisesRef = useRef(exercises);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef(sessionId);
+  const sessionDateRef = useRef(sessionDate);
   const activeWorkoutRef = useRef(activeWorkout);
 
   // Keep refs in sync
   exercisesRef.current = exercises;
   sessionIdRef.current = sessionId;
+  sessionDateRef.current = sessionDate;
   activeWorkoutRef.current = activeWorkout;
 
   const flushSave = useCallback(async () => {
@@ -195,7 +198,7 @@ export default function TrainingPlanPage() {
     if (!activeWorkoutRef.current || !sessionIdRef.current) return;
     const session: TrainingSession = {
       id: sessionIdRef.current,
-      date: new Date().toISOString().split('T')[0],
+      date: sessionDateRef.current || new Date().toISOString().split('T')[0],
       workoutName: activeWorkoutRef.current,
       exercises: exercisesRef.current,
     };
@@ -225,7 +228,7 @@ export default function TrainingPlanPage() {
         if (id && workout) {
           saveTrainingSession({
             id,
-            date: new Date().toISOString().split('T')[0],
+            date: sessionDateRef.current || new Date().toISOString().split('T')[0],
             workoutName: workout,
             exercises: exs,
           });
@@ -302,9 +305,11 @@ export default function TrainingPlanPage() {
         }));
 
     const newId = Date.now().toString();
+    const today = new Date().toISOString().split('T')[0];
     setExercises(exerciseData);
     setActiveWorkout(workoutName);
     setSessionId(newId);
+    setSessionDate(today);
     setExpandedExercise(null);
     setSaved(true);
     setSaveStatus('saving');
@@ -313,7 +318,7 @@ export default function TrainingPlanPage() {
     // Save immediately
     const session: TrainingSession = {
       id: newId,
-      date: new Date().toISOString().split('T')[0],
+      date: today,
       workoutName,
       exercises: exerciseData,
     };
@@ -398,6 +403,7 @@ export default function TrainingPlanPage() {
     setView('select');
     setActiveWorkout(null);
     setExercises([]);
+    setSessionDate('');
     setSaveStatus('idle');
   };
 
@@ -405,6 +411,7 @@ export default function TrainingPlanPage() {
     setExercises(session.exercises.map(e => ({ ...e, sets: e.sets.map(s => ({ ...s })) })));
     setActiveWorkout(session.workoutName);
     setSessionId(session.id);
+    setSessionDate(session.date);
     setExpandedExercise(null);
     setSaved(true);
     setSaveStatus('idle');

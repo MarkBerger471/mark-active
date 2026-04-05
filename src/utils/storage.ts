@@ -257,8 +257,8 @@ export async function saveTrainingSession(session: TrainingSession) {
     // Preserve startedAt (first save time)
     session.startedAt = existing.startedAt || existing.savedAt || now;
 
-    if (existing.durationMinutes != null && existing.durationMinutes > 0) {
-      // Already completed — preserve original savedAt and duration
+    if (session.date < today && existing.durationMinutes != null) {
+      // Past day + already frozen — preserve both
       session.savedAt = existing.savedAt;
       session.durationMinutes = existing.durationMinutes;
     } else if (session.date < today) {
