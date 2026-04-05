@@ -288,10 +288,11 @@ export default function BodyMetrix() {
     setEditingDate(m.date); // open inline edit
   };
 
-  const formatChange = (val?: number) => {
+  const formatChange = (val?: number, lowerIsBetter = false) => {
     if (val === undefined || val === 0) return null;
     const sign = val > 0 ? '+' : '';
-    const colorClass = val > 0 ? 'change-positive' : 'change-negative';
+    const isGood = lowerIsBetter ? val < 0 : val > 0;
+    const colorClass = isGood ? 'change-positive' : 'change-negative';
     return <span className={colorClass}>{sign}{val}</span>;
   };
 
@@ -581,14 +582,14 @@ export default function BodyMetrix() {
 
                     {/* Measurement Values */}
                     {(() => {
-                      const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'bmr' | 'recommendedCalories' | 'arms' | 'chest' | 'waist' | 'legs'; unit: string }) => {
+                      const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'bmr' | 'recommendedCalories' | 'arms' | 'chest' | 'waist' | 'legs'; unit: string; lowerIsBetter?: boolean }) => {
                         const change = getChange(m, previous, stat.field);
                         return (
                           <div key={stat.label} className="bg-white/5 rounded-xl p-3">
                             <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
                             <p className="text-lg font-bold text-white">{stat.value}</p>
                             {change !== undefined && change !== 0 && (
-                              <p className="text-sm">{formatChange(change)}</p>
+                              <p className="text-sm">{formatChange(change, stat.lowerIsBetter)}</p>
                             )}
                             {change === 0 && (
                               <p className="text-sm change-neutral">0</p>
@@ -603,7 +604,7 @@ export default function BodyMetrix() {
                         <div className="flex flex-col gap-3 mb-4">
                           {statCard({ label: 'Weight', value: `${m.weight}kg`, field: 'weight', unit: 'kg' })}
                           <div className="grid grid-cols-2 gap-3">
-                            {statCard({ label: 'Body Fat', value: m.bodyFat != null ? `${m.bodyFat}%` : '—', field: 'bodyFat', unit: '%' })}
+                            {statCard({ label: 'Body Fat', value: m.bodyFat != null ? `${m.bodyFat}%` : '—', field: 'bodyFat', unit: '%', lowerIsBetter: true })}
                             {statCard({ label: 'Muscle Mass', value: m.muscleMass != null ? `${m.muscleMass}kg` : '—', field: 'muscleMass', unit: 'kg' })}
                           </div>
                           <div className="grid grid-cols-2 gap-3">
@@ -611,11 +612,11 @@ export default function BodyMetrix() {
                             {statCard({ label: 'Rec. Calories', value: m.recommendedCalories != null ? `${m.recommendedCalories}` : '—', field: 'recommendedCalories', unit: 'kcal' })}
                           </div>
                           <div className="grid grid-cols-2 gap-3">
-                            {statCard({ label: 'Arms', value: `${m.arms}cm`, field: 'arms', unit: 'cm' })}
                             {statCard({ label: 'Chest', value: `${m.chest}cm`, field: 'chest', unit: 'cm' })}
+                            {statCard({ label: 'Waist', value: `${m.waist}cm`, field: 'waist', unit: 'cm', lowerIsBetter: true })}
                           </div>
                           <div className="grid grid-cols-2 gap-3">
-                            {statCard({ label: 'Waist', value: `${m.waist}cm`, field: 'waist', unit: 'cm' })}
+                            {statCard({ label: 'Arms', value: `${m.arms}cm`, field: 'arms', unit: 'cm' })}
                             {statCard({ label: 'Legs', value: `${m.legs}cm`, field: 'legs', unit: 'cm' })}
                           </div>
                         </div>
