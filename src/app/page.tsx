@@ -416,90 +416,93 @@ export default function Dashboard() {
 
               return (
                 <div className="glass-card p-5 order-1 md:order-2">
-                  <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-sm font-semibold text-white">Calorie Balance</h2>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-sm font-semibold text-white">Nutrition Balance</h2>
                     <span className={`text-[10px] font-bold uppercase ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>{phase}</span>
                   </div>
 
-                  <div className="flex items-center gap-3 max-h-48">
-                    {/* Gauges */}
-                    <div className="flex flex-col items-center gap-1 shrink-0">
-                      {/* Calorie gauge */}
-                      <div className="relative w-24 h-24">
-                        <svg className="w-24 h-24" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
-                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="8"
+                  {/* Gauges row */}
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    {/* Calorie gauge */}
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-28 h-28 sm:w-32 sm:h-32">
+                        <svg className="w-full h-full" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
+                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="7"
                             strokeDasharray={`${gaugeArc} ${gaugeCirc}`} strokeLinecap="round" />
-                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="#22c55e" strokeOpacity="0.25" strokeWidth="8"
+                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="#22c55e" strokeOpacity="0.25" strokeWidth="7"
                             strokeDasharray={`${greenArcLen} ${gaugeCirc - greenArcLen}`}
                             strokeDashoffset={-((greenStartAngle / 360) * gaugeCirc)} />
-                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke={zoneColor} strokeWidth="8"
+                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke={zoneColor} strokeWidth="7"
                             strokeDasharray={`${gaugeArc} ${gaugeCirc}`} strokeDashoffset={gaugeOffset}
                             strokeLinecap="round" className="transition-all duration-700" />
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <span className="text-base font-bold" style={{ color: zoneColor }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
-                          <span className="text-[6px] text-white/30">kcal {targetMid > 0 ? '+' : ''}{targetMid}%</span>
-                          <span className="text-[7px] uppercase" style={{ color: zoneColor }}>{zoneLabel}</span>
+                          <span className="text-xl font-bold" style={{ color: zoneColor }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
+                          <span className="text-[8px] text-white/30">target {targetMid > 0 ? '+' : ''}{targetMid}%</span>
+                          <span className="text-[9px] font-semibold uppercase" style={{ color: zoneColor }}>{zoneLabel}</span>
                         </div>
                       </div>
-                      {/* Protein gauge */}
-                      <div className="relative w-24 h-24">
-                        <svg className="w-24 h-24" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
-                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="8"
+                      <span className="text-[10px] text-white/40 mt-1">Calories</span>
+                    </div>
+                    {/* Protein gauge */}
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-28 h-28 sm:w-32 sm:h-32">
+                        <svg className="w-full h-full" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
+                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="7"
                             strokeDasharray={`${pGaugeArc} ${pGaugeCirc}`} strokeLinecap="round" />
-                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke="#22c55e" strokeOpacity="0.25" strokeWidth="8"
+                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke="#22c55e" strokeOpacity="0.25" strokeWidth="7"
                             strokeDasharray={`${pGreenArcLen} ${pGaugeCirc - pGreenArcLen}`}
                             strokeDashoffset={-((pGreenStartAngle / 360) * pGaugeCirc)} />
-                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke={proteinZoneColor} strokeWidth="8"
+                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke={proteinZoneColor} strokeWidth="7"
                             strokeDasharray={`${pGaugeArc} ${pGaugeCirc}`} strokeDashoffset={pGaugeOffset}
                             strokeLinecap="round" className="transition-all duration-700" />
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <span className="text-base font-bold" style={{ color: proteinZoneColor }}>{trainingDayProtein}g</span>
-                          <span className="text-[6px] text-white/30">protein {proteinTarget}g</span>
-                          <span className="text-[7px] uppercase" style={{ color: proteinZoneColor }}>{proteinZoneLabel}</span>
+                          <span className="text-xl font-bold" style={{ color: proteinZoneColor }}>{trainingDayProtein}g</span>
+                          <span className="text-[8px] text-white/30">target {proteinTarget}g</span>
+                          <span className="text-[9px] font-semibold uppercase" style={{ color: proteinZoneColor }}>{proteinZoneLabel}</span>
                         </div>
                       </div>
+                      <span className="text-[10px] text-white/40 mt-1">Protein</span>
                     </div>
+                  </div>
 
-                    {/* Bar charts */}
-                    <div className="flex-1">
-                      <svg viewBox="0 0 240 130" className="w-full max-h-40">
-                        {/* Calorie target line */}
+                  {/* Bar charts row */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Calorie bars */}
+                    <div>
+                      <svg viewBox="0 0 140 120" className="w-full">
                         {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; return (<>
-                        <line x1="5" y1={18 + barH - targetH} x2="105" y2={18 + barH - targetH} stroke={tColor} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
-                        <text x="108" y={18 + barH - targetH + 4} textAnchor="start" fill={tColor} fontSize="9" fontWeight="bold">{targetIntake}</text>
+                        <line x1="5" y1={12 + barH - targetH} x2="105" y2={12 + barH - targetH} stroke={tColor} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
+                        <text x="108" y={12 + barH - targetH + 4} textAnchor="start" fill={tColor} fontSize="9" fontWeight="bold">{targetIntake}</text>
                         </>); })()}
-                        {/* Burn bar */}
-                        <rect x="10" y={18 + barH - burnH} width="40" height={burnH} rx="5" fill="#f97316" fillOpacity="0.7" />
-                        <text x="30" y={18 + barH - burnH - 5} textAnchor="middle" fill="white" fontSize="11" fontWeight="bold">{dailyBurn}</text>
-                        <text x="30" y={18 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Burn</text>
-                        {/* Intake bar */}
-                        <rect x="58" y={18 + barH - intakeH} width="40" height={intakeH} rx="5" fill={zoneColor} fillOpacity="0.7" />
-                        <text x="78" y={18 + barH - intakeH - 5} textAnchor="middle" fill="white" fontSize="11" fontWeight="bold">{intake}</text>
-                        <text x="78" y={18 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Intake</text>
-
-                        {/* Separator */}
-                        <line x1="130" y1="12" x2="130" y2={18 + barH + 4} stroke="white" strokeOpacity="0.06" strokeWidth="1" />
-
-                        {/* Protein target line */}
-                        <line x1="135" y1={18 + barH - pTargetBarH} x2="225" y2={18 + barH - pTargetBarH} stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
-                        <text x="228" y={18 + barH - pTargetBarH + 4} textAnchor="start" fill="#3b82f6" fontSize="9" fontWeight="bold">{proteinTarget}g</text>
-                        {/* Protein bar */}
-                        <rect x="155" y={18 + barH - pIntakeBarH} width="40" height={pIntakeBarH} rx="5" fill={proteinZoneColor} fillOpacity="0.7" />
-                        <text x="175" y={18 + barH - pIntakeBarH - 5} textAnchor="middle" fill="white" fontSize="11" fontWeight="bold">{trainingDayProtein}g</text>
-                        <text x="175" y={18 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Protein</text>
+                        <rect x="10" y={12 + barH - burnH} width="38" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
+                        <text x="29" y={12 + barH - burnH - 4} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">{dailyBurn}</text>
+                        <text x="29" y={12 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Burn</text>
+                        <rect x="56" y={12 + barH - intakeH} width="38" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
+                        <text x="75" y={12 + barH - intakeH - 4} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">{intake}</text>
+                        <text x="75" y={12 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Intake</text>
+                      </svg>
+                    </div>
+                    {/* Protein bar */}
+                    <div>
+                      <svg viewBox="0 0 140 120" className="w-full">
+                        <line x1="5" y1={12 + barH - pTargetBarH} x2="105" y2={12 + barH - pTargetBarH} stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
+                        <text x="108" y={12 + barH - pTargetBarH + 4} textAnchor="start" fill="#3b82f6" fontSize="9" fontWeight="bold">{proteinTarget}g</text>
+                        <rect x="30" y={12 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="4" fill={proteinZoneColor} fillOpacity="0.7" />
+                        <text x="52" y={12 + barH - pIntakeBarH - 4} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">{trainingDayProtein}g</text>
+                        <text x="52" y={12 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Protein</text>
                       </svg>
                     </div>
                   </div>
 
                   {/* Status line */}
                   <div className="text-center mt-2">
-                    <p className="text-[11px] text-white/40">
+                    <p className="text-[10px] text-white/40">
                       {intake - targetIntake > 0 ? '+' : ''}{intake - targetIntake} kcal vs target
-                      <span className="text-white/25 mx-2">|</span>
-                      {proteinDiff > 0 ? '+' : ''}{proteinDiff}g protein vs {proteinTarget}g
-                      <span className="text-white/25 ml-2">({proteinLow}–{proteinHigh}g)</span>
+                      <span className="text-white/20 mx-1.5">|</span>
+                      {proteinDiff > 0 ? '+' : ''}{proteinDiff}g protein
+                      <span className="text-white/20 ml-1">({proteinLow}–{proteinHigh}g)</span>
                     </p>
                   </div>
 
