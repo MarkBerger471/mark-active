@@ -473,32 +473,32 @@ export default function Dashboard() {
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
                         {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; return (<>
-                        <line x1="5" y1={12 + barH - targetH} x2="105" y2={12 + barH - targetH} stroke={tColor} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
-                        <text x="108" y={12 + barH - targetH + 4} textAnchor="start" fill={tColor} fontSize="9" fontWeight="bold">{targetIntake}</text>
+                        <line x1="5" y1={12 + barH - targetH} x2="105" y2={12 + barH - targetH} stroke={tColor} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
+                        <text x="108" y={12 + barH - targetH + 3} textAnchor="start" fill={tColor} fontSize="7" fontWeight="bold">{targetIntake}</text>
                         </>); })()}
                         <rect x="10" y={12 + barH - burnH} width="38" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
-                        <text x="29" y={12 + barH - burnH - 4} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">{dailyBurn}</text>
-                        <text x="29" y={12 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Burn</text>
+                        <text x="29" y={12 + barH - burnH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{dailyBurn}</text>
+                        <text x="29" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Burn</text>
                         <rect x="56" y={12 + barH - intakeH} width="38" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
-                        <text x="75" y={12 + barH - intakeH - 4} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">{intake}</text>
-                        <text x="75" y={12 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Intake</text>
+                        <text x="75" y={12 + barH - intakeH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{intake}</text>
+                        <text x="75" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Intake</text>
                       </svg>
                     </div>
                     {/* Protein bar */}
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
-                        <line x1="5" y1={12 + barH - pTargetBarH} x2="105" y2={12 + barH - pTargetBarH} stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6" />
-                        <text x="108" y={12 + barH - pTargetBarH + 4} textAnchor="start" fill="#3b82f6" fontSize="9" fontWeight="bold">{proteinTarget}g</text>
+                        <line x1="5" y1={12 + barH - pTargetBarH} x2="105" y2={12 + barH - pTargetBarH} stroke="#3b82f6" strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
+                        <text x="108" y={12 + barH - pTargetBarH + 3} textAnchor="start" fill="#3b82f6" fontSize="7" fontWeight="bold">{proteinTarget}g</text>
                         <rect x="30" y={12 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="4" fill={proteinZoneColor} fillOpacity="0.7" />
-                        <text x="52" y={12 + barH - pIntakeBarH - 4} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">{trainingDayProtein}g</text>
-                        <text x="52" y={12 + barH + 14} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="9">Protein</text>
+                        <text x="52" y={12 + barH - pIntakeBarH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{trainingDayProtein}g</text>
+                        <text x="52" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Protein</text>
                       </svg>
                     </div>
                   </div>
 
                   {/* Status line */}
                   <div className="text-center mt-2">
-                    <p className="text-[10px] text-white/40">
+                    <p className="text-xs text-white/40">
                       {intake - targetIntake > 0 ? '+' : ''}{intake - targetIntake} kcal vs target
                       <span className="text-white/20 mx-1.5">|</span>
                       {proteinDiff > 0 ? '+' : ''}{proteinDiff}g protein
@@ -507,7 +507,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* Details */}
-                  <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5 text-[10px] text-white/30">
+                  <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5 text-xs text-white/30">
                     <div>BMR {bmr}</div>
                     <div>Training +{dailyTrainingAvg}</div>
                     {dailyNeat > 0 && <div>NEAT +{dailyNeat}</div>}
