@@ -473,25 +473,25 @@ export default function Dashboard() {
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
                         {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; return (<>
-                        <line x1="5" y1={12 + barH - targetH} x2="105" y2={12 + barH - targetH} stroke={tColor} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
-                        <text x="108" y={12 + barH - targetH + 3} textAnchor="start" fill={tColor} fontSize="7" fontWeight="bold">{targetIntake}</text>
+                        <line x1="15" y1={12 + barH - targetH} x2="95" y2={12 + barH - targetH} stroke={tColor} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
+                        <text x="98" y={12 + barH - targetH + 3} textAnchor="start" fill={tColor} fontSize="7" fontWeight="bold">{targetIntake}</text>
                         </>); })()}
-                        <rect x="10" y={12 + barH - burnH} width="38" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
-                        <text x="29" y={12 + barH - burnH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{dailyBurn}</text>
-                        <text x="29" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Burn</text>
-                        <rect x="56" y={12 + barH - intakeH} width="38" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
-                        <text x="75" y={12 + barH - intakeH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{intake}</text>
-                        <text x="75" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Intake</text>
+                        <rect x="22" y={12 + barH - burnH} width="38" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
+                        <text x="41" y={12 + barH - burnH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{dailyBurn}</text>
+                        <text x="41" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Burn</text>
+                        <rect x="68" y={12 + barH - intakeH} width="38" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
+                        <text x="87" y={12 + barH - intakeH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{intake}</text>
+                        <text x="87" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Intake</text>
                       </svg>
                     </div>
                     {/* Protein bar */}
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
-                        <line x1="5" y1={12 + barH - pTargetBarH} x2="105" y2={12 + barH - pTargetBarH} stroke="#3b82f6" strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
-                        <text x="108" y={12 + barH - pTargetBarH + 3} textAnchor="start" fill="#3b82f6" fontSize="7" fontWeight="bold">{proteinTarget}g</text>
-                        <rect x="30" y={12 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="4" fill={proteinZoneColor} fillOpacity="0.7" />
-                        <text x="52" y={12 + barH - pIntakeBarH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{trainingDayProtein}g</text>
-                        <text x="52" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Protein</text>
+                        <line x1="25" y1={12 + barH - pTargetBarH} x2="85" y2={12 + barH - pTargetBarH} stroke="#3b82f6" strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
+                        <text x="88" y={12 + barH - pTargetBarH + 3} textAnchor="start" fill="#3b82f6" fontSize="7" fontWeight="bold">{proteinTarget}g</text>
+                        <rect x="48" y={12 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="4" fill={proteinZoneColor} fillOpacity="0.7" />
+                        <text x="70" y={12 + barH - pIntakeBarH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{trainingDayProtein}g</text>
+                        <text x="70" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Protein</text>
                       </svg>
                     </div>
                   </div>
