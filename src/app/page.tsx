@@ -273,7 +273,11 @@ export default function Dashboard() {
 
             {/* Calorie Balance Chart */}
             {(() => {
-              const bmr = latestMeasurement?.bmr;
+              // Use latest measurement with BMR (same logic as training page)
+              let bmr: number | undefined;
+              for (let i = measurements.length - 1; i >= 0; i--) {
+                if (measurements[i].bmr) { bmr = measurements[i].bmr; break; }
+              }
               const bodyWeight = latestMeasurement?.weight || 80;
               const trainingDayKcal = nutritionPlan?.current.trainingDay.macros.kcal;
               const trainingDayProtein = nutritionPlan?.current.trainingDay.macros.protein || 0;
