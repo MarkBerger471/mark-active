@@ -688,20 +688,24 @@ export default function NutritionPlanPage() {
       if (updatedEmptyStomach.length === 0) updatedEmptyStomach = undefined;
     }
 
-    // Update stored macros with computed sum (use allMeals which excludes empty stomach)
-    const computed = sumMacros(allMeals);
+    // Stored macros include empty stomach so dashboard matches nutrition page
+    const esMealForMacros = buildEmptyStomachMeal();
+    const allMealsWithEs = esMealForMacros ? [esMealForMacros, ...allMeals] : allMeals;
+    const computed = sumMacros(allMealsWithEs);
     const savedPlan = { ...editPlan, meals: allMeals, macros: computed };
 
     newVersion.emptyStomach = updatedEmptyStomach;
 
     if (editingDay === 'training') {
       newVersion.trainingDay = savedPlan;
-      // Recompute rest day macros in case FOOD_DB values changed
-      newVersion.restDay = { ...newVersion.restDay, macros: sumMacros(newVersion.restDay.meals) };
+      // Recompute rest day macros including empty stomach
+      const restWithEs = esMealForMacros ? [esMealForMacros, ...newVersion.restDay.meals] : newVersion.restDay.meals;
+      newVersion.restDay = { ...newVersion.restDay, macros: sumMacros(restWithEs) };
     } else {
       newVersion.restDay = savedPlan;
-      // Recompute training day macros in case FOOD_DB values changed
-      newVersion.trainingDay = { ...newVersion.trainingDay, macros: sumMacros(newVersion.trainingDay.meals) };
+      // Recompute training day macros including empty stomach
+      const trainWithEs = esMealForMacros ? [esMealForMacros, ...newVersion.trainingDay.meals] : newVersion.trainingDay.meals;
+      newVersion.trainingDay = { ...newVersion.trainingDay, macros: sumMacros(trainWithEs) };
     }
 
     await persist({

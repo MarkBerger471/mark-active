@@ -282,57 +282,16 @@ export default function Dashboard() {
                 if (measurements[i].bmr) { bmr = measurements[i].bmr; break; }
               }
               const bodyWeight = measurements.length > 0 ? measurements[measurements.length - 1].weight : 80;
-              const trainingDayKcal = nutritionPlan?.current.trainingDay.macros.kcal;
+              // Stored macros now include empty stomach — matches Nutrition page exactly
+              const intake = nutritionPlan?.current.trainingDay.macros.kcal;
               const trainingDayProtein = nutritionPlan?.current.trainingDay.macros.protein || 0;
-              if (!bmr || !trainingDayKcal || trainingSessions.length === 0) return null;
+              if (!bmr || !intake || trainingSessions.length === 0) return null;
 
               const tdee = calcRollingTDEE(trainingSessions, bodyWeight, bmr, dailyActivity);
               const dailyBurn = tdee.total;
               const dailyTrainingAvg = tdee.training;
               const dailyNeat = tdee.neat;
               const weekSessions = tdee.sessions;
-
-              // Calculate Sunday cheat meal adjustment
-              // Last meal replaced with 1300 kcal cheat on Sunday
-              // Meal 5: egg white 150g(78) + egg 2×60g(186) + rye bread 200g(530) + whey 25g(100) ≈ 894 kcal
-              const KCAL_PER_100G: Record<string, number> = {
-                'egg white': 52, 'egg': 143, 'whey': 400, 'bread': 265, 'rye bread': 265,
-                'whole rye bread': 265, 'chicken': 165, 'fish': 120, 'beef': 254, 'rice': 130,
-                'greek yogurt': 59, 'oatmeal': 389, 'cheese': 403, 'feta': 264, 'cottage cheese': 98,
-                'cream of rice': 370, 'olive oil': 884, 'nuts': 607, 'berries': 57, 'banana': 89,
-              };
-              const PIECE_G: Record<string, number> = { 'egg': 60, 'banana': 120 };
-              const meals = nutritionPlan?.current.trainingDay.meals || [];
-              let lastMealKcal = 0;
-              if (meals.length > 0) {
-                const lastMeal = meals[meals.length - 1];
-                for (const item of lastMeal.items) {
-                  const name = (item.name || '').toLowerCase().trim();
-                  const amount = item.amount || '';
-                  // Find kcal/100g
-                  let per100 = 0;
-                  for (const [key, val] of Object.entries(KCAL_PER_100G)) {
-                    if (name.includes(key) || key.includes(name)) { per100 = val; break; }
-                  }
-                  if (per100 === 0) continue;
-                  // Parse grams
-                  const gMatch = amount.match(/([\d.]+)\s*(?:gr?|ml)/i);
-                  const bare = amount.match(/^([\d.]+)$/);
-                  let grams = 0;
-                  if (gMatch) { grams = parseFloat(gMatch[1]); }
-                  else if (bare) {
-                    const pw = Object.entries(PIECE_G).find(([k]) => name.includes(k));
-                    grams = pw ? parseFloat(bare[1]) * pw[1] : parseFloat(bare[1]);
-                  }
-                  lastMealKcal += Math.round(per100 * grams / 100);
-                }
-              }
-              if (lastMealKcal === 0 && meals.length > 0) lastMealKcal = Math.round(trainingDayKcal / meals.length);
-              const cheatMealKcal = 1300;
-              const sundayDiff = cheatMealKcal - lastMealKcal;
-              // Weekly: 6 normal days + 1 Sunday with cheat
-              const weeklyIntake = trainingDayKcal * 7 + sundayDiff;
-              const intake = Math.round(weeklyIntake / 7);
               // Protein: target = weight × 2.25 ±0.25
               const proteinTarget = Math.round(bodyWeight * 2.25);
               const proteinLow = Math.round(bodyWeight * 2.0);
