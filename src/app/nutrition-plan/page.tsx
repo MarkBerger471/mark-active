@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
 import Navigation from '@/components/Navigation';
 import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan } from '@/utils/storage';
+import { calcWeeklyIntake } from '@/utils/calories';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
 
 // Nutrition database: values per 100g
@@ -328,10 +329,11 @@ function MealCard({ meal }: { meal: NutritionMeal }) {
   );
 }
 
-function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan }: {
+function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, weeklyAvgKcal }: {
   dayPlan: DayPlan;
   title: string;
   color: string;
+  weeklyAvgKcal?: number;
   editing: boolean;
   onStartEdit: () => void;
   onSave: () => void;
@@ -450,12 +452,15 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
       {expanded && (
         <div className="px-5 pb-5">
           {/* Macros — always computed from food items */}
-          <div className="grid grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-white/5">
+          <div className="grid grid-cols-4 gap-2 mb-2 p-3 rounded-xl bg-white/5">
             <MacroBar label="Kcal" value={computedMacros.kcal || plan.macros.kcal} unit="" color="#b90a0a" />
             <MacroBar label="Protein" value={computedMacros.protein || plan.macros.protein} unit="g" color="#3b82f6" />
             <MacroBar label="Carbs" value={computedMacros.carbs || plan.macros.carbs} unit="g" color="#f59e0b" />
             <MacroBar label="Fat" value={computedMacros.fat || plan.macros.fat} unit="g" color="#10b981" />
           </div>
+          {weeklyAvgKcal != null && weeklyAvgKcal !== (computedMacros.kcal || plan.macros.kcal) && (
+            <p className="text-[11px] text-white/30 mb-3 ml-1">Weekly avg: ~{weeklyAvgKcal} kcal (incl. Sunday cheat)</p>
+          )}
 
           {/* Meals */}
           {!editing ? (
@@ -753,6 +758,7 @@ export default function NutritionPlanPage() {
               onCancel={cancelEdit}
               editPlan={editingDay === 'training' ? editPlan : null}
               setEditPlan={setEditPlan}
+              weeklyAvgKcal={calcWeeklyIntake(plan.current.trainingDay.macros.kcal, plan.current.trainingDay.meals).weeklyAvgKcal}
             />
           </div>
 

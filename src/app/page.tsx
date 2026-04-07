@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import Link from 'next/link';
 import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
-import { calcSessionCalories, calcRollingTDEE } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE, calcWeeklyIntake } from '@/utils/calories';
 import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
 
 type Phase = 'bulking' | 'cutting';
@@ -282,10 +282,10 @@ export default function Dashboard() {
                 if (measurements[i].bmr) { bmr = measurements[i].bmr; break; }
               }
               const bodyWeight = measurements.length > 0 ? measurements[measurements.length - 1].weight : 80;
-              // Stored macros now include empty stomach — matches Nutrition page exactly
-              const intake = nutritionPlan?.current.trainingDay.macros.kcal;
+              const dailyKcal = nutritionPlan?.current.trainingDay.macros.kcal;
               const trainingDayProtein = nutritionPlan?.current.trainingDay.macros.protein || 0;
-              if (!bmr || !intake || trainingSessions.length === 0) return null;
+              if (!bmr || !dailyKcal || trainingSessions.length === 0) return null;
+              const { weeklyAvgKcal: intake } = calcWeeklyIntake(dailyKcal, nutritionPlan?.current.trainingDay.meals || []);
 
               const tdee = calcRollingTDEE(trainingSessions, bodyWeight, bmr, dailyActivity);
               const dailyBurn = tdee.total;

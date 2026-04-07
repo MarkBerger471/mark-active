@@ -1,4 +1,4 @@
-import { TrainingSession } from '@/types';
+import { TrainingSession, NutritionMeal } from '@/types';
 
 const CARDIO_METS: Record<string, number> = {
   'stairmaster': 9.0,
@@ -125,4 +125,63 @@ export function calcRollingTDEE(
   const neat = actDays > 0 ? Math.round(totalActiveCals / actDays) : 0;
 
   return { total: bmr + dailyTraining + neat, training: dailyTraining, neat, sessions: rollingSessions };
+}
+
+const CHEAT_MEAL_KCAL = 1300;
+
+// Per-100g kcal for computing last meal calories (subset of FOOD_DB)
+const KCAL_PER_100G: Record<string, number> = {
+  'egg white': 52, 'egg whites': 52, 'egg': 143, 'eggs': 143, 'whey': 400,
+  'bread': 265, 'rye bread': 259, 'whole rye bread': 259, 'chicken': 165,
+  'chicken breast': 165, 'fish': 120, 'beef': 254, 'ground beef': 254,
+  'salmon': 208, 'tuna': 132, 'rice': 130, 'brown rice': 112,
+  'greek yogurt': 59, 'oatmeal': 389, 'cheese': 403, 'feta': 264,
+  'cottage cheese': 98, 'cream of rice': 370, 'olive oil': 884,
+  'nuts': 607, 'almonds': 579, 'walnuts': 654, 'berries': 57, 'banana': 89,
+  'avocado': 160, 'sweet potato': 86, 'potato': 77, 'pasta': 131,
+};
+const PIECE_G: Record<string, number> = { 'egg': 60, 'eggs': 60, 'banana': 120 };
+
+function calcMealKcal(meal: NutritionMeal): number {
+  let total = 0;
+  for (const item of meal.items) {
+    // Use stored kcal if available (already computed by nutrition page)
+    if (item.kcal && item.kcal > 0) { total += item.kcal; continue; }
+    const name = (item.name || '').toLowerCase().trim();
+    const amount = item.amount || '';
+    // Find best match (longest key)
+    let per100 = 0, bestLen = 0;
+    for (const [key, val] of Object.entries(KCAL_PER_100G)) {
+      if ((name.includes(key) || key.includes(name)) && key.length > bestLen) { per100 = val; bestLen = key.length; }
+    }
+    if (per100 === 0) continue;
+    const gMatch = amount.match(/([\d.]+)\s*(?:gr?|ml)/i);
+    const bare = amount.match(/^([\d.]+)$/);
+    let grams = 0;
+    if (gMatch) { grams = parseFloat(gMatch[1]); }
+    else if (bare) {
+      const pw = Object.entries(PIECE_G).find(([k]) => name.includes(k));
+      grams = pw ? parseFloat(bare[1]) * pw[1] : parseFloat(bare[1]);
+    }
+    total += Math.round(per100 * grams / 100);
+  }
+  return total;
+}
+
+/**
+ * Compute weekly average intake accounting for Sunday cheat meal.
+ * Returns { weeklyAvgKcal, lastMealKcal, cheatMealKcal }.
+ */
+export function calcWeeklyIntake(
+  dailyKcal: number,
+  meals: NutritionMeal[],
+): { weeklyAvgKcal: number; lastMealKcal: number; cheatMealKcal: number } {
+  let lastMealKcal = 0;
+  if (meals.length > 0) {
+    lastMealKcal = calcMealKcal(meals[meals.length - 1]);
+  }
+  if (lastMealKcal === 0 && meals.length > 0) lastMealKcal = Math.round(dailyKcal / meals.length);
+  const sundayDiff = CHEAT_MEAL_KCAL - lastMealKcal;
+  const weeklyAvgKcal = Math.round((dailyKcal * 7 + sundayDiff) / 7);
+  return { weeklyAvgKcal, lastMealKcal, cheatMealKcal: CHEAT_MEAL_KCAL };
 }
