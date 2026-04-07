@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import Link from 'next/link';
 import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
-import { calcSessionCalories } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE } from '@/utils/calories';
 import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
 
 type Phase = 'bulking' | 'cutting';
@@ -283,28 +283,11 @@ export default function Dashboard() {
               const trainingDayProtein = nutritionPlan?.current.trainingDay.macros.protein || 0;
               if (!bmr || !trainingDayKcal || trainingSessions.length === 0) return null;
 
-              // Rolling 7-day TDEE (same as training page)
-              const now = new Date();
-              const todayStr = now.toISOString().split('T')[0];
-              const rollingStart = new Date(now);
-              rollingStart.setDate(rollingStart.getDate() - 6);
-              const rollingStartStr = rollingStart.toISOString().split('T')[0];
-
-              const weekSessions = trainingSessions.filter(s => s.date >= rollingStartStr && s.date <= todayStr);
-              const weekTrainingCals = weekSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
-              const dailyTrainingAvg = Math.round(weekTrainingCals / 7);
-
-              // NEAT from Oura activeCalories
-              let totalActiveCals = 0, actDays = 0;
-              for (let i = 0; i < 7; i++) {
-                const d = new Date(rollingStart);
-                d.setDate(d.getDate() + i);
-                const dayStr = d.toISOString().split('T')[0];
-                const act = dailyActivity[dayStr];
-                if (act && act.activeCalories > 0) { totalActiveCals += act.activeCalories; actDays++; }
-              }
-              const dailyNeat = actDays > 0 ? Math.round(totalActiveCals / actDays) : 0;
-              const dailyBurn = bmr + dailyTrainingAvg + dailyNeat;
+              const tdee = calcRollingTDEE(trainingSessions, bodyWeight, bmr, dailyActivity);
+              const dailyBurn = tdee.total;
+              const dailyTrainingAvg = tdee.training;
+              const dailyNeat = tdee.neat;
+              const weekSessions = tdee.sessions;
 
               // Calculate Sunday cheat meal adjustment
               // Last meal replaced with 1300 kcal cheat on Sunday

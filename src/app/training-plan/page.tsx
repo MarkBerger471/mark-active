@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, updateSessionDuration, getMeasurements } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
-import { calcSessionCalories, parseDurationMinutes } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE, parseDurationMinutes } from '@/utils/calories';
 
 // LEGACY — replaced by shared @/utils/calories.ts
 // MET values for cardio activities (HR 120-130 range)
@@ -512,26 +512,14 @@ export default function TrainingPlanPage() {
               const now = new Date();
               const todayStr = now.toISOString().split('T')[0];
 
-              // Current week: rolling 7-day window (today - 6 days through today)
+              const rolling = calcRollingTDEE(sessions, latestWeight, latestBmr, dailyActivity);
+              const rollingTotal = rolling.total;
+              const rollingDailyTraining = rolling.training;
+              const rollingNeat = rolling.neat;
+              const rollingSessions = rolling.sessions;
+
               const rollingStart = new Date(now);
               rollingStart.setDate(rollingStart.getDate() - 6);
-              const rollingStartStr = rollingStart.toISOString().split('T')[0];
-
-              const rollingSessions = sessions.filter(s => s.date >= rollingStartStr && s.date <= todayStr);
-              const rollingTrainingCals = rollingSessions.reduce((sum, s) => sum + calcSessionCalories(s, latestWeight), 0);
-              const rollingDailyTraining = Math.round(rollingTrainingCals / 7);
-
-              let rollingActiveCals = 0, rollingActDays = 0;
-              for (let i = 0; i < 7; i++) {
-                const d = new Date(rollingStart);
-                d.setDate(d.getDate() + i);
-                const dayStr = d.toISOString().split('T')[0];
-                const act = dailyActivity[dayStr];
-                if (act && act.activeCalories > 0) { rollingActiveCals += act.activeCalories; rollingActDays++; }
-              }
-              const rollingNeat = rollingActDays > 0 ? Math.round(rollingActiveCals / rollingActDays) : 0;
-              const rollingTotal = latestBmr + rollingDailyTraining + rollingNeat;
-
               const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
               const rollingLabel = `${fmt(rollingStart)} – ${fmt(now)}`;
 

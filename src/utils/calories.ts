@@ -97,3 +97,32 @@ export function calcSessionCalories(session: TrainingSession, bodyWeight: number
 
   return Math.round(totalCals);
 }
+
+export function calcRollingTDEE(
+  sessions: TrainingSession[],
+  bodyWeight: number,
+  bmr: number,
+  dailyActivity: Record<string, { activeCalories: number }>,
+): { total: number; training: number; neat: number; sessions: TrainingSession[] } {
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const rollingStart = new Date(now);
+  rollingStart.setDate(rollingStart.getDate() - 6);
+  const rollingStartStr = rollingStart.toISOString().split('T')[0];
+
+  const rollingSessions = sessions.filter(s => s.date >= rollingStartStr && s.date <= todayStr);
+  const trainingCals = rollingSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
+  const dailyTraining = Math.round(trainingCals / 7);
+
+  let totalActiveCals = 0, actDays = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(rollingStart);
+    d.setDate(d.getDate() + i);
+    const dayStr = d.toISOString().split('T')[0];
+    const act = dailyActivity[dayStr];
+    if (act && act.activeCalories > 0) { totalActiveCals += act.activeCalories; actDays++; }
+  }
+  const neat = actDays > 0 ? Math.round(totalActiveCals / actDays) : 0;
+
+  return { total: bmr + dailyTraining + neat, training: dailyTraining, neat, sessions: rollingSessions };
+}
