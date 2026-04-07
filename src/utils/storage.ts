@@ -257,7 +257,15 @@ export async function saveTrainingSession(session: TrainingSession) {
     // Preserve startedAt (first save time)
     session.startedAt = existing.startedAt || existing.savedAt || now;
 
-    if (session.date < today && existing.durationMinutes != null) {
+    if (session.manualDuration) {
+      // User manually set duration — preserve it, only update savedAt for past days
+      session.savedAt = session.date < today ? (existing.savedAt || now) : now;
+    } else if (existing.manualDuration) {
+      // Previously manually set — preserve duration and flag
+      session.savedAt = existing.savedAt;
+      session.durationMinutes = existing.durationMinutes;
+      session.manualDuration = true;
+    } else if (session.date < today && existing.durationMinutes != null) {
       // Past day + already frozen — preserve both
       session.savedAt = existing.savedAt;
       session.durationMinutes = existing.durationMinutes;
@@ -288,6 +296,23 @@ export async function saveTrainingSession(session: TrainingSession) {
     timestamp: Date.now(),
   });
 
+  flushSyncQueue();
+}
+
+export async function updateSessionDuration(id: string, minutes: number) {
+  const allLocal = await idbGetSessions();
+  const session = allLocal.find(s => s.id === id);
+  if (!session) return;
+  session.durationMinutes = minutes;
+  session.manualDuration = true;
+  await idbPutSession(session);
+  await addPendingSync({
+    collection: 'trainingSessions',
+    docId: session.id,
+    operation: 'set',
+    data: stripUndefined(session),
+    timestamp: Date.now(),
+  });
   flushSyncQueue();
 }
 

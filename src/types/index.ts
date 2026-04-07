@@ -68,6 +68,7 @@ export interface TrainingSession {
   savedAt?: string; // ISO timestamp
   startedAt?: string; // ISO timestamp — first save time
   durationMinutes?: number; // frozen after the session day
+  manualDuration?: boolean; // true if user manually set the duration
   workoutName: string;
   exercises: TrainingExercise[];
 }

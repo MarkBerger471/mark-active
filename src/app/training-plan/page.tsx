@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Navigation from '@/components/Navigation';
-import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, getMeasurements } from '@/utils/storage';
+import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, updateSessionDuration, getMeasurements } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, parseDurationMinutes } from '@/utils/calories';
@@ -172,6 +172,8 @@ export default function TrainingPlanPage() {
   const [saved, setSaved] = useState(false);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [editingDuration, setEditingDuration] = useState<string | null>(null);
+  const [durationInput, setDurationInput] = useState('');
   const [lastSessions, setLastSessions] = useState<Record<string, TrainingSession>>({});
   const [measurementDates, setMeasurementDates] = useState<string[]>([]);
   const [latestBmr, setLatestBmr] = useState<number>(0);
@@ -634,11 +636,36 @@ export default function TrainingPlanPage() {
                             </span>
                             {(() => {
                               if (s.workoutName === 'Cardio') {
-                                // Always use input duration for cardio, not save timestamps
                                 const mins = doneExercises.reduce((t, ex) => t + parseDurationMinutes(ex.targetReps), 0);
                                 if (mins > 0) return <span className="text-xs text-blue-400/70 ml-2">{mins} min</span>;
+                              } else if (editingDuration === s.id) {
+                                return (
+                                  <span className="ml-2 inline-flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                    <input type="number" className="w-12 bg-white/10 rounded px-1 py-0.5 text-xs text-blue-400 text-center outline-none"
+                                      value={durationInput} onChange={e => setDurationInput(e.target.value)} autoFocus
+                                      onKeyDown={async e => {
+                                        if (e.key === 'Enter') {
+                                          const mins = parseInt(durationInput);
+                                          if (mins > 0) { await updateSessionDuration(s.id, mins); setSessions(await getTrainingSessions()); }
+                                          setEditingDuration(null);
+                                        } else if (e.key === 'Escape') { setEditingDuration(null); }
+                                      }}
+                                      onBlur={async () => {
+                                        const mins = parseInt(durationInput);
+                                        if (mins > 0) { await updateSessionDuration(s.id, mins); setSessions(await getTrainingSessions()); }
+                                        setEditingDuration(null);
+                                      }}
+                                    />
+                                    <span className="text-[10px] text-white/30">min</span>
+                                  </span>
+                                );
                               } else if (s.durationMinutes != null && s.durationMinutes > 0) {
-                                return <span className="text-xs text-blue-400/70 ml-2">{s.durationMinutes} min</span>;
+                                return (
+                                  <span className="text-xs text-blue-400/70 ml-2 cursor-pointer hover:text-blue-400 transition-colors"
+                                    onClick={e => { e.stopPropagation(); setEditingDuration(s.id); setDurationInput(String(s.durationMinutes)); }}
+                                    title="Click to edit duration"
+                                  >{s.durationMinutes} min</span>
+                                );
                               } else {
                                 const sets = doneExercises.reduce((n, ex) => n + ex.sets.length, 0);
                                 const exCount = doneExercises.length;
