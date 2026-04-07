@@ -103,8 +103,11 @@ export default function Dashboard() {
       // Fetch activity data (same as training page - 60 days)
       fetch('/api/oura?days=60').then(r => r.json()).then(d => {
         const act: Record<string, { activeCalories: number }> = {};
-        if (d.data) for (const day of d.data) { if (day.activeCalories) act[day.day] = { activeCalories: day.activeCalories }; }
-        if (d.activity) for (const day of d.activity) { if (day.activeCalories) act[day.day] = { activeCalories: day.activeCalories }; }
+        const addDay = (day: string, steps?: number, activeCal?: number) => {
+          if (steps || activeCal) act[day] = { activeCalories: activeCal || 0 };
+        };
+        if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
+        if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
         setDailyActivity(act);
       }).catch(() => {});
     }
@@ -273,12 +276,12 @@ export default function Dashboard() {
 
             {/* Calorie Balance Chart */}
             {(() => {
-              // Use latest measurement with BMR (same logic as training page)
+              // Derive BMR and weight from measurements (same as training page)
               let bmr: number | undefined;
               for (let i = measurements.length - 1; i >= 0; i--) {
                 if (measurements[i].bmr) { bmr = measurements[i].bmr; break; }
               }
-              const bodyWeight = latestMeasurement?.weight || 80;
+              const bodyWeight = measurements.length > 0 ? measurements[measurements.length - 1].weight : 80;
               const trainingDayKcal = nutritionPlan?.current.trainingDay.macros.kcal;
               const trainingDayProtein = nutritionPlan?.current.trainingDay.macros.protein || 0;
               if (!bmr || !trainingDayKcal || trainingSessions.length === 0) return null;
