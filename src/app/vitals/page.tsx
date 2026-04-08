@@ -4,8 +4,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import Navigation from '@/components/Navigation';
-import { getBloodTests, saveBloodTests } from '@/utils/storage';
-import { BloodTest, BloodTestValue } from '@/types';
+import { getBloodTests, saveBloodTests, getTrainingSessions, getNutritionPlan, getMeasurements, getSetting, saveSetting } from '@/utils/storage';
+import { BloodTest, BloodTestValue, TrainingSession, NutritionPlan } from '@/types';
 import ReactMarkdown from 'react-markdown';
 
 function MarkerPopup({ title, content, loading, onClose }: { title: string; content: string; loading: boolean; onClose: () => void }) {
@@ -574,6 +574,22 @@ export default function VitalsPage() {
   const [editDate, setEditDate] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Lifestyle dashboard state
+  const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
+  const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
+  const [latestWeight, setLatestWeight] = useState<number>(0);
+  const [avgSleep, setAvgSleep] = useState<string>('');
+  const [lsTrt, setLsTrt] = useState('Unknown');
+  const [lsAlcohol, setLsAlcohol] = useState('None');
+  const [lsProcessedFood, setLsProcessedFood] = useState('None');
+  const [lsWater, setLsWater] = useState('4+ L/day');
+  const [lsCoffee, setLsCoffee] = useState('2-5 cups/day');
+  const [lsStress, setLsStress] = useState('Moderate');
+
+  // Analysis state
+  const [analysing, setAnalysing] = useState<string | null>(null);
+  const [viewingAnalysis, setViewingAnalysis] = useState<string | null>(null);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.push('/login');
@@ -586,6 +602,23 @@ export default function VitalsPage() {
         setTests(t.sort((a, b) => b.date.localeCompare(a.date)));
         setLoaded(true);
       });
+      // Lifestyle data
+      getTrainingSessions().then(setTrainingSessions);
+      getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
+      getMeasurements().then(ms => { if (ms.length > 0) setLatestWeight(ms[ms.length - 1].weight); });
+      fetch('/api/oura?days=7').then(r => r.json()).then(d => {
+        if (d.data && d.data.length > 0) {
+          const sleepHours = d.data.filter((s: { totalSleep?: number }) => s.totalSleep).map((s: { totalSleep: number }) => Math.round(s.totalSleep / 3600 * 10) / 10);
+          if (sleepHours.length > 0) setAvgSleep(`${(sleepHours.reduce((a: number, b: number) => a + b, 0) / sleepHours.length).toFixed(1)}h/night`);
+        }
+      }).catch(() => {});
+      // Load manual lifestyle settings
+      getSetting('ls_trt').then(v => { if (v) setLsTrt(v); });
+      getSetting('ls_alcohol').then(v => { if (v) setLsAlcohol(v); });
+      getSetting('ls_processedFood').then(v => { if (v) setLsProcessedFood(v); });
+      getSetting('ls_water').then(v => { if (v) setLsWater(v); });
+      getSetting('ls_coffee').then(v => { if (v) setLsCoffee(v); });
+      getSetting('ls_stress').then(v => { if (v) setLsStress(v); });
     }
   }, [isAuthenticated]);
 
@@ -837,6 +870,63 @@ export default function VitalsPage() {
     }));
   };
 
+  // Derived lifestyle values
+  const now7 = new Date();
+  const weekAgoStr = new Date(now7.getTime() - 7 * 86400000).toISOString().split('T')[0];
+  const recentSessions = trainingSessions.filter(s => s.date >= weekAgoStr);
+  const trainingFreq = recentSessions.length;
+  const proteinG = nutritionPlan?.current.trainingDay.macros.protein || 0;
+  const proteinPerKg = latestWeight > 0 ? (proteinG / latestWeight).toFixed(1) : '?';
+  const allSupplements = [
+    ...(nutritionPlan?.current.emptyStomach || []),
+    ...(nutritionPlan?.current.trainingDay.meals || []).flatMap(m => m.supplements || []),
+  ];
+  const uniqueSupplements = [...new Set(allSupplements.map(s => s.replace(/\s+\d[\d.,]*\s*(?:mg|gr?|iu|mcg|ml|caps?|tablets?|scoops?)\s*$/i, '').trim()))];
+
+  const saveLifestyle = (key: string, value: string, setter: (v: string) => void) => {
+    setter(value);
+    saveSetting(`ls_${key}`, value);
+  };
+
+  const getLifestyleContext = () => ({
+    trainingFrequency: `${trainingFreq}`,
+    trainingType: 'heavy resistance training',
+    weight: latestWeight > 0 ? `${latestWeight}` : 'Unknown',
+    proteinIntake: proteinG > 0 ? `${proteinG}g/day (${proteinPerKg} g/kg)` : 'Unknown',
+    supplements: uniqueSupplements.length > 0 ? uniqueSupplements.join(', ') : 'None',
+    trt: lsTrt,
+    alcohol: lsAlcohol,
+    processedFood: lsProcessedFood,
+    water: lsWater,
+    coffee: lsCoffee,
+    sleep: avgSleep || 'Unknown',
+    stress: lsStress,
+  });
+
+  const handleAnalyse = async (test: BloodTest) => {
+    setAnalysing(test.id);
+    try {
+      const previousTests = tests.filter(t => t.id !== test.id && t.date < test.date).slice(0, 3).map(t => ({
+        date: t.date, label: t.label, values: t.values,
+      }));
+      const res = await fetch('/api/analyse-bloodtest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: test.values, lifestyle: getLifestyleContext(), previousTests }),
+      });
+      const json = await res.json();
+      if (json.html) {
+        const updated = tests.map(t => t.id === test.id ? { ...t, analysis: json.html } : t);
+        setTests(updated);
+        await saveBloodTests(updated);
+        setViewingAnalysis(test.id);
+      }
+    } catch (e) {
+      console.error('Analysis failed:', e);
+    }
+    setAnalysing(null);
+  };
+
   if (isLoading || !isAuthenticated || !loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -865,6 +955,60 @@ export default function VitalsPage() {
                 {showComparison ? 'Hide Comparison' : 'Compare Over Time'}
               </button>
             )}
+          </div>
+
+          {/* Lifestyle Dashboard */}
+          <div className="glass-card p-5 mb-6">
+            <h2 className="text-sm font-semibold text-white mb-3">Lifestyle Profile</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+              {/* Auto-derived */}
+              <div className="bg-white/5 rounded-xl p-3">
+                <p className="text-[10px] text-white/30 uppercase">Training</p>
+                <p className="text-white font-medium">{trainingFreq}x / week</p>
+                <p className="text-[9px] text-cyan-400/50">from training log</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3">
+                <p className="text-[10px] text-white/30 uppercase">Protein</p>
+                <p className="text-white font-medium">{proteinG > 0 ? `${proteinG}g (${proteinPerKg} g/kg)` : '—'}</p>
+                <p className="text-[9px] text-cyan-400/50">from nutrition plan</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3">
+                <p className="text-[10px] text-white/30 uppercase">Weight</p>
+                <p className="text-white font-medium">{latestWeight > 0 ? `${latestWeight} kg` : '—'}</p>
+                <p className="text-[9px] text-cyan-400/50">from measurements</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3">
+                <p className="text-[10px] text-white/30 uppercase">Sleep</p>
+                <p className="text-white font-medium">{avgSleep || '—'}</p>
+                <p className="text-[9px] text-cyan-400/50">via Oura (7d avg)</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 col-span-2 sm:col-span-3">
+                <p className="text-[10px] text-white/30 uppercase mb-1">Supplements</p>
+                <p className="text-white/70 text-xs">{uniqueSupplements.length > 0 ? uniqueSupplements.join(', ') : '—'}</p>
+                <p className="text-[9px] text-cyan-400/50">from nutrition plan</p>
+              </div>
+              {/* Manual inputs */}
+              {([
+                { key: 'trt', label: 'TRT', value: lsTrt, setter: setLsTrt, options: ['Yes', 'No', 'Unknown'] },
+                { key: 'alcohol', label: 'Alcohol', value: lsAlcohol, setter: setLsAlcohol, options: ['None', 'Light', 'Moderate', 'Heavy'] },
+                { key: 'processedFood', label: 'Processed Food', value: lsProcessedFood, setter: setLsProcessedFood, options: ['None', 'Some', 'Frequent'] },
+                { key: 'water', label: 'Water', value: lsWater, setter: setLsWater, options: ['<2 L/day', '2-3 L/day', '3-4 L/day', '4+ L/day'] },
+                { key: 'coffee', label: 'Coffee', value: lsCoffee, setter: setLsCoffee, options: ['None', '1 cup/day', '2-3 cups/day', '2-5 cups/day', '5+ cups/day'] },
+                { key: 'stress', label: 'Stress', value: lsStress, setter: setLsStress, options: ['Low', 'Moderate', 'High'] },
+              ] as const).map(field => (
+                <div key={field.key} className="bg-white/5 rounded-xl p-3">
+                  <p className="text-[10px] text-white/30 uppercase mb-1">{field.label}</p>
+                  <select
+                    value={field.value}
+                    onChange={e => saveLifestyle(field.key, e.target.value, field.setter as (v: string) => void)}
+                    className="w-full bg-white/10 text-white text-xs rounded-lg px-2 py-1.5 outline-none border border-white/10"
+                  >
+                    {field.options.map(opt => <option key={opt} value={opt} className="bg-[#1a1d27]">{opt}</option>)}
+                  </select>
+                  <p className="text-[9px] text-white/30 mt-1">manual</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Add form */}
@@ -1061,6 +1205,22 @@ export default function VitalsPage() {
                       )}
                     </div>
                     <div className="flex gap-2 items-center">
+                      {test.analysis ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setViewingAnalysis(test.id); }}
+                          className="text-xs text-green-400/70 hover:text-green-400 px-2 py-1"
+                        >
+                          View Report
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleAnalyse(test); }}
+                          disabled={analysing === test.id}
+                          className="text-xs text-blue-400/70 hover:text-blue-400 px-2 py-1 disabled:opacity-50"
+                        >
+                          {analysing === test.id ? 'Analysing...' : 'Analyse'}
+                        </button>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); startEditTest(test); }}
                         className="text-xs text-white/30 hover:text-white/70 px-2 py-1"
@@ -1174,6 +1334,23 @@ export default function VitalsPage() {
           </div>
         </div>
       </main>
+      {viewingAnalysis && (() => {
+        const test = tests.find(t => t.id === viewingAnalysis);
+        if (!test?.analysis) return null;
+        return (
+          <div className="fixed inset-0 bg-black/80 z-50 flex items-start justify-center overflow-y-auto p-4">
+            <div className="bg-white rounded-2xl max-w-4xl w-full my-8 relative">
+              <div className="sticky top-0 bg-white rounded-t-2xl border-b px-6 py-4 flex items-center justify-between z-10">
+                <h2 className="text-lg font-bold text-gray-800">
+                  Lab Report — {new Date(test.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </h2>
+                <button onClick={() => setViewingAnalysis(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+              </div>
+              <div className="p-6" dangerouslySetInnerHTML={{ __html: test.analysis }} />
+            </div>
+          </div>
+        );
+      })()}
       {popup && (
         <MarkerPopup
           title={popup.title}

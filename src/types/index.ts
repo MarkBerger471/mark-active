@@ -152,6 +152,7 @@ export interface BloodTest {
   label?: string;     // e.g. "Routine checkup"
   rawText?: string;   // original pasted/extracted text
   values: BloodTestValue[];
+  analysis?: string;  // HTML report from Claude analysis
 }
 
 export interface UserCredentials {
