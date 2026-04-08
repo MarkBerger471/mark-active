@@ -436,26 +436,34 @@ export default function Dashboard() {
                     {/* Calorie bars */}
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
-                        {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; return (<>
-                        <line x1="15" y1={12 + barH - targetH} x2="95" y2={12 + barH - targetH} stroke={tColor} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
-                        <text x="98" y={12 + barH - targetH + 3} textAnchor="start" fill={tColor} fontSize="7" fontWeight="bold">{targetIntake}</text>
+                        {/* Bars first (behind labels) */}
+                        <rect x="22" y={18 + barH - burnH} width="38" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
+                        <rect x="68" y={18 + barH - intakeH} width="38" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
+                        {/* Target line */}
+                        {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; const tY = 18 + barH - targetH; return (<>
+                        <line x1="15" y1={tY} x2="130" y2={tY} stroke={tColor} strokeWidth="1" strokeDasharray="3 2" opacity="0.4" />
+                        <text x="130" y={tY - 3} textAnchor="end" fill={tColor} fontSize="6" fontWeight="bold">{targetIntake}</text>
                         </>); })()}
-                        <rect x="22" y={12 + barH - burnH} width="38" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
-                        <text x="41" y={12 + barH - burnH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{dailyBurn}</text>
-                        <text x="41" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Burn</text>
-                        <rect x="68" y={12 + barH - intakeH} width="38" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
-                        <text x="87" y={12 + barH - intakeH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{intake}</text>
-                        <text x="87" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Intake</text>
+                        {/* Bar value labels (inside bars) */}
+                        <text x="41" y={18 + barH - burnH / 2 + 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{dailyBurn}</text>
+                        <text x="41" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Burn</text>
+                        <text x="87" y={18 + barH - intakeH / 2 + 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{intake}</text>
+                        <text x="87" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Intake</text>
                       </svg>
                     </div>
                     {/* Protein bar */}
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
-                        <line x1="25" y1={12 + barH - pTargetBarH} x2="85" y2={12 + barH - pTargetBarH} stroke="#3b82f6" strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
-                        <text x="88" y={12 + barH - pTargetBarH + 3} textAnchor="start" fill="#3b82f6" fontSize="7" fontWeight="bold">{proteinTarget}g</text>
-                        <rect x="48" y={12 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="4" fill={proteinZoneColor} fillOpacity="0.7" />
-                        <text x="70" y={12 + barH - pIntakeBarH - 3} textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">{trainingDayProtein}g</text>
-                        <text x="70" y={12 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Protein</text>
+                        {/* Bar first */}
+                        <rect x="48" y={18 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="4" fill={proteinZoneColor} fillOpacity="0.7" />
+                        {/* Target line */}
+                        {(() => { const tY = 18 + barH - pTargetBarH; return (<>
+                        <line x1="25" y1={tY} x2="130" y2={tY} stroke="#3b82f6" strokeWidth="1" strokeDasharray="3 2" opacity="0.4" />
+                        <text x="130" y={tY - 3} textAnchor="end" fill="#3b82f6" fontSize="6" fontWeight="bold">{proteinTarget}g</text>
+                        </>); })()}
+                        {/* Bar value label (inside bar) */}
+                        <text x="70" y={18 + barH - pIntakeBarH / 2 + 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{trainingDayProtein}g</text>
+                        <text x="70" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Protein</text>
                       </svg>
                     </div>
                   </div>
