@@ -6,6 +6,7 @@ import { useEffect, useState, useRef } from 'react';
 import Navigation from '@/components/Navigation';
 import { getBloodTests, saveBloodTests, getTrainingSessions, getNutritionPlan, getMeasurements, getSetting, saveSetting } from '@/utils/storage';
 import { BloodTest, BloodTestValue, TrainingSession, NutritionPlan } from '@/types';
+import EmptyState from '@/components/EmptyState';
 import ReactMarkdown from 'react-markdown';
 
 function MarkerPopup({ title, content, loading, onClose }: { title: string; content: string; loading: boolean; onClose: () => void }) {
@@ -948,7 +949,7 @@ export default function VitalsPage() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
+      <main className="main-content p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
           <h1 className="text-3xl font-bold text-white mb-4">Vitals</h1>
 
@@ -1187,10 +1188,7 @@ export default function VitalsPage() {
 
           {/* Blood test list */}
           {tests.length === 0 && !showAdd && (
-            <div className="glass-card p-8 text-center">
-              <p className="text-white/40 mb-4">No blood tests recorded yet</p>
-              <button onClick={() => setShowAdd(true)} className="btn-primary text-sm">Add Your First Blood Test</button>
-            </div>
+            <EmptyState icon="bloodtest" message="No blood tests recorded yet" action="Add Your First Blood Test" onAction={() => setShowAdd(true)} />
           )}
 
           <div className="space-y-3">

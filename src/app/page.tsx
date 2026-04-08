@@ -9,6 +9,9 @@ import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutri
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
 import { calcSessionCalories, calcRollingTDEE, calcWeeklyIntake } from '@/utils/calories';
 import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
+import AnimatedNumber from '@/components/AnimatedNumber';
+import Sparkline from '@/components/Sparkline';
+import BeforeAfterSlider from '@/components/BeforeAfterSlider';
 
 type Phase = 'bulking' | 'cutting';
 
@@ -38,22 +41,141 @@ function formatDuration(seconds?: number): string {
   return `${h}h ${m}m`;
 }
 
-function SleepScoreRing({ score }: { score: number }) {
-  const radius = 36;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-  const color = score >= 85 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#ef4444';
-
+function SleepMultiRing({ score, deepPct, remPct }: { score: number; deepPct: number; remPct: number }) {
+  const rings = [
+    { r: 40, val: score / 100, color: score >= 85 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#ef4444', w: 6 },
+    { r: 32, val: Math.min(remPct / 25, 1), color: '#06b6d4', w: 5 },
+    { r: 25, val: Math.min(deepPct / 20, 1), color: '#818cf8', w: 5 },
+  ];
   return (
-    <div className="relative w-24 h-24">
-      <svg className="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r={radius} fill="none" stroke="white" strokeOpacity="0.08" strokeWidth="7" />
-        <circle cx="50" cy="50" r={radius} fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
-          strokeDasharray={circumference} strokeDashoffset={offset} className="transition-all duration-700" />
+    <div className="relative w-28 h-28">
+      <svg className="w-28 h-28 -rotate-90" viewBox="0 0 100 100">
+        <defs>
+          <filter id="ringGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        {rings.map((ring, i) => {
+          const c = 2 * Math.PI * ring.r;
+          const off = c - ring.val * c;
+          return (
+            <g key={i}>
+              <circle cx="50" cy="50" r={ring.r} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth={ring.w} />
+              <circle cx="50" cy="50" r={ring.r} fill="none" stroke={ring.color} strokeWidth={ring.w} strokeLinecap="round"
+                strokeDasharray={c} strokeDashoffset={off} filter="url(#ringGlow)"
+                className="gauge-sweep" style={{ '--gauge-arc': c, animationDelay: `${i * 150}ms` } as React.CSSProperties} />
+            </g>
+          );
+        })}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold text-white">{score}</span>
-        <span className="text-[9px] text-white/30 uppercase">Score</span>
+        <span className="text-2xl font-bold text-white data-value">{score}</span>
+        <span className="text-[8px] text-white/30 uppercase tracking-wider">Score</span>
+      </div>
+    </div>
+  );
+}
+
+function SleepHypnogram({ deep, rem, light, awake, total, bedStart }: { deep: number; rem: number; light: number; awake: number; total: number; bedStart?: string }) {
+  if (!total || total === 0) return null;
+  // Build synthetic hypnogram blocks from durations
+  // Typical cycle: Light → Deep → Light → REM, repeating ~4-5 times
+  const totalSec = deep + rem + light + awake;
+  const cycles = Math.max(3, Math.round(totalSec / 5400)); // ~90 min cycles
+  const stages: { stage: number; dur: number }[] = []; // 0=awake, 1=light, 2=rem, 3=deep
+  let remainDeep = deep, remainRem = rem, remainLight = light, remainAwake = awake;
+  for (let c = 0; c < cycles; c++) {
+    // Each cycle: light → deep → light → REM, with brief awake
+    const cycleFrac = 1 / cycles;
+    const cDeep = Math.round(deep * cycleFrac * (c < cycles / 2 ? 1.3 : 0.7));
+    const cRem = Math.round(rem * cycleFrac * (c < cycles / 2 ? 0.7 : 1.3));
+    const cAwake = Math.round(awake * cycleFrac);
+    const cLight = Math.round((totalSec * cycleFrac) - cDeep - cRem - cAwake);
+    if (cAwake > 0) { stages.push({ stage: 0, dur: Math.min(cAwake, remainAwake) }); remainAwake -= cAwake; }
+    if (cLight > 0) { stages.push({ stage: 1, dur: Math.max(0, Math.min(cLight * 0.4, remainLight)) }); }
+    if (cDeep > 0) { stages.push({ stage: 3, dur: Math.min(cDeep, remainDeep) }); remainDeep -= cDeep; }
+    stages.push({ stage: 1, dur: Math.max(0, Math.min(cLight * 0.6, remainLight)) }); remainLight -= cLight;
+    if (cRem > 0) { stages.push({ stage: 2, dur: Math.min(cRem, remainRem) }); remainRem -= cRem; }
+  }
+  const colors = ['rgba(255,255,255,0.2)', '#60a5fa', '#06b6d4', '#818cf8'];
+  const glowColors = ['none', 'none', '0 0 4px #06b6d4', '0 0 4px #818cf8'];
+  const labels = ['Awake', 'Light', 'REM', 'Deep'];
+  const yMap = [4, 18, 30, 42]; // y positions for each stage
+  const w = 280, h = 52;
+  let x = 0;
+  const blocks = stages.filter(s => s.dur > 0).map((s, i) => {
+    const bw = Math.max(2, (s.dur / totalSec) * w);
+    const block = { x, y: yMap[s.stage], w: bw, color: colors[s.stage], glow: glowColors[s.stage], key: i };
+    x += bw;
+    return block;
+  });
+  // Time labels
+  const startHour = bedStart ? new Date(bedStart).getHours() : 23;
+  const durHours = Math.round(totalSec / 3600);
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[9px] text-white/25 uppercase tracking-wider">Sleep Stages</span>
+        <div className="flex gap-3">
+          {[3, 2, 1, 0].map(s => (
+            <span key={s} className="flex items-center gap-1 text-[8px]" style={{ color: colors[s] }}>
+              <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: colors[s] }} />
+              {labels[s]}
+            </span>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: '48px' }}>
+        <defs>
+          <filter id="stageGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.5" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        {/* Grid lines */}
+        {yMap.map((y, i) => (
+          <line key={i} x1="0" y1={y + 4} x2={w} y2={y + 4} stroke="white" strokeOpacity="0.03" />
+        ))}
+        {/* Stage blocks */}
+        {blocks.map(b => (
+          <rect key={b.key} x={b.x} y={b.y} width={b.w} height={8} rx="1.5" fill={b.color}
+            filter={b.glow !== 'none' ? 'url(#stageGlow)' : undefined} opacity="0.85" />
+        ))}
+      </svg>
+      <div className="flex justify-between text-[8px] text-white/20 mt-0.5">
+        <span>{startHour}:00</span>
+        <span>{(startHour + Math.floor(durHours / 2)) % 24}:00</span>
+        <span>{(startHour + durHours) % 24}:00</span>
+      </div>
+    </div>
+  );
+}
+
+function SleepHeatStrip({ days }: { days: { day: string; score: number }[] }) {
+  const last7 = days.slice(0, 7).reverse();
+  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  return (
+    <div className="mt-3 pt-3 border-t border-white/5">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[9px] text-white/25 uppercase tracking-wider">Last 7 Nights</span>
+      </div>
+      <div className="flex gap-1.5">
+        {last7.map((d, i) => {
+          const intensity = Math.max(0.15, d.score / 100);
+          const hue = d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444';
+          return (
+            <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
+              <div
+                className="w-full aspect-square rounded-md transition-all"
+                style={{ background: hue, opacity: intensity, boxShadow: d.score >= 85 ? `0 0 8px ${hue}40` : 'none' }}
+              />
+              <span className="text-[7px] text-white/25">{dayLabels[new Date(d.day + 'T00:00:00').getDay() === 0 ? 6 : new Date(d.day + 'T00:00:00').getDay() - 1]}</span>
+              <span className="text-[7px] text-white/30 font-medium">{d.score}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -138,7 +260,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
+      <main className="main-content p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
           <div className="mb-4 relative">
             <DumbbellIcon className="absolute -top-2 right-0 w-24 h-24 text-white opacity-[0.04] pointer-events-none" />
@@ -152,36 +274,49 @@ export default function Dashboard() {
 
           {/* Quick Stats */}
           {latestMeasurement && (() => {
-            const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean }) => {
+            const sparkData = (field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs') =>
+              measurements.map(m => m[field]).filter((v): v is number => v != null).slice(-8);
+            const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean; hero?: boolean }, idx: number) => {
               const curVal = latestMeasurement[stat.field];
               const prevVal = previousMeasurement?.[stat.field];
               const change = (curVal != null && prevVal != null)
                 ? Math.round((curVal - prevVal) * 10) / 10
                 : undefined;
+              const isGood = change !== undefined && change !== 0 && (stat.lowerIsBetter ? change < 0 : change > 0);
+              const isBad = change !== undefined && change !== 0 && !isGood;
+              const tint = isGood ? 'from-green-500/8 to-transparent' : isBad ? 'from-red-500/8 to-transparent' : '';
+              const spark = sparkData(stat.field);
+              const sparkColor = stat.lowerIsBetter ? '#ef4444' : '#22c55e';
               return (
-                <div key={stat.label} className="glass-card p-4 stat-accent">
-                  <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
-                  <p className="text-2xl font-bold text-white mt-1">{stat.value}</p>
-                  {change !== undefined && change !== 0 && (
-                    <p className="text-sm mt-1">{formatChange(change, stat.lowerIsBetter)}</p>
-                  )}
+                <div key={stat.label} className={`glass-card p-4 stat-accent card-animate bg-gradient-to-br ${tint}`} style={{ animationDelay: `${idx * 60}ms` }}>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
+                      <p className={`font-bold mt-1 data-value ${stat.hero ? 'text-4xl gradient-text' : 'text-2xl text-white'}`}>{stat.value}</p>
+                      {change !== undefined && change !== 0 && (
+                        <p className="text-sm mt-1">{formatChange(change, stat.lowerIsBetter)}</p>
+                      )}
+                    </div>
+                    {spark.length >= 2 && <Sparkline data={spark} color={sparkColor} width={56} height={28} />}
+                  </div>
                 </div>
               );
             };
+            let idx = 0;
             return (
               <div className="flex flex-col gap-4 mb-8">
-                {statCard({ label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight' })}
+                {statCard({ label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight', hero: true }, idx++)}
                 <div className="grid grid-cols-2 gap-4">
-                  {statCard({ label: 'Muscle Mass', value: latestMeasurement.muscleMass != null ? `${latestMeasurement.muscleMass}kg` : '—', field: 'muscleMass' })}
-                  {statCard({ label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat', lowerIsBetter: true })}
+                  {statCard({ label: 'Muscle Mass', value: latestMeasurement.muscleMass != null ? `${latestMeasurement.muscleMass}kg` : '—', field: 'muscleMass' }, idx++)}
+                  {statCard({ label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat', lowerIsBetter: true }, idx++)}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  {statCard({ label: 'Chest', value: `${latestMeasurement.chest}cm`, field: 'chest' })}
-                  {statCard({ label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist', lowerIsBetter: true })}
+                  {statCard({ label: 'Chest', value: `${latestMeasurement.chest}cm`, field: 'chest' }, idx++)}
+                  {statCard({ label: 'Waist', value: `${latestMeasurement.waist}cm`, field: 'waist', lowerIsBetter: true }, idx++)}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  {statCard({ label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' })}
-                  {statCard({ label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' })}
+                  {statCard({ label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' }, idx++)}
+                  {statCard({ label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' }, idx++)}
                 </div>
               </div>
             );
@@ -193,7 +328,7 @@ export default function Dashboard() {
             {sleepData.length > 0 && (() => {
               const last = sleepData[0];
               return (
-                <div className="glass-card p-5 order-2 md:order-1">
+                <div className="glass-card p-5 order-2 md:order-1 fade-up">
                   <button
                     onClick={() => setSleepExpanded(!sleepExpanded)}
                     className="w-full flex items-center justify-between text-left"
@@ -208,48 +343,50 @@ export default function Dashboard() {
                   </button>
 
                   <div className="flex items-center gap-4 mt-3">
-                    <SleepScoreRing score={last.score} />
-                    <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-1">
+                    <SleepMultiRing score={last.score}
+                      deepPct={last.totalSleep && last.deepSleep ? Math.round((last.deepSleep / last.totalSleep) * 100) : 0}
+                      remPct={last.totalSleep && last.remSleep ? Math.round((last.remSleep / last.totalSleep) * 100) : 0}
+                    />
+                    <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2">
                       <div>
-                        <span className="text-[9px] text-white/30 uppercase">Total</span>
-                        <p className="text-xs font-semibold text-white">{formatDuration(last.totalSleep)}</p>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Total</span>
+                        <p className="text-sm font-bold text-white data-value">{formatDuration(last.totalSleep)}</p>
                       </div>
                       <div>
-                        <span className="text-[9px] text-white/30 uppercase">Deep</span>
-                        <p className="text-xs font-semibold text-indigo-400">{formatDuration(last.deepSleep)}</p>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Deep</span>
+                        <p className="text-sm font-bold text-indigo-400 data-value" style={{ textShadow: '0 0 8px rgba(129,140,248,0.5)' }}>{formatDuration(last.deepSleep)}</p>
                       </div>
                       <div>
-                        <span className="text-[9px] text-white/30 uppercase">REM</span>
-                        <p className="text-xs font-semibold text-cyan-400">{formatDuration(last.remSleep)}</p>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">REM</span>
+                        <p className="text-sm font-bold text-cyan-400 data-value">{formatDuration(last.remSleep)}</p>
                       </div>
                       <div>
-                        <span className="text-[9px] text-white/30 uppercase">Avg HR</span>
-                        <p className="text-xs font-semibold text-red-400">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Avg HR</span>
+                        <p className="text-sm font-bold text-red-400 data-value">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
                       </div>
                       <div>
-                        <span className="text-[9px] text-white/30 uppercase">HRV</span>
-                        <p className="text-xs font-semibold text-green-400">{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">HRV</span>
+                        <p className="text-sm font-bold text-green-400 data-value" style={{ textShadow: '0 0 8px rgba(34,197,94,0.4)' }}>{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
                       </div>
                       <div>
-                        <span className="text-[9px] text-white/30 uppercase">Efficiency</span>
-                        <p className="text-xs font-semibold text-white/70">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</span>
+                        <p className="text-sm font-bold text-white/70 data-value">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
                       </div>
                     </div>
                   </div>
 
+                  {/* Hypnogram */}
                   {last.totalSleep && last.deepSleep && last.remSleep && last.lightSleep && (
-                    <div className="mt-3">
-                      <div className="flex rounded-full overflow-hidden h-2">
-                        <div className="bg-indigo-500" style={{ width: `${(last.deepSleep / last.totalSleep) * 100}%` }} />
-                        <div className="bg-cyan-500" style={{ width: `${(last.remSleep / last.totalSleep) * 100}%` }} />
-                        <div className="bg-blue-300/40" style={{ width: `${(last.lightSleep / last.totalSleep) * 100}%` }} />
-                      </div>
-                      <div className="flex gap-3 mt-1">
-                        <span className="text-[9px] text-indigo-400">Deep {Math.round((last.deepSleep / last.totalSleep) * 100)}%</span>
-                        <span className="text-[9px] text-cyan-400">REM {Math.round((last.remSleep / last.totalSleep) * 100)}%</span>
-                        <span className="text-[9px] text-blue-300/50">Light {Math.round((last.lightSleep / last.totalSleep) * 100)}%</span>
-                      </div>
-                    </div>
+                    <SleepHypnogram
+                      deep={last.deepSleep} rem={last.remSleep} light={last.lightSleep}
+                      awake={last.awakeTime || 0} total={last.totalSleep}
+                      bedStart={last.bedtimeStart}
+                    />
+                  )}
+
+                  {/* 7-day heat strip */}
+                  {sleepData.length >= 3 && (
+                    <SleepHeatStrip days={sleepData} />
                   )}
 
                   {sleepExpanded && (
@@ -364,7 +501,7 @@ export default function Dashboard() {
               const pIntakeBarH = (trainingDayProtein / pMax) * barH;
 
               return (
-                <div className="glass-card p-5 order-1 md:order-2">
+                <div className="glass-card p-5 order-1 md:order-2 fade-up">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-sm font-semibold text-white">Nutrition Balance</h2>
                     <span className={`text-[10px] font-bold uppercase ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>{phase}</span>
@@ -383,7 +520,7 @@ export default function Dashboard() {
                             strokeDashoffset={-((greenStartAngle / 360) * gaugeCirc)} />
                           <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke={zoneColor} strokeWidth="7"
                             strokeDasharray={`${gaugeArc} ${gaugeCirc}`} strokeDashoffset={gaugeOffset}
-                            strokeLinecap="round" className="transition-all duration-700" />
+                            strokeLinecap="round" className="gauge-sweep gauge-glow" style={{ '--gauge-arc': gaugeArc } as React.CSSProperties} />
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
                           <span className="text-xl font-bold" style={{ color: zoneColor }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
@@ -404,7 +541,7 @@ export default function Dashboard() {
                             strokeDashoffset={-((pGreenStartAngle / 360) * pGaugeCirc)} />
                           <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke={proteinZoneColor} strokeWidth="7"
                             strokeDasharray={`${pGaugeArc} ${pGaugeCirc}`} strokeDashoffset={pGaugeOffset}
-                            strokeLinecap="round" className="transition-all duration-700" />
+                            strokeLinecap="round" className="gauge-sweep gauge-glow" style={{ '--gauge-arc': pGaugeArc } as React.CSSProperties} />
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
                           <span className="text-xl font-bold" style={{ color: proteinZoneColor }}>{trainingDayProtein}g</span>
@@ -421,9 +558,19 @@ export default function Dashboard() {
                     {/* Calorie bars */}
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
+                        <defs>
+                          <linearGradient id="burnGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.9" />
+                            <stop offset="100%" stopColor="#f97316" stopOpacity="0.8" />
+                          </linearGradient>
+                          <linearGradient id="intakeGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={zoneColor} stopOpacity="0.9" />
+                            <stop offset="100%" stopColor={zoneColor} stopOpacity="0.5" />
+                          </linearGradient>
+                        </defs>
                         {/* Bars first (behind labels) */}
-                        <rect x="22" y={18 + barH - burnH} width="38" height={burnH} rx="4" fill="#f97316" fillOpacity="0.7" />
-                        <rect x="68" y={18 + barH - intakeH} width="38" height={intakeH} rx="4" fill={zoneColor} fillOpacity="0.7" />
+                        <rect x="22" y={18 + barH - burnH} width="38" height={burnH} rx="6" fill="url(#burnGrad)" />
+                        <rect x="68" y={18 + barH - intakeH} width="38" height={intakeH} rx="6" fill="url(#intakeGrad)" />
                         {/* Target line */}
                         {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; const tY = 18 + barH - targetH; return (<>
                         <line x1="15" y1={tY} x2="130" y2={tY} stroke={tColor} strokeWidth="1" strokeDasharray="3 2" opacity="0.4" />
@@ -440,8 +587,14 @@ export default function Dashboard() {
                     {/* Protein bar */}
                     <div>
                       <svg viewBox="0 0 140 120" className="w-full">
+                        <defs>
+                          <linearGradient id="proteinGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={proteinZoneColor} stopOpacity="0.9" />
+                            <stop offset="100%" stopColor={proteinZoneColor} stopOpacity="0.5" />
+                          </linearGradient>
+                        </defs>
                         {/* Bar first */}
-                        <rect x="48" y={18 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="4" fill={proteinZoneColor} fillOpacity="0.7" />
+                        <rect x="48" y={18 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="6" fill="url(#proteinGrad)" />
                         {/* Target line */}
                         {(() => { const tY = 18 + barH - pTargetBarH; return (<>
                         <line x1="25" y1={tY} x2="130" y2={tY} stroke="#3b82f6" strokeWidth="1" strokeDasharray="3 2" opacity="0.4" />
@@ -538,7 +691,25 @@ export default function Dashboard() {
               x: toX(weeks[i]), y: toY(m.weight), val: m.weight, date: m.date
             }));
 
-            const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+            // Smooth curve using cubic bezier (Catmull-Rom inspired)
+            const smoothLine = (pts: { x: number; y: number }[]) => {
+              if (pts.length < 2) return '';
+              if (pts.length === 2) return `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y}`;
+              let d = `M ${pts[0].x} ${pts[0].y}`;
+              for (let i = 0; i < pts.length - 1; i++) {
+                const p0 = pts[Math.max(0, i - 1)];
+                const p1 = pts[i];
+                const p2 = pts[i + 1];
+                const p3 = pts[Math.min(pts.length - 1, i + 2)];
+                const cp1x = p1.x + (p2.x - p0.x) / 6;
+                const cp1y = p1.y + (p2.y - p0.y) / 6;
+                const cp2x = p2.x - (p3.x - p1.x) / 6;
+                const cp2y = p2.y - (p3.y - p1.y) / 6;
+                d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+              }
+              return d;
+            };
+            const linePath = smoothLine(points);
             const areaPath = `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`;
 
             // Trend line across full data range
@@ -571,17 +742,33 @@ export default function Dashboard() {
             const labelStep = Math.max(1, Math.ceil(allDates.length / labelCount));
 
             return (
-              <div className="glass-strong p-6 mb-8">
+              <div className="glass-strong p-6 mb-8 fade-up relative overflow-hidden">
+                {/* Animated gradient mesh background */}
+                <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ background: 'radial-gradient(ellipse 60% 50% at 20% 30%, rgba(139,92,246,0.15) 0%, transparent 70%), radial-gradient(ellipse 50% 60% at 80% 70%, rgba(6,182,212,0.1) 0%, transparent 70%)', animation: 'mesh-drift 8s ease-in-out infinite alternate' }} />
                 {/* Header with phase toggle */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                   <div>
-                    <h2 className="text-lg font-semibold text-white">Weight Progress</h2>
-                    <p className="text-sm text-white/40 mt-0.5">
-                      {startWeight}kg → {endWeight}kg
-                      <span className={`ml-2 font-semibold ${isPositiveProgress ? 'text-green-400' : totalChange === 0 ? 'text-white/40' : 'text-yellow-400'}`}>
-                        ({totalChange > 0 ? '+' : ''}{totalChange}kg)
-                      </span>
-                    </p>
+                    <h2 className="text-lg font-bold text-white">Weight Progress</h2>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <p className="text-sm text-white/40">
+                        {startWeight}kg → {endWeight}kg
+                        <span className={`ml-2 font-semibold ${isPositiveProgress ? 'text-green-400' : totalChange === 0 ? 'text-white/40' : 'text-yellow-400'}`}>
+                          ({totalChange > 0 ? '+' : ''}{totalChange}kg)
+                        </span>
+                      </p>
+                      {/* Weekly rate pill */}
+                      {(() => {
+                        const rateColor = phase === 'bulking'
+                          ? (slope >= 0.3 && slope <= 0.7 ? '#22c55e' : slope > 0 ? '#f59e0b' : '#ef4444')
+                          : (slope <= -0.3 && slope >= -0.7 ? '#22c55e' : slope < 0 ? '#f59e0b' : '#ef4444');
+                        const arrow = slope > 0.05 ? '↗' : slope < -0.05 ? '↘' : '→';
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: `${rateColor}20`, color: rateColor, border: `1px solid ${rateColor}30` }}>
+                            {arrow} {slope > 0 ? '+' : ''}{slope.toFixed(2)} kg/wk
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3 self-start">
@@ -662,24 +849,56 @@ export default function Dashboard() {
                       </g>
                     )}
 
+                    {/* Milestone markers */}
+                    {(() => {
+                      const milestones: number[] = [];
+                      for (let m = Math.ceil(startWeight / 5) * 5; m <= endWeight; m += 5) {
+                        if (m > startWeight && m !== targetWeight) milestones.push(m);
+                      }
+                      return milestones.map(m => {
+                        const y = toY(m);
+                        // Find the data point closest to this milestone
+                        const ptIdx = weights.findIndex((w, i) => i > 0 && weights[i - 1] < m && w >= m);
+                        const x = ptIdx >= 0 ? toX(weeks[ptIdx]) : padding.left + innerWidth * ((m - startWeight) / (endWeight - startWeight));
+                        return (
+                          <g key={m}>
+                            <line x1={padding.left} y1={y} x2={chartWidth - padding.right} y2={y} stroke="white" strokeOpacity="0.04" strokeDasharray="2 4" />
+                            <circle cx={x} cy={y} r="6" fill="none" stroke="#f59e0b" strokeWidth="1.5" opacity="0.5" />
+                            <text x={x + 10} y={y + 3} fill="#f59e0b" fontSize="8" opacity="0.6">+{Math.round(m - startWeight)}kg</text>
+                          </g>
+                        );
+                      });
+                    })()}
+
                     {/* Gradient defs */}
                     <defs>
                       <linearGradient id="dashWeightGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={accentColor} stopOpacity="0.3" />
+                        <stop offset="0%" stopColor={accentColor} stopOpacity="0.35" />
+                        <stop offset="60%" stopColor={accentColor} stopOpacity="0.08" />
                         <stop offset="100%" stopColor={accentColor} stopOpacity="0" />
                       </linearGradient>
+                      <filter id="glow">
+                        <feGaussianBlur stdDeviation="2" result="blur" />
+                        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
                       <linearGradient id="dashLineGrad" x1="0" y1="0" x2="1" y2="0">
                         <stop offset="0%" stopColor={accentColor} stopOpacity="0.5" />
                         <stop offset="100%" stopColor={accentColor} stopOpacity="1" />
                       </linearGradient>
                       <linearGradient id="dashBfGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#b90a0a" stopOpacity="0.25" />
-                        <stop offset="100%" stopColor="#b90a0a" stopOpacity="0" />
+                        <stop offset="0%" stopColor="#ef4444" stopOpacity="0.3" />
+                        <stop offset="50%" stopColor="#ef4444" stopOpacity="0.1" />
+                        <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
                       </linearGradient>
                       <linearGradient id="dashMmGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" />
+                        <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.1" />
                         <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
                       </linearGradient>
+                      <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="1.5" result="blur" />
+                        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
                     </defs>
 
                     {/* Body Fat % curve (secondary axis) */}
@@ -720,7 +939,7 @@ export default function Dashboard() {
                           <path d={`${bfLine} L ${bfPoints[bfPoints.length - 1].x} ${bfBottom} L ${bfPoints[0].x} ${bfBottom} Z`} fill="url(#dashBfGrad)" />
 
                           {/* Line */}
-                          <path d={bfLine} fill="none" stroke={bfColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.7" />
+                          <path d={bfLine} fill="none" stroke={bfColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.8" filter="url(#lineGlow)" />
 
                           {/* Points */}
                           {bfPoints.map((p, i) => {
@@ -775,7 +994,7 @@ export default function Dashboard() {
                           {!hasBf && <text x={mmAxisX} y={padding.top - 10} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.4">MM kg</text>}
 
                           <path d={`${mmLine} L ${mmPoints[mmPoints.length - 1].x} ${padding.top + innerHeight} L ${mmPoints[0].x} ${padding.top + innerHeight} Z`} fill="url(#dashMmGrad)" />
-                          <path d={mmLine} fill="none" stroke={mmColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.7" />
+                          <path d={mmLine} fill="none" stroke={mmColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.8" filter="url(#lineGlow)" />
 
                           {mmPoints.map((p, i) => {
                             const isLast = i === mmPoints.length - 1;
@@ -812,7 +1031,7 @@ export default function Dashboard() {
                     )}
 
                     {/* Main line (solid) */}
-                    <path d={linePath} fill="none" stroke="url(#dashLineGrad)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+                    <path d={linePath} fill="none" stroke="url(#dashLineGrad)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" filter="url(#glow)" />
 
                     {/* Data points */}
                     {points.map((p, i) => {
@@ -880,32 +1099,27 @@ export default function Dashboard() {
                   {(previousMeasurement.photos.front || latestMeasurement.photos.front) && (
                     <div>
                       <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider mb-3">Front</h3>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-xs text-white/30 mb-2 text-center">
-                            {new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </p>
+                      {previousMeasurement.photos.front && latestMeasurement.photos.front ? (
+                        <BeforeAfterSlider
+                          beforeSrc={previousMeasurement.photos.front}
+                          afterSrc={latestMeasurement.photos.front}
+                          beforeLabel={new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                          afterLabel={new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        />
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
                           <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
                             {previousMeasurement.photos.front ? (
                               <img src={previousMeasurement.photos.front} alt="Front previous" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
-                            )}
+                            ) : <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>}
                           </div>
-                        </div>
-                        <div>
-                          <p className="text-xs text-white/30 mb-2 text-center">
-                            {new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </p>
                           <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
                             {latestMeasurement.photos.front ? (
                               <img src={latestMeasurement.photos.front} alt="Front current" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
-                            )}
+                            ) : <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>}
                           </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
@@ -913,32 +1127,27 @@ export default function Dashboard() {
                   {(previousMeasurement.photos.back || latestMeasurement.photos.back) && (
                     <div>
                       <h3 className="text-sm font-medium text-white/50 uppercase tracking-wider mb-3">Back</h3>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-xs text-white/30 mb-2 text-center">
-                            {new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </p>
+                      {previousMeasurement.photos.back && latestMeasurement.photos.back ? (
+                        <BeforeAfterSlider
+                          beforeSrc={previousMeasurement.photos.back}
+                          afterSrc={latestMeasurement.photos.back}
+                          beforeLabel={new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                          afterLabel={new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        />
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
                           <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
                             {previousMeasurement.photos.back ? (
                               <img src={previousMeasurement.photos.back} alt="Back previous" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
-                            )}
+                            ) : <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>}
                           </div>
-                        </div>
-                        <div>
-                          <p className="text-xs text-white/30 mb-2 text-center">
-                            {new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </p>
                           <div className="aspect-[3/4] rounded-xl overflow-hidden bg-white/5">
                             {latestMeasurement.photos.back ? (
                               <img src={latestMeasurement.photos.back} alt="Back current" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>
-                            )}
+                            ) : <div className="w-full h-full flex items-center justify-center text-white/20 text-sm">No photo</div>}
                           </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>

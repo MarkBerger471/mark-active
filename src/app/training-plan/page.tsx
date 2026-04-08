@@ -8,6 +8,7 @@ import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTr
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, calcRollingTDEE, parseDurationMinutes } from '@/utils/calories';
+import { hapticLight } from '@/utils/haptics';
 
 // LEGACY — replaced by shared @/utils/calories.ts
 // MET values for cardio activities (HR 120-130 range)
@@ -356,6 +357,7 @@ export default function TrainingPlanPage() {
   };
 
   const toggleSetDone = (exIdx: number, setIdx: number) => {
+    hapticLight();
     setExercises(prev => {
       const updated = [...prev];
       const ex = { ...updated[exIdx] };
@@ -470,7 +472,7 @@ export default function TrainingPlanPage() {
     return (
       <div className="min-h-screen">
         <Navigation />
-        <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
+        <main className="main-content p-6 pt-32 md:pt-6 pwa-main">
           <div className="max-w-5xl mx-auto">
             <div className="mb-4 relative">
               <DumbbellIcon className="absolute -top-2 right-0 w-24 h-24 text-white opacity-[0.04] pointer-events-none" />
@@ -816,7 +818,7 @@ export default function TrainingPlanPage() {
     return (
       <div className="min-h-screen">
         <Navigation />
-        <main className="md:ml-64 p-4 md:p-6 pt-32 md:pt-6 pwa-main">
+        <main className="main-content p-4 md:p-6 pt-32 md:pt-6 pwa-main">
           <div className="max-w-3xl mx-auto">
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-2xl font-bold text-white">Cardio</h1>
@@ -903,7 +905,7 @@ export default function TrainingPlanPage() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-4 md:p-6 pt-32 md:pt-6 pwa-main">
+      <main className="main-content p-4 md:p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-3xl mx-auto">
           {/* Workout header */}
           <div className="flex items-center justify-between mb-4">

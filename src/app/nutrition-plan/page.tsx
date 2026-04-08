@@ -747,7 +747,7 @@ export default function NutritionPlanPage() {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main className="md:ml-64 p-6 pt-32 md:pt-6 pwa-main">
+      <main className="main-content p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
           <h1 className="text-3xl font-bold text-white mb-4">Nutrition</h1>
 
