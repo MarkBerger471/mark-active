@@ -285,7 +285,12 @@ function MealCard({ meal }: { meal: NutritionMeal }) {
         </div>
       </div>
       {meal.items.length > 0 && (
-        <table className="w-full">
+        <table className="w-full" style={{ tableLayout: 'fixed' }}>
+          <colgroup>
+            <col />
+            <col style={{ width: '80px' }} />
+            <col style={{ width: '160px' }} />
+          </colgroup>
           <tbody>
             {meal.items.map((rawItem, i) => {
               const item = calcItemMacros(parseFoodItem(rawItem));
