@@ -289,23 +289,21 @@ export default function Dashboard() {
 
               // Cache TDEE once per day
               const todayKey = new Date().toISOString().split('T')[0];
-              let dailyBurn: number, dailyTrainingAvg: number, dailyNeat: number, weekSessions: typeof trainingSessions;
+              const rollingStartStr = new Date(Date.now() - 6 * 86400000).toISOString().split('T')[0];
+              const weekSessions = trainingSessions.filter(s => s.date >= rollingStartStr && s.date <= todayKey);
+              let dailyBurn: number, dailyTrainingAvg: number, dailyNeat: number;
               const cacheRaw = typeof window !== 'undefined' ? localStorage.getItem('tdee_cache') : null;
               const cache = cacheRaw ? JSON.parse(cacheRaw) : null;
               if (cache && cache.date === todayKey) {
                 dailyBurn = cache.total;
                 dailyTrainingAvg = cache.training;
                 dailyNeat = cache.neat;
-                weekSessions = cache.sessions != null
-                  ? trainingSessions.filter(s => s.date >= new Date(Date.now() - 6 * 86400000).toISOString().split('T')[0])
-                  : [];
               } else {
                 const tdee = calcRollingTDEE(trainingSessions, bodyWeight, bmr, dailyActivity);
                 dailyBurn = tdee.total;
                 dailyTrainingAvg = tdee.training;
                 dailyNeat = tdee.neat;
-                weekSessions = tdee.sessions;
-                try { localStorage.setItem('tdee_cache', JSON.stringify({ date: todayKey, total: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat, sessionCount: weekSessions.length })); } catch {}
+                try { localStorage.setItem('tdee_cache', JSON.stringify({ date: todayKey, total: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat })); } catch {}
               }
               // Protein: target = weight × 2.25 ±0.25
               const proteinTarget = Math.round(bodyWeight * 2.25);
