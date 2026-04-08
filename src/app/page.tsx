@@ -337,8 +337,8 @@ export default function Dashboard() {
               const absDiff = Math.abs(diff);
 
               // Green: within ±2% of target, Yellow: ±2-5%, Red: beyond ±5%
-              const zoneColor = absDiff <= 0.02 ? '#22c55e' : absDiff <= 0.05 ? '#f59e0b' : '#ef4444';
-              const zoneLabel = absDiff <= 0.02 ? 'On Target' : absDiff <= 0.05 ? 'Slightly Off' : 'Off Target';
+              const zoneColor = absDiff <= 0.05 ? '#22c55e' : absDiff <= 0.10 ? '#f59e0b' : '#ef4444';
+              const zoneLabel = absDiff <= 0.05 ? 'On Target' : absDiff <= 0.10 ? 'Slightly Off' : 'Off Target';
               const surplusDeficit = intake - dailyBurn;
               const surplusPct = Math.round((ratio - 1) * 100);
 
@@ -361,7 +361,7 @@ export default function Dashboard() {
               const gaugeOffset = gaugeArc - (gaugeAngle / 270) * gaugeArc;
 
               // Green zone: ±2% from target center (mapped to gauge range)
-              const greenLow = -2, greenHigh = 2;
+              const greenLow = -5, greenHigh = 5;
               const greenStartAngle = ((greenLow - gaugeMin) / (gaugeMax - gaugeMin)) * 270;
               const greenEndAngle = ((greenHigh - gaugeMin) / (gaugeMax - gaugeMin)) * 270;
               const greenArcLen = ((greenEndAngle - greenStartAngle) / 360) * gaugeCirc;
