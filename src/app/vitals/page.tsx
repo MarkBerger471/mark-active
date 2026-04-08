@@ -873,7 +873,17 @@ export default function VitalsPage() {
   // Derived lifestyle values
   const now7 = new Date();
   const weekAgoStr = new Date(now7.getTime() - 7 * 86400000).toISOString().split('T')[0];
-  const recentSessions = trainingSessions.filter(s => s.date >= weekAgoStr);
+  const recentSessions = trainingSessions.filter(s => {
+    if (s.date < weekAgoStr) return false;
+    if (s.workoutName === 'Cardio') {
+      const mins = s.exercises?.reduce((t, ex) => {
+        const m = (ex.targetReps || '').match(/(\d+)\s*min/i);
+        return t + (m ? parseInt(m[1]) : 0);
+      }, 0) || 0;
+      return mins >= 60;
+    }
+    return true;
+  });
   const trainingFreq = recentSessions.length;
   const proteinG = nutritionPlan?.current.trainingDay.macros.protein || 0;
   const proteinPerKg = latestWeight > 0 ? (proteinG / latestWeight).toFixed(1) : '?';
@@ -992,7 +1002,7 @@ export default function VitalsPage() {
                 { key: 'trt', label: 'TRT', value: lsTrt, setter: setLsTrt, options: ['Yes', 'No', 'Unknown'] },
                 { key: 'alcohol', label: 'Alcohol', value: lsAlcohol, setter: setLsAlcohol, options: ['None', 'Light', 'Moderate', 'Heavy'] },
                 { key: 'processedFood', label: 'Processed Food', value: lsProcessedFood, setter: setLsProcessedFood, options: ['None', 'Some', 'Frequent'] },
-                { key: 'water', label: 'Water', value: lsWater, setter: setLsWater, options: ['<2 L/day', '2-3 L/day', '3-4 L/day', '4+ L/day'] },
+                { key: 'water', label: 'Water', value: lsWater, setter: setLsWater, options: ['<2 L/day', '2-3 L/day', '3-4 L/day', '4-5 L/day', '5-6 L/day', '6+ L/day'] },
                 { key: 'coffee', label: 'Coffee', value: lsCoffee, setter: setLsCoffee, options: ['None', '1 cup/day', '2-3 cups/day', '2-5 cups/day', '5+ cups/day'] },
                 { key: 'stress', label: 'Stress', value: lsStress, setter: setLsStress, options: ['Low', 'Moderate', 'High'] },
               ] as const).map(field => (
@@ -1205,14 +1215,25 @@ export default function VitalsPage() {
                       )}
                     </div>
                     <div className="flex gap-2 items-center">
-                      {test.analysis ? (
+                      {test.analysis ? (<>
                         <button
                           onClick={(e) => { e.stopPropagation(); setViewingAnalysis(test.id); }}
                           className="text-xs text-green-400/70 hover:text-green-400 px-2 py-1"
                         >
                           View Report
                         </button>
-                      ) : (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const updated = tests.map(t => t.id === test.id ? { ...t, analysis: undefined } : t);
+                            setTests(updated);
+                            await saveBloodTests(updated);
+                          }}
+                          className="text-xs text-white/20 hover:text-red-400 px-2 py-1"
+                        >
+                          Del Report
+                        </button>
+                      </>) : (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleAnalyse(test); }}
                           disabled={analysing === test.id}
