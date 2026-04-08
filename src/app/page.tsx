@@ -445,9 +445,10 @@ export default function Dashboard() {
                         <text x="130" y={tY - 3} textAnchor="end" fill={tColor} fontSize="6" fontWeight="bold">{targetIntake}</text>
                         </>); })()}
                         {/* Bar value labels (inside bars) */}
-                        <text x="41" y={18 + barH - burnH / 2 + 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{dailyBurn}</text>
+                        <text x="41" y={18 + barH - burnH / 2} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{dailyBurn}</text>
                         <text x="41" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Burn</text>
-                        <text x="87" y={18 + barH - intakeH / 2 + 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{intake}</text>
+                        <text x="87" y={18 + barH - intakeH / 2} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{intake}</text>
+                        <text x="87" y={18 + barH - intakeH / 2 + 9} textAnchor="middle" fill={zoneColor} fontSize="6" opacity="0.8">{intake - targetIntake > 0 ? '+' : ''}{intake - targetIntake}</text>
                         <text x="87" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Intake</text>
                       </svg>
                     </div>
@@ -462,7 +463,8 @@ export default function Dashboard() {
                         <text x="130" y={tY - 3} textAnchor="end" fill="#3b82f6" fontSize="6" fontWeight="bold">{proteinTarget}g</text>
                         </>); })()}
                         {/* Bar value label (inside bar) */}
-                        <text x="70" y={18 + barH - pIntakeBarH / 2 + 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{trainingDayProtein}g</text>
+                        <text x="70" y={18 + barH - pIntakeBarH / 2} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{trainingDayProtein}g</text>
+                        <text x="70" y={18 + barH - pIntakeBarH / 2 + 9} textAnchor="middle" fill={proteinZoneColor} fontSize="6" opacity="0.8">{proteinDiff > 0 ? '+' : ''}{proteinDiff}g</text>
                         <text x="70" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Protein</text>
                       </svg>
                     </div>
