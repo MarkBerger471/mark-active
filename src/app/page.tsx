@@ -470,16 +470,6 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* Status line */}
-                  <div className="text-center mt-2">
-                    <p className="text-xs text-white/40">
-                      {intake - targetIntake > 0 ? '+' : ''}{intake - targetIntake} kcal vs target
-                      <span className="text-white/20 mx-1.5">|</span>
-                      {proteinDiff > 0 ? '+' : ''}{proteinDiff}g protein
-                      <span className="text-white/20 ml-1">({proteinLow}–{proteinHigh}g)</span>
-                    </p>
-                  </div>
-
                   {/* Details */}
                   <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5 text-xs text-white/30">
                     <div>BMR {bmr}</div>
