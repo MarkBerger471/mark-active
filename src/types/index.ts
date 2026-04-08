@@ -46,6 +46,7 @@ export interface TrainingSet {
   reps?: number;
   isWarmup: boolean;
   done?: boolean;
+  prevDone?: boolean; // was this set completed in the previous session
 }
 
 export interface TrainingExercise {

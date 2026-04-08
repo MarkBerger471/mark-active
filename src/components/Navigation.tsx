@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: '◉' },
@@ -15,11 +15,12 @@ const navItems = [
 
 export default function Navigation() {
   const pathname = usePathname();
+  const router = useRouter();
   const { logout } = useAuth();
   const [online, setOnline] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
-  const mobileRefs = useRef<(HTMLAnchorElement | null)[]>([]);
-  const [pillStyle, setPillStyle] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -30,19 +31,29 @@ export default function Navigation() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
 
-  // Animated pill position for mobile
-  useEffect(() => {
+  // Swipe navigation
+  const handleSwipe = useCallback((dir: 'left' | 'right') => {
     const idx = navItems.findIndex(i => i.href === pathname);
-    const el = mobileRefs.current[idx];
-    if (el) {
-      const parent = el.parentElement;
-      if (parent) {
-        const parentRect = parent.getBoundingClientRect();
-        const elRect = el.getBoundingClientRect();
-        setPillStyle({ left: elRect.left - parentRect.left, width: elRect.width });
+    if (dir === 'left' && idx < navItems.length - 1) router.push(navItems[idx + 1].href);
+    if (dir === 'right' && idx > 0) router.push(navItems[idx - 1].href);
+  }, [pathname, router]);
+
+  useEffect(() => {
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - touchStartX.current;
+      const dy = e.changedTouches[0].clientY - touchStartY.current;
+      if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        handleSwipe(dx < 0 ? 'left' : 'right');
       }
-    }
-  }, [pathname]);
+    };
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => { document.removeEventListener('touchstart', onTouchStart); document.removeEventListener('touchend', onTouchEnd); };
+  }, [handleSwipe]);
 
   return (
     <>
@@ -95,20 +106,14 @@ export default function Navigation() {
       {/* Mobile top bar */}
       <nav className="md:hidden fixed top-0 left-0 right-0 z-50 flex justify-center px-4 pt-[env(safe-area-inset-top,8px)]">
         <div className="glass-strong rounded-2xl max-w-5xl w-full">
-          <div className="flex justify-around items-center py-2 px-2 relative">
-            {/* Animated pill */}
-            <div
-              className="absolute top-1/2 -translate-y-1/2 h-[calc(100%-8px)] rounded-xl bg-va-red/10 transition-all duration-300 ease-out"
-              style={{ left: pillStyle.left, width: pillStyle.width }}
-            />
-            {navItems.map((item, i) => {
+          <div className="flex justify-around items-center py-2 px-2">
+            {navItems.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  ref={el => { mobileRefs.current[i] = el; }}
-                  className={`relative z-10 flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors duration-200 min-w-[50px] ${
+                  className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors duration-200 min-w-[50px] ${
                     isActive ? 'text-va-red' : 'text-white/40'
                   }`}
                 >

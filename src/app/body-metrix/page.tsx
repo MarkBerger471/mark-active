@@ -292,8 +292,14 @@ export default function BodyMetrix() {
     if (val === undefined || val === 0) return null;
     const sign = val > 0 ? '+' : '';
     const isGood = lowerIsBetter ? val < 0 : val > 0;
-    const colorClass = isGood ? 'change-positive' : 'change-negative';
-    return <span className={colorClass}>{sign}{val}</span>;
+    const color = isGood ? '#22c55e' : '#ef4444';
+    const arrow = val > 0 ? '↑' : '↓';
+    return (
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold"
+        style={{ background: `${color}15`, color, textShadow: `0 0 8px ${color}40` }}>
+        {arrow} {sign}{val}
+      </span>
+    );
   };
 
   const formatDate = (dateStr: string) => {
@@ -538,8 +544,13 @@ export default function BodyMetrix() {
                 No measurements yet. Add your first entry above.
               </div>
             ) : (
-              <div className="space-y-4">
-                {sortedMeasurements.map((m) => {
+              <div className="relative">
+                {/* Timeline connector line */}
+                {sortedMeasurements.length > 1 && (
+                  <div className="absolute left-[19px] top-8 bottom-8 w-0.5 bg-gradient-to-b from-va-red/30 via-va-red/10 to-transparent hidden sm:block" />
+                )}
+                <div className="space-y-4">
+                {sortedMeasurements.map((m, mIdx) => {
                   // Find previous measurement (chronologically before this one)
                   const chronologicalIndex = measurements.findIndex(entry => entry.date === m.date);
                   const previous = chronologicalIndex > 0 ? measurements[chronologicalIndex - 1] : null;
@@ -555,7 +566,9 @@ export default function BodyMetrix() {
                   }
 
                   return (
-                  <div key={m.date} id={`measurement-${m.date}`} className="glass-card p-6">
+                  <div key={m.date} id={`measurement-${m.date}`} className="glass-card p-6 card-animate sm:pl-12 relative" style={{ animationDelay: `${mIdx * 60}ms` }}>
+                    {/* Timeline dot */}
+                    <div className={`absolute left-3.5 top-7 w-3 h-3 rounded-full border-2 hidden sm:block ${mIdx === 0 ? 'bg-va-red border-va-red shadow-[0_0_8px_rgba(185,10,10,0.5)]' : 'bg-white/10 border-white/20'}`} />
                     <div
                       className="flex items-center justify-between mb-4 cursor-pointer"
                       onClick={() => setExpandedEntry(isExpanded ? null : m.date)}
@@ -584,18 +597,21 @@ export default function BodyMetrix() {
                     {(() => {
                       const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'bmr' | 'recommendedCalories' | 'arms' | 'chest' | 'waist' | 'legs'; unit: string; lowerIsBetter?: boolean }) => {
                         const change = getChange(m, previous, stat.field);
+                        const isGood = change !== undefined && change !== 0 && (stat.lowerIsBetter ? change < 0 : change > 0);
+                        const isBad = change !== undefined && change !== 0 && !isGood;
+                        const tint = isGood ? 'from-green-500/8 to-transparent' : isBad ? 'from-red-500/8 to-transparent' : '';
                         return (
-                          <div key={stat.label} className="bg-white/5 rounded-xl p-3">
-                            <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
-                            <p className="text-lg font-bold text-white">{stat.value}</p>
+                          <div key={stat.label} className={`bg-white/5 rounded-xl p-3 bg-gradient-to-br ${tint}`}>
+                            <p className="text-[10px] text-white/40 uppercase tracking-wider">{stat.label}</p>
+                            <p className="text-lg font-bold text-white data-value">{stat.value}</p>
                             {change !== undefined && change !== 0 && (
-                              <p className="text-sm">{formatChange(change, stat.lowerIsBetter)}</p>
+                              <div className="mt-1">{formatChange(change, stat.lowerIsBetter)}</div>
                             )}
                             {change === 0 && (
-                              <p className="text-sm change-neutral">0</p>
+                              <p className="text-xs text-white/20 mt-1">→ 0</p>
                             )}
                             {change === undefined && (
-                              <p className="text-sm text-white/20">—</p>
+                              <p className="text-xs text-white/20 mt-1">—</p>
                             )}
                           </div>
                         );
@@ -623,7 +639,14 @@ export default function BodyMetrix() {
                       );
                     })()}
 
-                    {/* Status fields */}
+                    {/* Section divider */}
+                    {(m.energy || m.hunger || m.tiredness || m.digestion || m.sleepHours || m.cardio || m.trainings || m.foodChanges) && (
+                      <div className="flex items-center gap-3 my-4">
+                        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                        <span className="text-[9px] text-white/20 uppercase tracking-widest">Subjective</span>
+                        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                      </div>
+                    )}
                     {(m.energy || m.hunger || m.tiredness || m.digestion || m.sleepHours || m.cardio || m.trainings || m.foodChanges) && (
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                         {([
@@ -690,6 +713,7 @@ export default function BodyMetrix() {
                   </div>
                   );
                 })}
+              </div>
               </div>
             )}
           </div>

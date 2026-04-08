@@ -171,6 +171,9 @@ export default function TrainingPlanPage() {
   const [sessionDate, setSessionDate] = useState('');
   const [expandedExercise, setExpandedExercise] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
+  const [elapsedStr, setElapsedStr] = useState('');
+  const [restTimer, setRestTimer] = useState(0);
+  const restIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [editingDuration, setEditingDuration] = useState<string | null>(null);
@@ -246,6 +249,34 @@ export default function TrainingPlanPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
+  // Elapsed workout timer
+  useEffect(() => {
+    if (!sessionId || !activeWorkout) { setElapsedStr(''); return; }
+    const startMs = parseInt(sessionId);
+    if (isNaN(startMs)) return;
+    const tick = () => {
+      const sec = Math.floor((Date.now() - startMs) / 1000);
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      setElapsedStr(`${m}:${s.toString().padStart(2, '0')}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [sessionId, activeWorkout]);
+
+  // Rest timer — starts when a set is toggled done
+  const startRestTimer = (seconds = 90) => {
+    if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    setRestTimer(seconds);
+    restIntervalRef.current = setInterval(() => {
+      setRestTimer(prev => {
+        if (prev <= 1) { if (restIntervalRef.current) clearInterval(restIntervalRef.current); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       getTrainingSessions().then(setSessions);
@@ -299,12 +330,12 @@ export default function TrainingPlanPage() {
           .filter(e => workoutName === 'Cardio' || e.name !== 'Cardio')
           .map(e => ({
             ...e,
-            sets: e.sets.map(s => ({ ...s, done: true })),
+            sets: e.sets.map(s => ({ ...s, done: false, prevDone: !!s.done })),
             skipped: false,
           }))
       : preset.exercises.map(e => ({
           ...e,
-          sets: e.sets.map(s => ({ ...s, done: true })),
+          sets: e.sets.map(s => ({ ...s, done: false })),
         }));
 
     const newId = Date.now().toString();
@@ -358,15 +389,18 @@ export default function TrainingPlanPage() {
 
   const toggleSetDone = (exIdx: number, setIdx: number) => {
     hapticLight();
+    let wasDone = false;
     setExercises(prev => {
       const updated = [...prev];
       const ex = { ...updated[exIdx] };
       const sets = [...ex.sets];
+      wasDone = !!sets[setIdx].done;
       sets[setIdx] = { ...sets[setIdx], done: !sets[setIdx].done };
       ex.sets = sets;
       updated[exIdx] = ex;
       return updated;
     });
+    if (!wasDone) startRestTimer(90);
     triggerAutoSave();
   };
 
@@ -929,7 +963,21 @@ export default function TrainingPlanPage() {
               style={{ width: `${totalSets > 0 ? (completedSets / totalSets) * 100 : 0}%` }}
             />
           </div>
-          <p className="text-xs text-white/30 mb-6 -mt-4">{completedSets}/{totalSets} sets completed</p>
+          <div className="flex items-center justify-between mb-6 -mt-4">
+            <p className="text-xs text-white/30">{completedSets}/{totalSets} sets completed</p>
+            <div className="flex items-center gap-2">
+              {elapsedStr && (
+                <span className="text-xs text-white/40 font-mono data-value">{elapsedStr}</span>
+              )}
+              {restTimer > 0 && (
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
+                  restTimer <= 10 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-blue-500/15 text-blue-400'
+                }`}>
+                  Rest {Math.floor(restTimer / 60)}:{(restTimer % 60).toString().padStart(2, '0')}
+                </span>
+              )}
+            </div>
+          </div>
 
           {/* Exercises */}
           <div className="space-y-3">
@@ -939,10 +987,14 @@ export default function TrainingPlanPage() {
               const workingSets = ex.sets.filter(s => !s.isWarmup);
               const doneSets = ex.sets.filter(s => s.done).length;
 
+              const completionPct = ex.sets.length > 0 ? doneSets / ex.sets.length : 0;
+              const statusTint = ex.skipped ? '' : completionPct >= 1 ? 'from-green-500/8 to-transparent' : completionPct > 0 ? 'from-amber-500/6 to-transparent' : '';
+
               return (
                 <div
                   key={exIdx}
-                  className={`glass-card overflow-hidden transition-all ${ex.skipped ? 'opacity-40' : ''}`}
+                  className={`glass-card overflow-hidden transition-all card-animate bg-gradient-to-r ${statusTint} ${ex.skipped ? 'opacity-40' : ''}`}
+                  style={{ animationDelay: `${exIdx * 50}ms` }}
                 >
                   {/* Exercise header - tap to expand */}
                   <button
@@ -950,8 +1002,12 @@ export default function TrainingPlanPage() {
                     className="w-full p-4 flex items-center justify-between text-left"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-va-red font-bold">{exIdx + 1}</span>
+                      <div className="flex items-center gap-2.5">
+                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                          completionPct >= 1 ? 'bg-green-500/20 text-green-400 shadow-[0_0_8px_rgba(34,197,94,0.3)]' :
+                          completionPct > 0 ? 'bg-amber-500/20 text-amber-400' :
+                          'bg-va-red/20 text-va-red'
+                        }`}>{exIdx + 1}</span>
                         <h3 className={`text-white font-semibold truncate ${ex.skipped ? 'line-through' : ''}`}>
                           {ex.name}
                         </h3>
@@ -1087,9 +1143,9 @@ function SetRow({
   const step = 1;
 
   return (
-    <div className={`flex items-center gap-1.5 mb-2 ${set.done ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center gap-1.5 mb-2 transition-all duration-300 ${set.done ? 'opacity-40' : ''}`}>
       {/* Label */}
-      <span className={`text-xs w-7 shrink-0 ${isWarmup ? 'text-yellow-500/60' : 'text-white/30'}`}>
+      <span className={`text-[10px] w-7 shrink-0 font-semibold uppercase tracking-wider ${isWarmup ? 'text-yellow-500/60' : 'text-white/25'}`}>
         {isWarmup ? 'WU' : 'SET'}
       </span>
 
@@ -1097,7 +1153,7 @@ function SetRow({
       <button
         type="button"
         onClick={() => onWeightChange(exIdx, setIdx, String(Math.round((weightNum - step) * 10) / 10))}
-        className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-red-500/30 bg-red-500/10 text-red-400 active:bg-red-500/30"
+        className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-red-500/20 bg-red-500/8 text-red-400 active:bg-red-500/30 transition-all"
       >−</button>
       <div className="flex-1">
         <input
@@ -1105,14 +1161,14 @@ function SetRow({
           inputMode="decimal"
           value={formatWeight(set.weight)}
           onChange={(e) => onWeightChange(exIdx, setIdx, e.target.value)}
-          className="glass-input w-full px-2 py-2 text-sm text-center"
+          className={`glass-input w-full px-2 py-2 text-sm text-center font-semibold data-value focus:shadow-[0_0_12px_rgba(185,10,10,0.2)] ${set.prevDone && !set.done ? 'border-green-500/20 bg-green-500/8' : ''}`}
           placeholder="kg"
         />
       </div>
       <button
         type="button"
         onClick={() => onWeightChange(exIdx, setIdx, String(Math.round((weightNum + step) * 10) / 10))}
-        className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-green-500/30 bg-green-500/10 text-green-400 active:bg-green-500/30"
+        className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-green-500/20 bg-green-500/8 text-green-400 active:bg-green-500/30 transition-all"
       >+</button>
 
       {/* Reps input */}
@@ -1122,21 +1178,23 @@ function SetRow({
           inputMode="numeric"
           value={set.reps ?? ''}
           onChange={(e) => onRepsChange(exIdx, setIdx, e.target.value)}
-          className="glass-input w-full px-1 py-2 text-sm text-center"
+          className="glass-input w-full px-1 py-2 text-sm text-center data-value focus:shadow-[0_0_12px_rgba(185,10,10,0.2)]"
           placeholder={targetReps}
         />
       </div>
 
-      {/* Done checkbox */}
+      {/* Done checkbox — animated circle fill */}
       <button
         onClick={() => onToggleDone(exIdx, setIdx)}
-        className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-all ${
+        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center shrink-0 transition-all duration-300 ${
           set.done
-            ? 'bg-green-600 border-green-600 text-white'
-            : 'border-white/15 text-transparent hover:border-white/30'
+            ? 'bg-green-500 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)] scale-95'
+            : 'border-white/15 text-transparent hover:border-white/30 hover:scale-105'
         }`}
       >
-        ✓
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M3 7l3 3 5-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
     </div>
   );
