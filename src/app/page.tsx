@@ -421,12 +421,20 @@ export default function Dashboard() {
                     ))}
 
                     {linePath && <path d={`${linePath} L ${pts[pts.length - 1].x} ${pad.top + iH} L ${pts[0].x} ${pad.top + iH} Z`} fill="url(#glucoseGrad)" opacity="0.5" />}
-                    {/* Per-segment colored line */}
+                    {/* Per-segment colored line with overlap to prevent gaps */}
                     {pts.length >= 2 && pts.slice(0, -1).map((p, i) => {
                       const p2 = pts[i + 1];
+                      // Extend slightly into next segment to prevent gaps
+                      const p3 = pts[Math.min(pts.length - 1, i + 2)];
                       const avgVal = (p.val + p2.val) / 2;
                       const segColor = avgVal < 80 ? '#ef4444' : avgVal <= 110 ? '#22c55e' : avgVal <= 160 ? '#f59e0b' : '#ef4444';
-                      return <line key={i} x1={p.x} y1={p.y} x2={p2.x} y2={p2.y} stroke={segColor} strokeWidth="2.5" strokeLinecap="round" filter="url(#glucoseGlow)" />;
+                      // Catmull-Rom bezier for smooth connection
+                      const p0 = pts[Math.max(0, i - 1)];
+                      const cp1x = p.x + (p2.x - p0.x) / 6;
+                      const cp1y = p.y + (p2.y - p0.y) / 6;
+                      const cp2x = p2.x - (p3.x - p.x) / 6;
+                      const cp2y = p2.y - (p3.y - p.y) / 6;
+                      return <path key={i} d={`M ${p.x} ${p.y} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`} fill="none" stroke={segColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />;
                     })}
                     {pts.length > 0 && <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />}
 
@@ -1132,8 +1140,8 @@ export default function Dashboard() {
                             <g key={i}>
                               {isLast && <circle cx={p.x} cy={p.y} r="8" fill={color} opacity="0.12" />}
                               <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={color} stroke="#fff" strokeWidth={isLast ? 2 : 1.5} />
-                              {isLast && <text x={p.x} y={p.y - 12} textAnchor="end" fill="white" fontSize="13" fontWeight="bold">{p.val}{unit}</text>}
-                              {isFirst && <text x={p.x} y={p.y - 12} textAnchor="start" fill="white" fontSize="12" fontWeight="bold" opacity="0.5">{p.val}{unit}</text>}
+                              {isLast && <text x={p.x} y={p.y - 14} textAnchor="end" fill="white" fontSize="16" fontWeight="bold">{p.val}{unit}</text>}
+                              {isFirst && <text x={p.x} y={p.y - 14} textAnchor="start" fill="white" fontSize="14" fontWeight="bold" opacity="0.5">{p.val}{unit}</text>}
                             </g>
                           );
                         })}
