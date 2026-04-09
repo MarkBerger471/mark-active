@@ -217,13 +217,15 @@ export default function Dashboard() {
       });
       getSetting('phase').then(v => { if (v) setPhase(v as Phase); });
       getSetting('targetWeight').then(v => { if (v) setTargetWeight(parseFloat(v)); });
-      fetch('/api/oura?days=7').then(r => r.json()).then(d => {
-        if (d.data) setSleepData(d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)));
-      }).catch(() => {});
       getTrainingSessions().then(setTrainingSessions);
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
-      // Fetch activity data (same as training page - 60 days)
-      fetch('/api/oura?days=60').then(r => r.json()).then(d => {
+      // Defer Oura API calls to avoid blocking initial render
+      setTimeout(() => {
+        fetch('/api/oura?days=7').then(r => r.json()).then(d => {
+          if (d.data) setSleepData(d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)));
+        }).catch(() => {});
+      }, 500);
+      setTimeout(() => fetch('/api/oura?days=60').then(r => r.json()).then(d => {
         const act: Record<string, { activeCalories: number }> = {};
         const addDay = (day: string, steps?: number, activeCal?: number) => {
           if (steps || activeCal) act[day] = { activeCalories: activeCal || 0 };
@@ -231,7 +233,7 @@ export default function Dashboard() {
         if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
         if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
         setDailyActivity(act);
-      }).catch(() => {});
+      }).catch(() => {}), 1000);
     }
   }, [isAuthenticated]);
 

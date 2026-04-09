@@ -54,7 +54,8 @@ function stripUndefined(obj: any): any {
 // Background refresh: pull from Firestore into IndexedDB when online
 function backgroundRefreshMeasurements() {
   if (typeof window === 'undefined' || !navigator.onLine) return;
-  (async () => {
+  // Defer to avoid blocking initial render
+  setTimeout(() => (async () => {
     try {
       const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
       const snap = await getDocs(q);
@@ -67,12 +68,12 @@ function backgroundRefreshMeasurements() {
     } catch (e) {
       console.warn('Background refresh measurements failed:', e);
     }
-  })();
+  })(), 2000);
 }
 
 function backgroundRefreshSessions() {
   if (typeof window === 'undefined' || !navigator.onLine) return;
-  (async () => {
+  setTimeout(() => (async () => {
     try {
       const snap = await getDocs(collection(db, 'trainingSessions'));
       const items = snap.docs.map(d => d.data() as TrainingSession);
@@ -83,12 +84,12 @@ function backgroundRefreshSessions() {
     } catch (e) {
       console.warn('Background refresh sessions failed:', e);
     }
-  })();
+  })(), 3000);
 }
 
 function backgroundRefreshNutrition() {
   if (typeof window === 'undefined' || !navigator.onLine) return;
-  (async () => {
+  setTimeout(() => (async () => {
     try {
       const snap = await getDoc(doc(db, 'nutrition', 'plan'));
       if (snap.exists()) {
@@ -101,12 +102,12 @@ function backgroundRefreshNutrition() {
     } catch (e) {
       console.warn('Background refresh nutrition failed:', e);
     }
-  })();
+  })(), 4000);
 }
 
 function backgroundRefreshSetting(key: string) {
   if (typeof window === 'undefined' || !navigator.onLine) return;
-  (async () => {
+  setTimeout(() => (async () => {
     try {
       const snap = await getDoc(doc(db, 'settings', key));
       const pending = await hasPendingSyncFor('settings', key);
@@ -118,7 +119,7 @@ function backgroundRefreshSetting(key: string) {
     } catch (e) {
       console.warn('Background refresh setting failed:', e);
     }
-  })();
+  })(), 2000);
 }
 
 // Auth (localStorage for offline persistence)
