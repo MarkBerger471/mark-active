@@ -1202,15 +1202,17 @@ export default function VitalsPage() {
                     onClick={() => setExpandedTest(isExpanded ? null : test.id)}
                     className="w-full p-4 flex items-center justify-between text-left cursor-pointer"
                   >
-                    <div>
-                      <span className="text-white font-medium">
-                        {new Date(test.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </span>
-                      {test.label && <span className="text-white/30 text-sm ml-2">{test.label}</span>}
-                      <span className="text-white/20 text-xs ml-2">{test.values.length} markers</span>
-                      {outOfRange.length > 0 && (
-                        <span className="text-yellow-400/60 text-xs ml-2">{outOfRange.length} out of range</span>
-                      )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2 whitespace-nowrap overflow-hidden">
+                        <span className="text-white font-medium text-sm">
+                          {new Date(test.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </span>
+                        {test.label && <span className="text-white/30 text-xs">{test.label}</span>}
+                        <span className="text-white/20 text-[10px]">{test.values.length} markers</span>
+                        {outOfRange.length > 0 && (
+                          <span className="text-yellow-400/60 text-[10px]">{outOfRange.length} out of range</span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex gap-2 items-center">
                       {test.analysis ? (<>
