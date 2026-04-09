@@ -8,7 +8,7 @@ import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTr
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, calcRollingTDEE, parseDurationMinutes } from '@/utils/calories';
-import { hapticLight } from '@/utils/haptics';
+import { hapticLight, hapticSuccess, playTimerBeep } from '@/utils/haptics';
 
 // LEGACY — replaced by shared @/utils/calories.ts
 // MET values for cardio activities (HR 120-130 range)
@@ -266,12 +266,17 @@ export default function TrainingPlanPage() {
   }, [sessionId, activeWorkout]);
 
   // Rest timer — starts when a set is toggled done
-  const startRestTimer = (seconds = 90) => {
+  const startRestTimer = (seconds = 60) => {
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
     setRestTimer(seconds);
     restIntervalRef.current = setInterval(() => {
       setRestTimer(prev => {
-        if (prev <= 1) { if (restIntervalRef.current) clearInterval(restIntervalRef.current); return 0; }
+        if (prev <= 1) {
+          if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+          playTimerBeep();
+          hapticSuccess();
+          return 0;
+        }
         return prev - 1;
       });
     }, 1000);
@@ -400,7 +405,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
-    if (!wasDone) startRestTimer(90);
+    if (!wasDone) startRestTimer(60);
     triggerAutoSave();
   };
 
@@ -436,8 +441,16 @@ export default function TrainingPlanPage() {
     triggerAutoSave();
   };
 
+  const saveWorkout = async () => {
+    await flushSave();
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 2000);
+  };
+
   const finishWorkout = async () => {
     await flushSave();
+    if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    setRestTimer(0);
     setView('select');
     setActiveWorkout(null);
     setExercises([]);
@@ -949,12 +962,8 @@ export default function TrainingPlanPage() {
             <div className="flex gap-2">
               {saveStatus === 'saving' && <span className="text-xs text-white/30 self-center">Saving...</span>}
               {saveStatus === 'saved' && <span className="text-xs text-green-400/60 self-center">Saved ✓</span>}
-              <button
-                onClick={finishWorkout}
-                className="btn-primary text-sm px-4 py-2"
-              >
-                Finish
-              </button>
+              <button onClick={saveWorkout} className="btn-secondary text-sm px-3 py-2">Save</button>
+              <button onClick={finishWorkout} className="btn-primary text-sm px-3 py-2">Finish</button>
             </div>
           </div>
 

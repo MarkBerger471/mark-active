@@ -220,16 +220,16 @@ export default function Dashboard() {
           }
         }
       });
+      // Priority 1: settings (instant from IDB)
       getSetting('phase').then(v => { if (v) setPhase(v as Phase); });
       getSetting('targetWeight').then(v => { if (v) setTargetWeight(parseFloat(v)); });
+      // Priority 2: training + nutrition (instant from IDB, deferred Firestore sync)
       getTrainingSessions().then(setTrainingSessions);
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
-      // Defer Oura API calls to avoid blocking initial render
-      setTimeout(() => {
-        fetch('/api/oura?days=7').then(r => r.json()).then(d => {
-          if (d.data) setSleepData(d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)));
-        }).catch(() => {});
-      }, 500);
+      // Priority 3: API calls (deferred)
+      setTimeout(() => fetch('/api/oura?days=7').then(r => r.json()).then(d => {
+        if (d.data) setSleepData(d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)));
+      }).catch(() => {}), 300);
       setTimeout(() => fetch('/api/oura?days=60').then(r => r.json()).then(d => {
         const act: Record<string, { activeCalories: number }> = {};
         const addDay = (day: string, steps?: number, activeCal?: number) => {
@@ -238,11 +238,11 @@ export default function Dashboard() {
         if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
         if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
         setDailyActivity(act);
-      }).catch(() => {}), 1000);
-      // Glucose data from LibreLinkUp
+      }).catch(() => {}), 800);
+      // Glucose data from LibreLinkUp (lowest priority)
       setTimeout(() => fetch('/api/glucose').then(r => r.json()).then(d => {
         if (d.current) setGlucose(d);
-      }).catch(() => {}), 1500);
+      }).catch(() => {}), 2000);
     }
   }, [isAuthenticated]);
 
@@ -329,125 +329,6 @@ export default function Dashboard() {
                   {statCard({ label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' }, idx++)}
                   {statCard({ label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' }, idx++)}
                 </div>
-              </div>
-            );
-          })()}
-
-          {/* Glucose Monitor */}
-          {glucose?.current && (() => {
-            const { current, history, stats } = glucose;
-            const v = current.value;
-            const color = v < 80 ? '#ef4444' : v <= 110 ? '#22c55e' : v <= 160 ? '#f59e0b' : '#ef4444';
-            const label = v < 80 ? 'LOW' : v <= 110 ? 'IN RANGE' : v <= 160 ? 'ELEVATED' : 'HIGH';
-            const chartW = 500, chartH = 160;
-            const pad = { top: 5, right: 10, bottom: 20, left: 30 };
-            const iW = chartW - pad.left - pad.right;
-            const iH = chartH - pad.top - pad.bottom;
-
-            // Tighter Y scale for dramatic curves
-            const mn = 50, mx = 300;
-            const rng = mx - mn;
-            const toGY = (val: number) => pad.top + iH - ((Math.max(mn, Math.min(mx, val)) - mn) / rng) * iH;
-            const toGX = (i: number) => pad.left + (i / Math.max(1, history.length - 1)) * iW;
-            const pts = history.map((h, i) => ({ x: toGX(i), y: toGY(h.value), val: h.value }));
-
-            let linePath = '';
-            if (pts.length >= 2) {
-              linePath = `M ${pts[0].x} ${pts[0].y}`;
-              for (let i = 0; i < pts.length - 1; i++) {
-                const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
-                linePath += ` C ${p1.x + (p2.x - p0.x) / 6} ${p1.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p1.x) / 6} ${p2.y - (p3.y - p1.y) / 6}, ${p2.x} ${p2.y}`;
-              }
-            }
-
-            // Zone bands
-            const zones = [
-              { top: toGY(200), bottom: toGY(160), color: '#ef4444', opacity: 0.06 },
-              { top: toGY(160), bottom: toGY(110), color: '#f59e0b', opacity: 0.05 },
-              { top: toGY(110), bottom: toGY(80), color: '#22c55e', opacity: 0.08 },
-              { top: toGY(80), bottom: toGY(50), color: '#ef4444', opacity: 0.06 },
-            ];
-
-            const timestamps = history.map(h => new Date(h.timestamp));
-            const fmtTime = (d: Date) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
-            return (
-              <div className="glass-card p-5 mb-6 fade-up">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <span className="text-lg">🩸</span> Glucose
-                  </h2>
-                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                    style={{ background: `${color}20`, color }}>{label}</span>
-                </div>
-
-                <div className="flex items-center gap-3 mb-2">
-                  <div>
-                    <span className="text-5xl font-bold data-value" style={{ color }}>{current.value}</span>
-                    <span className="text-sm text-white/30 ml-1">mg/dL</span>
-                    <div className="text-4xl font-bold mt-1" style={{ color }}>{current.trend}</div>
-                  </div>
-                  <div className="flex-1" />
-                  <div className="flex flex-col gap-1 text-right">
-                    <span className="text-xs text-white/30">TIR <span className="text-white/60 font-bold">{stats.timeInRange}%</span></span>
-                    <span className="text-xs text-white/30">Avg <span className="text-white/60 font-bold">{stats.avgGlucose}</span></span>
-                    <span className="text-xs text-white/30">eA1c <span className="text-white/60 font-bold">{stats.estimatedA1c}%</span></span>
-                  </div>
-                </div>
-
-                {pts.length > 2 && (
-                  <svg viewBox={`0 0 ${chartW} ${chartH}`} className="w-full" style={{ height: '140px' }}>
-                    <defs>
-                      <linearGradient id="glucoseGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-                        <stop offset="100%" stopColor={color} stopOpacity="0" />
-                      </linearGradient>
-                      <filter id="glucoseGlow">
-                        <feGaussianBlur stdDeviation="1.5" result="blur" />
-                        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-                      </filter>
-                    </defs>
-
-                    {/* Zone bands */}
-                    {zones.map((z, i) => (
-                      <rect key={i} x={pad.left} y={z.top} width={iW} height={z.bottom - z.top} fill={z.color} opacity={z.opacity} />
-                    ))}
-                    {/* Zone boundary lines */}
-                    {[80, 110, 160].map(val => (
-                      <g key={val}>
-                        <line x1={pad.left} y1={toGY(val)} x2={pad.left + iW} y2={toGY(val)} stroke={val === 110 ? '#22c55e' : val === 80 ? '#ef4444' : '#f59e0b'} strokeOpacity="0.2" strokeDasharray="3 3" />
-                        <text x={pad.left - 3} y={toGY(val) + 3} textAnchor="end" fill="white" fillOpacity="0.25" fontSize="7">{val}</text>
-                      </g>
-                    ))}
-
-                    {linePath && <path d={`${linePath} L ${pts[pts.length - 1].x} ${pad.top + iH} L ${pts[0].x} ${pad.top + iH} Z`} fill="url(#glucoseGrad)" opacity="0.5" />}
-                    {/* Per-segment colored line with overlap to prevent gaps */}
-                    {pts.length >= 2 && pts.slice(0, -1).map((p, i) => {
-                      const p2 = pts[i + 1];
-                      // Extend slightly into next segment to prevent gaps
-                      const p3 = pts[Math.min(pts.length - 1, i + 2)];
-                      const avgVal = (p.val + p2.val) / 2;
-                      const segColor = avgVal < 80 ? '#ef4444' : avgVal <= 110 ? '#22c55e' : avgVal <= 160 ? '#f59e0b' : '#ef4444';
-                      // Catmull-Rom bezier for smooth connection
-                      const p0 = pts[Math.max(0, i - 1)];
-                      const cp1x = p.x + (p2.x - p0.x) / 6;
-                      const cp1y = p.y + (p2.y - p0.y) / 6;
-                      const cp2x = p2.x - (p3.x - p.x) / 6;
-                      const cp2y = p2.y - (p3.y - p.y) / 6;
-                      return <path key={i} d={`M ${p.x} ${p.y} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`} fill="none" stroke={segColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />;
-                    })}
-                    {pts.length > 0 && <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />}
-
-                    {timestamps[0] && <text x={pad.left} y={chartH - 2} fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{fmtTime(timestamps[0])}</text>}
-                    {timestamps[timestamps.length - 1] && <text x={pad.left + iW} y={chartH - 2} textAnchor="end" fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{fmtTime(timestamps[timestamps.length - 1])}</text>}
-                    {/* Mid-point time */}
-                    {timestamps.length > 2 && (() => {
-                      const midIdx = Math.floor(timestamps.length / 2);
-                      const midX = pad.left + (midIdx / (timestamps.length - 1)) * iW;
-                      return <text x={midX} y={chartH - 2} textAnchor="middle" fill="white" fillOpacity="0.3" fontSize="9">{fmtTime(timestamps[midIdx])}</text>;
-                    })()}
-                  </svg>
-                )}
               </div>
             );
           })()}
@@ -554,11 +435,26 @@ export default function Dashboard() {
               if (!bmr || !dailyKcal || trainingSessions.length === 0) return null;
               const { weeklyAvgKcal: intake } = calcWeeklyIntake(dailyKcal, nutritionPlan?.current.trainingDay.meals || []);
 
-              const tdee = calcRollingTDEE(trainingSessions, bodyWeight, bmr, dailyActivity);
-              const dailyBurn = tdee.total;
-              const dailyTrainingAvg = tdee.training;
-              const dailyNeat = tdee.neat;
-              const weekSessions = tdee.sessions;
+              // Cache TDEE once per day — only recompute if date or plan changes
+              const nbCacheKey = `nb_${new Date().toISOString().split('T')[0]}_${dailyKcal}`;
+              const nbCacheRaw = typeof window !== 'undefined' ? localStorage.getItem('nb_cache') : null;
+              const nbCache = nbCacheRaw ? JSON.parse(nbCacheRaw) : null;
+              let dailyBurn: number, dailyTrainingAvg: number, dailyNeat: number;
+              if (nbCache?.key === nbCacheKey) {
+                dailyBurn = nbCache.burn;
+                dailyTrainingAvg = nbCache.training;
+                dailyNeat = nbCache.neat;
+              } else {
+                const tdee = calcRollingTDEE(trainingSessions, bodyWeight, bmr, dailyActivity);
+                dailyBurn = tdee.total;
+                dailyTrainingAvg = tdee.training;
+                dailyNeat = tdee.neat;
+                try { localStorage.setItem('nb_cache', JSON.stringify({ key: nbCacheKey, burn: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat })); } catch {}
+              }
+              const weekSessions = trainingSessions.filter(s => {
+                const d = new Date(); d.setDate(d.getDate() - 6);
+                return s.date >= d.toISOString().split('T')[0];
+              });
               // Protein: target = weight × 2.25 ±0.25
               const proteinTarget = Math.round(bodyWeight * 2.25);
               const proteinLow = Math.round(bodyWeight * 2.0);
@@ -750,7 +646,80 @@ export default function Dashboard() {
             })()}
           </div>
 
-          {/* Glucose Monitor — moved above sleep */}
+          {/* Glucose Monitor */}
+          {glucose?.current && (() => {
+            const { current, history, stats } = glucose;
+            const gv = current.value;
+            const color = gv < 80 ? '#ef4444' : gv <= 110 ? '#22c55e' : gv <= 160 ? '#f59e0b' : '#ef4444';
+            const glabel = gv < 80 ? 'LOW' : gv <= 110 ? 'IN RANGE' : gv <= 160 ? 'ELEVATED' : 'HIGH';
+            const gChartW = 500, gChartH = 160;
+            const gPad = { top: 5, right: 10, bottom: 20, left: 30 };
+            const gIW = gChartW - gPad.left - gPad.right;
+            const gIH = gChartH - gPad.top - gPad.bottom;
+            const gMn = 50, gMx = 300, gRng = gMx - gMn;
+            const toGY = (val: number) => gPad.top + gIH - ((Math.max(gMn, Math.min(gMx, val)) - gMn) / gRng) * gIH;
+            const toGX = (i: number) => gPad.left + (i / Math.max(1, history.length - 1)) * gIW;
+            const gPts = history.map((h, i) => ({ x: toGX(i), y: toGY(h.value), val: h.value }));
+            let gLinePath = '';
+            if (gPts.length >= 2) {
+              gLinePath = `M ${gPts[0].x} ${gPts[0].y}`;
+              for (let i = 0; i < gPts.length - 1; i++) {
+                const p0 = gPts[Math.max(0, i - 1)], p1 = gPts[i], p2 = gPts[i + 1], p3 = gPts[Math.min(gPts.length - 1, i + 2)];
+                gLinePath += ` C ${p1.x + (p2.x - p0.x) / 6} ${p1.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p1.x) / 6} ${p2.y - (p3.y - p1.y) / 6}, ${p2.x} ${p2.y}`;
+              }
+            }
+            const gZones = [
+              { top: toGY(200), bottom: toGY(160), color: '#ef4444', opacity: 0.06 },
+              { top: toGY(160), bottom: toGY(110), color: '#f59e0b', opacity: 0.05 },
+              { top: toGY(110), bottom: toGY(80), color: '#22c55e', opacity: 0.08 },
+              { top: toGY(80), bottom: toGY(50), color: '#ef4444', opacity: 0.06 },
+            ];
+            const gTimestamps = history.map(h => new Date(h.timestamp));
+            const gFmtTime = (d: Date) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            return (
+              <div className="glass-card p-5 mb-6 fade-up">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-white flex items-center gap-2"><span className="text-lg">🩸</span> Glucose</h2>
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: `${color}20`, color }}>{glabel}</span>
+                </div>
+                <div className="flex items-center gap-3 mb-2">
+                  <div>
+                    <span className="text-5xl font-bold data-value" style={{ color }}>{current.value}</span>
+                    <span className="text-sm text-white/30 ml-1">mg/dL</span>
+                    <div className="text-4xl font-bold mt-1" style={{ color }}>{current.trend}</div>
+                  </div>
+                  <div className="flex-1" />
+                  <div className="flex flex-col gap-1 text-right">
+                    <span className="text-xs text-white/30">TIR <span className="text-white/60 font-bold">{stats.timeInRange}%</span></span>
+                    <span className="text-xs text-white/30">Avg <span className="text-white/60 font-bold">{stats.avgGlucose}</span></span>
+                    <span className="text-xs text-white/30">eA1c <span className="text-white/60 font-bold">{stats.estimatedA1c}%</span></span>
+                  </div>
+                </div>
+                {gPts.length > 2 && (
+                  <svg viewBox={`0 0 ${gChartW} ${gChartH}`} className="w-full" style={{ height: '140px' }}>
+                    <defs>
+                      <linearGradient id="glucoseGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.25" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient>
+                      <filter id="glucoseGlow"><feGaussianBlur stdDeviation="1.5" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+                    </defs>
+                    {gZones.map((z, i) => <rect key={i} x={gPad.left} y={z.top} width={gIW} height={z.bottom - z.top} fill={z.color} opacity={z.opacity} />)}
+                    {[80, 110, 160].map(val => (
+                      <g key={val}><line x1={gPad.left} y1={toGY(val)} x2={gPad.left + gIW} y2={toGY(val)} stroke={val === 110 ? '#22c55e' : val === 80 ? '#ef4444' : '#f59e0b'} strokeOpacity="0.2" strokeDasharray="3 3" /><text x={gPad.left - 3} y={toGY(val) + 3} textAnchor="end" fill="white" fillOpacity="0.25" fontSize="7">{val}</text></g>
+                    ))}
+                    {gLinePath && <path d={`${gLinePath} L ${gPts[gPts.length - 1].x} ${gPad.top + gIH} L ${gPts[0].x} ${gPad.top + gIH} Z`} fill="url(#glucoseGrad)" opacity="0.5" />}
+                    {gPts.length >= 2 && gPts.slice(0, -1).map((p, i) => {
+                      const p2 = gPts[i + 1], p3 = gPts[Math.min(gPts.length - 1, i + 2)], p0 = gPts[Math.max(0, i - 1)];
+                      const segColor = (p.val + p2.val) / 2 < 80 ? '#ef4444' : (p.val + p2.val) / 2 <= 110 ? '#22c55e' : (p.val + p2.val) / 2 <= 160 ? '#f59e0b' : '#ef4444';
+                      return <path key={i} d={`M ${p.x} ${p.y} C ${p.x + (p2.x - p0.x) / 6} ${p.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p.x) / 6} ${p2.y - (p3.y - p.y) / 6}, ${p2.x} ${p2.y}`} fill="none" stroke={segColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />;
+                    })}
+                    {gPts.length > 0 && <circle cx={gPts[gPts.length - 1].x} cy={gPts[gPts.length - 1].y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />}
+                    {gTimestamps[0] && <text x={gPad.left} y={gChartH - 2} fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{gFmtTime(gTimestamps[0])}</text>}
+                    {gTimestamps[gTimestamps.length - 1] && <text x={gPad.left + gIW} y={gChartH - 2} textAnchor="end" fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{gFmtTime(gTimestamps[gTimestamps.length - 1])}</text>}
+                    {gTimestamps.length > 2 && (() => { const mi = Math.floor(gTimestamps.length / 2); return <text x={gPad.left + (mi / (gTimestamps.length - 1)) * gIW} y={gChartH - 2} textAnchor="middle" fill="white" fillOpacity="0.3" fontSize="9">{gFmtTime(gTimestamps[mi])}</text>; })()}
+                  </svg>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {
