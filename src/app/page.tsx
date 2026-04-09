@@ -70,7 +70,7 @@ function SleepMultiRing({ score, deepPct, remPct }: { score: number; deepPct: nu
         })}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold text-white data-value">{score}</span>
+        <span className="text-2xl font-bold gradient-text data-value">{score}</span>
         <span className="text-[8px] text-white/30 uppercase tracking-wider">Score</span>
       </div>
     </div>
@@ -197,6 +197,11 @@ export default function Dashboard() {
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number }>>({});
+  const [glucose, setGlucose] = useState<{
+    current: { value: number; valueMmol: number; trend: string; timestamp: string; isHigh: boolean; isLow: boolean } | null;
+    history: { value: number; valueMmol: number; timestamp: string }[];
+    stats: { timeInRange: number; avgGlucose: number; avgMmol: number; estimatedA1c: number; readings: number };
+  } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -234,6 +239,10 @@ export default function Dashboard() {
         if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
         setDailyActivity(act);
       }).catch(() => {}), 1000);
+      // Glucose data from LibreLinkUp
+      setTimeout(() => fetch('/api/glucose').then(r => r.json()).then(d => {
+        if (d.current) setGlucose(d);
+      }).catch(() => {}), 1500);
     }
   }, [isAuthenticated]);
 
@@ -294,7 +303,7 @@ export default function Dashboard() {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
-                      <p className={`font-bold mt-1 data-value ${stat.hero ? 'text-4xl gradient-text' : 'text-2xl text-white'}`}>{stat.value}</p>
+                      <p className={`font-bold mt-1 data-value gradient-text ${stat.hero ? 'text-4xl' : 'text-2xl'}`}>{stat.value}</p>
                       {change !== undefined && change !== 0 && (
                         <p className="text-sm mt-1">{formatChange(change, stat.lowerIsBetter)}</p>
                       )}
@@ -320,6 +329,105 @@ export default function Dashboard() {
                   {statCard({ label: 'Legs', value: `${latestMeasurement.legs}cm`, field: 'legs' }, idx++)}
                   {statCard({ label: 'Arms', value: `${latestMeasurement.arms}cm`, field: 'arms' }, idx++)}
                 </div>
+              </div>
+            );
+          })()}
+
+          {/* Glucose Monitor */}
+          {glucose?.current && (() => {
+            const { current, history, stats } = glucose;
+            const v = current.value;
+            const color = v < 80 ? '#ef4444' : v <= 110 ? '#22c55e' : v <= 160 ? '#f59e0b' : '#ef4444';
+            const label = v < 80 ? 'LOW' : v <= 110 ? 'IN RANGE' : v <= 160 ? 'ELEVATED' : 'HIGH';
+            const chartW = 500, chartH = 160;
+            const pad = { top: 5, right: 10, bottom: 20, left: 30 };
+            const iW = chartW - pad.left - pad.right;
+            const iH = chartH - pad.top - pad.bottom;
+
+            // Tighter Y scale for dramatic curves
+            const mn = 50, mx = 300;
+            const rng = mx - mn;
+            const toGY = (val: number) => pad.top + iH - ((Math.max(mn, Math.min(mx, val)) - mn) / rng) * iH;
+            const toGX = (i: number) => pad.left + (i / Math.max(1, history.length - 1)) * iW;
+            const pts = history.map((h, i) => ({ x: toGX(i), y: toGY(h.value), val: h.value }));
+
+            let linePath = '';
+            if (pts.length >= 2) {
+              linePath = `M ${pts[0].x} ${pts[0].y}`;
+              for (let i = 0; i < pts.length - 1; i++) {
+                const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+                linePath += ` C ${p1.x + (p2.x - p0.x) / 6} ${p1.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p1.x) / 6} ${p2.y - (p3.y - p1.y) / 6}, ${p2.x} ${p2.y}`;
+              }
+            }
+
+            // Zone bands
+            const zones = [
+              { top: toGY(200), bottom: toGY(160), color: '#ef4444', opacity: 0.06 },
+              { top: toGY(160), bottom: toGY(110), color: '#f59e0b', opacity: 0.05 },
+              { top: toGY(110), bottom: toGY(80), color: '#22c55e', opacity: 0.08 },
+              { top: toGY(80), bottom: toGY(50), color: '#ef4444', opacity: 0.06 },
+            ];
+
+            const timestamps = history.map(h => new Date(h.timestamp));
+            const fmtTime = (d: Date) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+            return (
+              <div className="glass-card p-5 mb-6 fade-up">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <span className="text-lg">🩸</span> Glucose
+                  </h2>
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                    style={{ background: `${color}20`, color }}>{label}</span>
+                </div>
+
+                <div className="flex items-center gap-3 mb-2">
+                  <div>
+                    <span className="text-5xl font-bold data-value" style={{ color }}>{current.value}</span>
+                    <span className="text-sm text-white/30 ml-1">mg/dL</span>
+                    <div className="text-4xl font-bold mt-1" style={{ color }}>{current.trend}</div>
+                  </div>
+                  <div className="flex-1" />
+                  <div className="flex flex-col gap-1 text-right">
+                    <span className="text-xs text-white/30">TIR <span className="text-white/60 font-bold">{stats.timeInRange}%</span></span>
+                    <span className="text-xs text-white/30">Avg <span className="text-white/60 font-bold">{stats.avgGlucose}</span></span>
+                    <span className="text-xs text-white/30">eA1c <span className="text-white/60 font-bold">{stats.estimatedA1c}%</span></span>
+                  </div>
+                </div>
+
+                {pts.length > 2 && (
+                  <svg viewBox={`0 0 ${chartW} ${chartH}`} className="w-full" style={{ height: '140px' }}>
+                    <defs>
+                      <linearGradient id="glucoseGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+                        <stop offset="100%" stopColor={color} stopOpacity="0" />
+                      </linearGradient>
+                      <filter id="glucoseGlow">
+                        <feGaussianBlur stdDeviation="1.5" result="blur" />
+                        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
+                    </defs>
+
+                    {/* Zone bands */}
+                    {zones.map((z, i) => (
+                      <rect key={i} x={pad.left} y={z.top} width={iW} height={z.bottom - z.top} fill={z.color} opacity={z.opacity} />
+                    ))}
+                    {/* Zone boundary lines */}
+                    {[80, 110, 160].map(val => (
+                      <g key={val}>
+                        <line x1={pad.left} y1={toGY(val)} x2={pad.left + iW} y2={toGY(val)} stroke={val === 110 ? '#22c55e' : val === 80 ? '#ef4444' : '#f59e0b'} strokeOpacity="0.2" strokeDasharray="3 3" />
+                        <text x={pad.left - 3} y={toGY(val) + 3} textAnchor="end" fill="white" fillOpacity="0.25" fontSize="7">{val}</text>
+                      </g>
+                    ))}
+
+                    {linePath && <path d={`${linePath} L ${pts[pts.length - 1].x} ${pad.top + iH} L ${pts[0].x} ${pad.top + iH} Z`} fill="url(#glucoseGrad)" />}
+                    {linePath && <path d={linePath} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" filter="url(#glucoseGlow)" />}
+                    {pts.length > 0 && <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />}
+
+                    {timestamps[0] && <text x={pad.left} y={chartH - 3} fill="white" fillOpacity="0.2" fontSize="7">{fmtTime(timestamps[0])}</text>}
+                    {timestamps[timestamps.length - 1] && <text x={pad.left + iW} y={chartH - 3} textAnchor="end" fill="white" fillOpacity="0.2" fontSize="7">{fmtTime(timestamps[timestamps.length - 1])}</text>}
+                  </svg>
+                )}
               </div>
             );
           })()}
@@ -352,7 +460,7 @@ export default function Dashboard() {
                     <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2">
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">Total</span>
-                        <p className="text-sm font-bold text-white data-value">{formatDuration(last.totalSleep)}</p>
+                        <p className="text-sm font-bold gradient-text data-value">{formatDuration(last.totalSleep)}</p>
                       </div>
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">Deep</span>
@@ -372,7 +480,7 @@ export default function Dashboard() {
                       </div>
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</span>
-                        <p className="text-sm font-bold text-white/70 data-value">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
+                        <p className="text-sm font-bold gradient-text data-value">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
                       </div>
                     </div>
                   </div>
@@ -622,6 +730,8 @@ export default function Dashboard() {
             })()}
           </div>
 
+          {/* Glucose Monitor — moved above sleep */}
+
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {
             const weights = measurements.map(m => m.weight);
@@ -667,10 +777,7 @@ export default function Dashboard() {
             // Chart dimensions
             const chartWidth = 700;
             const chartHeight = 240;
-            const hasBf = measurements.some(m => m.bodyFat != null);
-            const hasMm = measurements.some(m => m.muscleMass != null);
-            const hasSecondary = hasBf || hasMm;
-            const padding = { top: 30, right: hasSecondary ? 80 : 60, bottom: 44, left: 54 };
+            const padding = { top: 30, right: 50, bottom: 44, left: 54 };
             const innerWidth = chartWidth - padding.left - padding.right;
             const innerHeight = chartHeight - padding.top - padding.bottom;
 
@@ -811,9 +918,9 @@ export default function Dashboard() {
                     ) : (
                       <button
                         onClick={() => { setTargetInput(targetWeight ? String(targetWeight) : ''); setShowTargetInput(true); }}
-                        className="flex items-center gap-1.5 glass-input px-3 py-1.5 rounded-full text-xs text-white/50 hover:text-white/80 hover:border-white/20 transition-all"
+                        className="glass-input px-3 py-1.5 rounded-full text-xs text-white/40 hover:text-white/70 hover:border-white/20 transition-all"
                       >
-                        🎯 {targetWeight ? `${targetWeight}kg` : 'Set Target'}
+                        {targetWeight ? `Target ${targetWeight}kg` : 'Set Target'}
                       </button>
                     )}
 
@@ -832,45 +939,22 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Chart */}
-                <div className="overflow-x-auto">
+                {/* Weight Chart */}
+                <div className="overflow-x-auto mb-4">
                   <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full" style={{ minWidth: '340px' }}>
-                    {/* Y-axis grid + labels */}
                     {yLabels.map((tick, i) => (
                       <g key={i}>
-                        <line x1={padding.left} y1={tick.y} x2={chartWidth - padding.right} y2={tick.y} stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
-                        <text x={padding.left - 10} y={tick.y + 4} textAnchor="end" fill="rgba(255,255,255,0.3)" fontSize="10">{tick.val}</text>
+                        <line x1={padding.left} y1={tick.y} x2={chartWidth - padding.right} y2={tick.y} stroke="rgba(255,255,255,0.04)" />
+                        <text x={padding.left - 8} y={tick.y + 3} textAnchor="end" fill="rgba(255,255,255,0.2)" fontSize="9">{tick.val}</text>
                       </g>
                     ))}
 
-                    {/* Target weight line */}
                     {targetWeight !== null && (
                       <g>
-                        <line x1={padding.left} y1={toY(targetWeight)} x2={chartWidth - padding.right} y2={toY(targetWeight)} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4 4" opacity="0.6" />
-                        <text x={chartWidth - padding.right + 4} y={toY(targetWeight) + 4} fill="#f59e0b" fontSize="10" fontWeight="bold">{targetWeight}kg</text>
+                        <line x1={padding.left} y1={toY(targetWeight)} x2={chartWidth - padding.right} y2={toY(targetWeight)} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4 3" opacity="0.4" />
+                        <text x={chartWidth - padding.right + 4} y={toY(targetWeight) + 3} fill="#f59e0b" fontSize="9" fontWeight="bold" opacity="0.7">{targetWeight}kg</text>
                       </g>
                     )}
-
-                    {/* Milestone markers */}
-                    {(() => {
-                      const milestones: number[] = [];
-                      for (let m = Math.ceil(startWeight / 5) * 5; m <= endWeight; m += 5) {
-                        if (m > startWeight && m !== targetWeight) milestones.push(m);
-                      }
-                      return milestones.map(m => {
-                        const y = toY(m);
-                        // Find the data point closest to this milestone
-                        const ptIdx = weights.findIndex((w, i) => i > 0 && weights[i - 1] < m && w >= m);
-                        const x = ptIdx >= 0 ? toX(weeks[ptIdx]) : padding.left + innerWidth * ((m - startWeight) / (endWeight - startWeight));
-                        return (
-                          <g key={m}>
-                            <line x1={padding.left} y1={y} x2={chartWidth - padding.right} y2={y} stroke="white" strokeOpacity="0.04" strokeDasharray="2 4" />
-                            <circle cx={x} cy={y} r="6" fill="none" stroke="#f59e0b" strokeWidth="1.5" opacity="0.5" />
-                            <text x={x + 10} y={y + 3} fill="#f59e0b" fontSize="8" opacity="0.6">+{Math.round(m - startWeight)}kg</text>
-                          </g>
-                        );
-                      });
-                    })()}
 
                     {/* Gradient defs */}
                     <defs>
@@ -888,13 +972,11 @@ export default function Dashboard() {
                         <stop offset="100%" stopColor={accentColor} stopOpacity="1" />
                       </linearGradient>
                       <linearGradient id="dashBfGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ef4444" stopOpacity="0.3" />
-                        <stop offset="50%" stopColor="#ef4444" stopOpacity="0.1" />
+                        <stop offset="0%" stopColor="#ef4444" stopOpacity="0.15" />
                         <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
                       </linearGradient>
                       <linearGradient id="dashMmGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" />
-                        <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.1" />
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.15" />
                         <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
                       </linearGradient>
                       <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
@@ -903,133 +985,12 @@ export default function Dashboard() {
                       </filter>
                     </defs>
 
-                    {/* Body Fat % curve (secondary axis) */}
-                    {(() => {
-                      const bfData = measurements
-                        .map((m, i) => m.bodyFat != null ? { week: weeks[i], val: m.bodyFat, date: m.date } : null)
-                        .filter((d): d is { week: number; val: number; date: string } => d !== null);
-                      if (bfData.length < 2) return null;
-
-                      const bfMin = Math.min(...bfData.map(d => d.val)) - 0.5;
-                      const bfMax = Math.max(...bfData.map(d => d.val)) + 0.5;
-                      const bfRange = bfMax - bfMin || 1;
-                      // When MM is also shown, BF% uses the top half of the chart
-                      const bfTop = padding.top;
-                      const bfBottom = hasMm ? padding.top + innerHeight * 0.45 : padding.top + innerHeight;
-                      const bfHeight = bfBottom - bfTop;
-                      const toBfY = (v: number) => bfBottom - ((v - bfMin) / bfRange) * bfHeight;
-
-                      const bfPoints = bfData.map(d => ({ x: toX(d.week), y: toBfY(d.val), val: d.val }));
-                      const bfLine = bfPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-
-                      const bfColor = '#b90a0a';
-                      const bfTicks = 4;
-                      const bfLabels = Array.from({ length: bfTicks }, (_, i) => {
-                        const val = bfMin + (bfRange * i) / (bfTicks - 1);
-                        return { val: Math.round(val * 10) / 10, y: toBfY(val) };
-                      });
-
-                      return (
-                        <g>
-                          {/* Right Y-axis labels */}
-                          {bfLabels.map((tick, i) => (
-                            <text key={`bf-y-${i}`} x={chartWidth - padding.right + 10} y={tick.y + 4} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.6">{tick.val}%</text>
-                          ))}
-                          <text x={chartWidth - padding.right + 10} y={padding.top - 10} textAnchor="start" fill={bfColor} fontSize="9" opacity="0.4">{hasMm ? 'BF%  MM kg' : 'BF%'}</text>
-
-                          {/* Area fill */}
-                          <path d={`${bfLine} L ${bfPoints[bfPoints.length - 1].x} ${bfBottom} L ${bfPoints[0].x} ${bfBottom} Z`} fill="url(#dashBfGrad)" />
-
-                          {/* Line */}
-                          <path d={bfLine} fill="none" stroke={bfColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.8" filter="url(#lineGlow)" />
-
-                          {/* Points */}
-                          {bfPoints.map((p, i) => {
-                            const isLast = i === bfPoints.length - 1;
-                            const isFirst = i === 0;
-                            return (
-                              <g key={`bf-${i}`}>
-                                <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2.5} fill={bfColor} stroke="#fff" strokeWidth={isLast ? 1.5 : 1} opacity="0.8" />
-                                {(isFirst || isLast) && (
-                                  <text x={p.x + (isLast ? -4 : 4)} y={p.y - 10} textAnchor={isLast ? 'end' : 'start'} fill={bfColor} fontSize="10" fontWeight="bold">{p.val}%</text>
-                                )}
-                              </g>
-                            );
-                          })}
-                        </g>
-                      );
-                    })()}
-
-                    {/* Muscle Mass curve (secondary axis) */}
-                    {(() => {
-                      const mmData = measurements
-                        .map((m, i) => m.muscleMass != null ? { week: weeks[i], val: m.muscleMass, date: m.date } : null)
-                        .filter((d): d is { week: number; val: number; date: string } => d !== null);
-                      if (mmData.length < 2) return null;
-
-                      const mmMin = Math.min(...mmData.map(d => d.val)) - 0.5;
-                      const mmMax = Math.max(...mmData.map(d => d.val)) + 0.5;
-                      const mmRange = mmMax - mmMin || 1;
-                      // When BF% is also shown, MM uses the bottom half of the chart
-                      const mmTop = hasBf ? padding.top + innerHeight * 0.55 : padding.top;
-                      const mmBottom = padding.top + innerHeight;
-                      const mmHeight = mmBottom - mmTop;
-                      const toMmY = (v: number) => mmBottom - ((v - mmMin) / mmRange) * mmHeight;
-
-                      const mmPoints = mmData.map(d => ({ x: toX(d.week), y: toMmY(d.val), val: d.val }));
-                      const mmLine = mmPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-
-                      const mmColor = '#3b82f6';
-                      const mmTicks = 4;
-                      const mmLabels = Array.from({ length: mmTicks }, (_, i) => {
-                        const val = mmMin + (mmRange * i) / (mmTicks - 1);
-                        return { val: Math.round(val * 10) / 10, y: toMmY(val) };
-                      });
-
-                      const mmAxisX = chartWidth - padding.right + 10;
-
-                      return (
-                        <g>
-                          {mmLabels.map((tick, i) => (
-                            <text key={`mm-y-${i}`} x={mmAxisX} y={tick.y + 4} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.6">{tick.val}</text>
-                          ))}
-                          {!hasBf && <text x={mmAxisX} y={padding.top - 10} textAnchor="start" fill={mmColor} fontSize="9" opacity="0.4">MM kg</text>}
-
-                          <path d={`${mmLine} L ${mmPoints[mmPoints.length - 1].x} ${padding.top + innerHeight} L ${mmPoints[0].x} ${padding.top + innerHeight} Z`} fill="url(#dashMmGrad)" />
-                          <path d={mmLine} fill="none" stroke={mmColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.8" filter="url(#lineGlow)" />
-
-                          {mmPoints.map((p, i) => {
-                            const isLast = i === mmPoints.length - 1;
-                            const isFirst = i === 0;
-                            return (
-                              <g key={`mm-${i}`}>
-                                <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2.5} fill={mmColor} stroke="#fff" strokeWidth={isLast ? 1.5 : 1} opacity="0.8" />
-                                {(isFirst || isLast) && (
-                                  <text x={p.x + (isLast ? -4 : 4)} y={p.y - 10} textAnchor={isLast ? 'end' : 'start'} fill={mmColor} fontSize="10" fontWeight="bold">{p.val}kg</text>
-                                )}
-                              </g>
-                            );
-                          })}
-                        </g>
-                      );
-                    })()}
-
                     {/* Area fill */}
                     <path d={areaPath} fill="url(#dashWeightGrad)" />
 
-                    {/* Trend line (historical) */}
-                    <line
-                      x1={points[0].x} y1={trendY1}
-                      x2={points[points.length - 1].x} y2={trendY2}
-                      stroke={accentColor}
-                      strokeWidth="1.5"
-                      strokeDasharray="6 4"
-                      opacity="0.4"
-                    />
-
-                    {/* Projection line (future) */}
+                    {/* Projection line (future, subtle) */}
                     {projPoints.length > 0 && (
-                      <path d={projPath} fill="none" stroke={accentColor} strokeWidth="2" strokeDasharray="6 4" opacity="0.5" />
+                      <path d={projPath} fill="none" stroke={accentColor} strokeWidth="1.5" strokeDasharray="4 4" opacity="0.3" />
                     )}
 
                     {/* Main line (solid) */}
@@ -1038,13 +999,12 @@ export default function Dashboard() {
                     {/* Data points */}
                     {points.map((p, i) => {
                       const isLast = i === points.length - 1;
-                      const isFirst = i === 0;
                       return (
                         <g key={i}>
-                          {isLast && <circle cx={p.x} cy={p.y} r="8" fill={accentColor} opacity="0.15" />}
-                          <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={accentColor} stroke="#fff" strokeWidth={isLast ? 2 : 1.5} />
-                          {(isFirst || isLast) && (
-                            <text x={p.x} y={p.y - 12} textAnchor={isLast ? 'end' : 'start'} fill="white" fontSize="11" fontWeight="bold">{p.val}kg</text>
+                          {isLast && <circle cx={p.x} cy={p.y} r="7" fill={accentColor} opacity="0.12" />}
+                          <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2} fill={accentColor} stroke="#fff" strokeWidth={isLast ? 1.5 : 0.8} />
+                          {isLast && (
+                            <text x={p.x} y={p.y - 10} textAnchor="end" fill="white" fontSize="11" fontWeight="bold">{p.val}kg</text>
                           )}
                         </g>
                       );
@@ -1078,6 +1038,126 @@ export default function Dashboard() {
                     <text x={padding.left - 10} y={padding.top - 10} textAnchor="end" fill="rgba(255,255,255,0.2)" fontSize="9">kg</text>
                   </svg>
                 </div>
+
+              {/* Body Composition Charts — same style as weight chart */}
+              {(() => {
+                const cW = chartWidth, cH = 160;
+                const cPad = { top: 25, right: 50, bottom: 40, left: 54 };
+                const cIW = cW - cPad.left - cPad.right;
+                const cIH = cH - cPad.top - cPad.bottom;
+                const wkMin = weeks[0] ?? 0;
+                const wkMax = weeks[weeks.length - 1] ?? 1;
+                const wkRange = wkMax - wkMin || 1;
+                const toCX = (w: number) => cPad.left + ((w - wkMin) / wkRange) * cIW;
+
+                // X-axis date labels (reuse from weight chart)
+                const allChartDates = measurements.map(m => ({ week: weeks[measurements.indexOf(m)], date: new Date(m.date) }));
+                const cLabelStep = Math.max(1, Math.floor(allChartDates.length / 6));
+
+                const renderCompositionChart = (
+                  data: { week: number; val: number; date: string }[],
+                  color: string,
+                  label: string,
+                  unit: string,
+                ) => {
+                  if (data.length < 2) return null;
+                  const vals = data.map(d => d.val);
+                  const mn = Math.min(...vals) - 1;
+                  const mx = Math.max(...vals) + 1;
+                  const rng = mx - mn || 1;
+                  const toCY = (v: number) => cPad.top + cIH - ((v - mn) / rng) * cIH;
+                  const pts = data.map(d => ({ x: toCX(d.week), y: toCY(d.val), val: d.val }));
+                  const line = smoothLine(pts);
+                  const area = `${line} L ${pts[pts.length - 1].x} ${cPad.top + cIH} L ${pts[0].x} ${cPad.top + cIH} Z`;
+                  const gradId = `compGrad-${label.replace(/\s/g, '')}`;
+                  const glowId = `compGlow-${label.replace(/\s/g, '')}`;
+
+                  // Y-axis labels
+                  const yTicks = 5;
+                  const yLabelsArr = Array.from({ length: yTicks }, (_, i) => {
+                    const val = mn + (rng * i) / (yTicks - 1);
+                    return { val: Math.round(val * 10) / 10, y: toCY(val) };
+                  });
+
+                  return (
+                    <div className="glass-card p-4 card-animate overflow-hidden">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider">{label}</h3>
+                      </div>
+                      <svg viewBox={`0 0 ${cW} ${cH}`} className="w-full" style={{ minWidth: '280px' }}>
+                        <defs>
+                          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+                            <stop offset="60%" stopColor={color} stopOpacity="0.08" />
+                            <stop offset="100%" stopColor={color} stopOpacity="0" />
+                          </linearGradient>
+                          <linearGradient id={`${gradId}Line`} x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor={color} stopOpacity="0.5" />
+                            <stop offset="100%" stopColor={color} stopOpacity="1" />
+                          </linearGradient>
+                          <filter id={glowId} x="-20%" y="-20%" width="140%" height="140%">
+                            <feGaussianBlur stdDeviation="2" result="blur" />
+                            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                          </filter>
+                        </defs>
+
+                        {/* Y-axis grid + labels */}
+                        {yLabelsArr.map((tick, i) => (
+                          <g key={i}>
+                            <line x1={cPad.left} y1={tick.y} x2={cW - cPad.right} y2={tick.y} stroke="rgba(255,255,255,0.04)" />
+                            <text x={cPad.left - 8} y={tick.y + 3} textAnchor="end" fill="rgba(255,255,255,0.2)" fontSize="9">{tick.val}</text>
+                          </g>
+                        ))}
+
+                        {/* Area + line */}
+                        <path d={area} fill={`url(#${gradId})`} />
+                        <path d={line} fill="none" stroke={`url(#${gradId}Line)`} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" filter={`url(#${glowId})`} />
+
+                        {/* Data points with labels */}
+                        {pts.map((p, i) => {
+                          const isLast = i === pts.length - 1;
+                          const isFirst = i === 0;
+                          return (
+                            <g key={i}>
+                              {isLast && <circle cx={p.x} cy={p.y} r="7" fill={color} opacity="0.12" />}
+                              <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2} fill={color} stroke="#fff" strokeWidth={isLast ? 1.5 : 0.8} />
+                              {isLast && <text x={p.x} y={p.y - 10} textAnchor="end" fill="white" fontSize="11" fontWeight="bold">{p.val}{unit}</text>}
+                              {isFirst && <text x={p.x} y={p.y - 10} textAnchor="start" fill="rgba(255,255,255,0.4)" fontSize="9">{p.val}{unit}</text>}
+                            </g>
+                          );
+                        })}
+
+                        {/* X-axis date labels */}
+                        {data.map((d, i) => {
+                          if (i > 0 && i < data.length - 1 && data.length > 3) return null;
+                          const x = toCX(d.week);
+                          const dateObj = new Date(d.date);
+                          return (
+                            <text key={i} x={x} y={cH - 5} textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="9"
+                              transform={`rotate(-30 ${x} ${cH - 5})`}>
+                              {dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                            </text>
+                          );
+                        })}
+
+                        {/* Unit label */}
+                        <text x={cPad.left - 10} y={cPad.top - 8} textAnchor="end" fill="rgba(255,255,255,0.2)" fontSize="9">{unit}</text>
+                      </svg>
+                    </div>
+                  );
+                };
+
+                const bfData = measurements.map((m, i) => m.bodyFat != null ? { week: weeks[i], val: m.bodyFat, date: m.date } : null).filter((d): d is { week: number; val: number; date: string } => d !== null);
+                const mmData = measurements.map((m, i) => m.muscleMass != null ? { week: weeks[i], val: m.muscleMass, date: m.date } : null).filter((d): d is { week: number; val: number; date: string } => d !== null);
+
+                if (bfData.length < 2 && mmData.length < 2) return null;
+                return (
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                    {renderCompositionChart(bfData, '#ef4444', 'Body Fat', '%')}
+                    {renderCompositionChart(mmData, '#3b82f6', 'Muscle Mass', 'kg')}
+                  </div>
+                );
+              })()}
               </div>
             );
           })()}

@@ -603,7 +603,7 @@ export default function BodyMetrix() {
                         return (
                           <div key={stat.label} className={`bg-white/5 rounded-xl p-3 bg-gradient-to-br ${tint}`}>
                             <p className="text-[10px] text-white/40 uppercase tracking-wider">{stat.label}</p>
-                            <p className="text-lg font-bold text-white data-value">{stat.value}</p>
+                            <p className="text-lg font-bold gradient-text data-value">{stat.value}</p>
                             {change !== undefined && change !== 0 && (
                               <div className="mt-1">{formatChange(change, stat.lowerIsBetter)}</div>
                             )}
