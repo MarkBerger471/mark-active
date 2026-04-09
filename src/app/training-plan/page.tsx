@@ -648,20 +648,21 @@ export default function TrainingPlanPage() {
                           onClick={() => setExpandedSession(isExpanded ? null : s.id)}
                         >
                           <div className="flex-1 min-w-0">
-                            <span className={`font-medium ${s.workoutName === 'Cardio' ? 'text-rose-400' : 'text-white'}`}>{s.workoutName}</span>
-                            <span className="text-white/30 text-sm ml-3">
-                              {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                              {s.savedAt && (
-                                <span className="ml-1">{new Date(s.savedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-                              )}
-                            </span>
-                            <span className="text-xs text-white/20 ml-2">
-                              {doneExercises.length}/{s.exercises.length}
-                            </span>
+                            <div className="flex items-baseline gap-2 whitespace-nowrap overflow-hidden">
+                              <span className={`font-medium text-sm ${s.workoutName === 'Cardio' ? 'text-rose-400' : 'text-white'}`}>{s.workoutName}</span>
+                              <span className="text-white/30 text-xs">
+                                {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {s.savedAt && (
+                                  <span className="ml-1">{new Date(s.savedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                                )}
+                              </span>
+                              <span className="text-[10px] text-white/20">
+                                {doneExercises.length}/{s.exercises.length}
+                              </span>
                             {(() => {
                               if (s.workoutName === 'Cardio') {
                                 const mins = doneExercises.reduce((t, ex) => t + parseDurationMinutes(ex.targetReps), 0);
-                                if (mins > 0) return <span className="text-xs text-blue-400/70 ml-2">{mins} min</span>;
+                                if (mins > 0) return <span className="text-[10px] text-blue-400/70 ml-1">{mins} min</span>;
                               } else if (editingDuration === s.id) {
                                 return (
                                   <span className="ml-2 inline-flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -697,9 +698,10 @@ export default function TrainingPlanPage() {
                               }
                               return null;
                             })()}
-                            <span className="text-xs text-orange-400/80 ml-2">
+                            <span className="text-[10px] text-orange-400/80 ml-1">
                               {calcSessionCalories(s, latestWeight)} kcal
                             </span>
+                            </div>
                           </div>
                           <div className="flex gap-2 ml-2 shrink-0">
                             <button
