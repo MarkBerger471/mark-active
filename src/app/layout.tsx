@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { AuthProvider } from "@/contexts/AuthContext";
 import BackgroundEffects from "@/components/BackgroundEffects";
 import PWAProvider from "@/components/PWAProvider";
+import PageTransition from "@/components/PageTransition";
 import "./globals.css";
 
 const inter = Inter({
@@ -46,7 +47,7 @@ export default function RootLayout({
       <body className="min-h-screen">
         <BackgroundEffects />
         <PWAProvider />
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider><PageTransition>{children}</PageTransition></AuthProvider>
       </body>
     </html>
   );

@@ -438,8 +438,14 @@ export default function Dashboard() {
                     })}
                     {pts.length > 0 && <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />}
 
-                    {timestamps[0] && <text x={pad.left} y={chartH - 3} fill="white" fillOpacity="0.2" fontSize="7">{fmtTime(timestamps[0])}</text>}
-                    {timestamps[timestamps.length - 1] && <text x={pad.left + iW} y={chartH - 3} textAnchor="end" fill="white" fillOpacity="0.2" fontSize="7">{fmtTime(timestamps[timestamps.length - 1])}</text>}
+                    {timestamps[0] && <text x={pad.left} y={chartH - 2} fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{fmtTime(timestamps[0])}</text>}
+                    {timestamps[timestamps.length - 1] && <text x={pad.left + iW} y={chartH - 2} textAnchor="end" fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{fmtTime(timestamps[timestamps.length - 1])}</text>}
+                    {/* Mid-point time */}
+                    {timestamps.length > 2 && (() => {
+                      const midIdx = Math.floor(timestamps.length / 2);
+                      const midX = pad.left + (midIdx / (timestamps.length - 1)) * iW;
+                      return <text x={midX} y={chartH - 2} textAnchor="middle" fill="white" fillOpacity="0.3" fontSize="9">{fmtTime(timestamps[midIdx])}</text>;
+                    })()}
                   </svg>
                 )}
               </div>

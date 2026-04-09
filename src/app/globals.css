@@ -437,6 +437,37 @@ body {
   filter: drop-shadow(0 0 6px currentColor);
 }
 
+/* Page slide transitions */
+.page-transition {
+  will-change: transform, opacity;
+}
+.page-exit-left {
+  animation: slide-out-left 0.15s ease-in forwards;
+}
+.page-exit-right {
+  animation: slide-out-right 0.15s ease-in forwards;
+}
+.page-enter-left {
+  animation: slide-in-left 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.page-enter-right {
+  animation: slide-in-right 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes slide-out-left {
+  to { transform: translateX(-60px); opacity: 0; }
+}
+@keyframes slide-out-right {
+  to { transform: translateX(60px); opacity: 0; }
+}
+@keyframes slide-in-left {
+  from { transform: translateX(60px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(-60px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
 /* Elevation levels */
 .elevation-0 { background: rgba(255, 255, 255, 0.03); }
 .elevation-1 { background: rgba(255, 255, 255, 0.05); }
