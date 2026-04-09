@@ -420,8 +420,14 @@ export default function Dashboard() {
                       </g>
                     ))}
 
-                    {linePath && <path d={`${linePath} L ${pts[pts.length - 1].x} ${pad.top + iH} L ${pts[0].x} ${pad.top + iH} Z`} fill="url(#glucoseGrad)" />}
-                    {linePath && <path d={linePath} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" filter="url(#glucoseGlow)" />}
+                    {linePath && <path d={`${linePath} L ${pts[pts.length - 1].x} ${pad.top + iH} L ${pts[0].x} ${pad.top + iH} Z`} fill="url(#glucoseGrad)" opacity="0.5" />}
+                    {/* Per-segment colored line */}
+                    {pts.length >= 2 && pts.slice(0, -1).map((p, i) => {
+                      const p2 = pts[i + 1];
+                      const avgVal = (p.val + p2.val) / 2;
+                      const segColor = avgVal < 80 ? '#ef4444' : avgVal <= 110 ? '#22c55e' : avgVal <= 160 ? '#f59e0b' : '#ef4444';
+                      return <line key={i} x1={p.x} y1={p.y} x2={p2.x} y2={p2.y} stroke={segColor} strokeWidth="2.5" strokeLinecap="round" filter="url(#glucoseGlow)" />;
+                    })}
                     {pts.length > 0 && <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />}
 
                     {timestamps[0] && <text x={pad.left} y={chartH - 3} fill="white" fillOpacity="0.2" fontSize="7">{fmtTime(timestamps[0])}</text>}
@@ -743,12 +749,21 @@ export default function Dashboard() {
             const dates = measurements.map(m => new Date(m.date).getTime());
             const firstDate = dates[0];
             const weeks = dates.map(d => (d - firstDate) / (7 * 24 * 60 * 60 * 1000));
+            // Slope from last 4 weeks of data for projection
+            const fourWeeksAgo = weeks[weeks.length - 1] - 4;
+            const recentIdx = weeks.findIndex(w => w >= fourWeeksAgo);
+            const recentWeeks = weeks.slice(recentIdx);
+            const recentWeights = weights.slice(recentIdx);
+            const rn = recentWeeks.length;
+            const rsumX = recentWeeks.reduce((a, b) => a + b, 0);
+            const rsumY = recentWeights.reduce((a, b) => a + b, 0);
+            const rsumXY = recentWeeks.reduce((a, x, i) => a + x * recentWeights[i], 0);
+            const rsumX2 = recentWeeks.reduce((a, x) => a + x * x, 0);
+            const slope = rn > 1 ? (rn * rsumXY - rsumX * rsumY) / (rn * rsumX2 - rsumX * rsumX) : 0;
+            // Full history regression for trend line reference
             const n = weeks.length;
             const sumX = weeks.reduce((a, b) => a + b, 0);
             const sumY = weights.reduce((a, b) => a + b, 0);
-            const sumXY = weeks.reduce((a, x, i) => a + x * weights[i], 0);
-            const sumX2 = weeks.reduce((a, x) => a + x * x, 0);
-            const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX); // kg per week
             const intercept = (sumY - slope * sumX) / n;
 
             // Projection: extend from last point using trend
@@ -1013,13 +1028,9 @@ export default function Dashboard() {
                     {/* Projection endpoint */}
                     {projPoints.length > 0 && (() => {
                       const last = projPathPoints[projPathPoints.length - 1];
-                      const lastProj = projPoints[projPoints.length - 1];
                       return (
                         <g>
-                          <circle cx={last.x} cy={last.y} r="4" fill="#f59e0b" stroke="#fff" strokeWidth="1.5" />
-                          <text x={last.x} y={last.y - 10} textAnchor="end" fill="#f59e0b" fontSize="10" fontWeight="bold">
-                            {Math.round(lastProj.weight * 10) / 10}kg
-                          </text>
+                          <circle cx={last.x} cy={last.y} r="3" fill="#f59e0b" stroke="#fff" strokeWidth="1" opacity="0.6" />
                         </g>
                       );
                     })()}
@@ -1067,7 +1078,7 @@ export default function Dashboard() {
                   const rng = mx - mn || 1;
                   const toCY = (v: number) => cPad.top + cIH - ((v - mn) / rng) * cIH;
                   const pts = data.map(d => ({ x: toCX(d.week), y: toCY(d.val), val: d.val }));
-                  const line = smoothLine(pts);
+                  const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
                   const area = `${line} L ${pts[pts.length - 1].x} ${cPad.top + cIH} L ${pts[0].x} ${cPad.top + cIH} Z`;
                   const gradId = `compGrad-${label.replace(/\s/g, '')}`;
                   const glowId = `compGlow-${label.replace(/\s/g, '')}`;
@@ -1119,10 +1130,10 @@ export default function Dashboard() {
                           const isFirst = i === 0;
                           return (
                             <g key={i}>
-                              {isLast && <circle cx={p.x} cy={p.y} r="7" fill={color} opacity="0.12" />}
-                              <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2} fill={color} stroke="#fff" strokeWidth={isLast ? 1.5 : 0.8} />
-                              {isLast && <text x={p.x} y={p.y - 10} textAnchor="end" fill="white" fontSize="11" fontWeight="bold">{p.val}{unit}</text>}
-                              {isFirst && <text x={p.x} y={p.y - 10} textAnchor="start" fill="rgba(255,255,255,0.4)" fontSize="9">{p.val}{unit}</text>}
+                              {isLast && <circle cx={p.x} cy={p.y} r="8" fill={color} opacity="0.12" />}
+                              <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={color} stroke="#fff" strokeWidth={isLast ? 2 : 1.5} />
+                              {isLast && <text x={p.x} y={p.y - 12} textAnchor="end" fill="white" fontSize="13" fontWeight="bold">{p.val}{unit}</text>}
+                              {isFirst && <text x={p.x} y={p.y - 12} textAnchor="start" fill="white" fontSize="12" fontWeight="bold" opacity="0.5">{p.val}{unit}</text>}
                             </g>
                           );
                         })}
