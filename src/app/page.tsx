@@ -77,110 +77,6 @@ function SleepMultiRing({ score, deepPct, remPct }: { score: number; deepPct: nu
   );
 }
 
-function SleepHypnogram({ deep, rem, light, awake, total, bedStart }: { deep: number; rem: number; light: number; awake: number; total: number; bedStart?: string }) {
-  if (!total || total === 0) return null;
-  // Build synthetic hypnogram blocks from durations
-  // Typical cycle: Light → Deep → Light → REM, repeating ~4-5 times
-  const totalSec = deep + rem + light + awake;
-  const cycles = Math.max(3, Math.round(totalSec / 5400)); // ~90 min cycles
-  const stages: { stage: number; dur: number }[] = []; // 0=awake, 1=light, 2=rem, 3=deep
-  let remainDeep = deep, remainRem = rem, remainLight = light, remainAwake = awake;
-  for (let c = 0; c < cycles; c++) {
-    // Each cycle: light → deep → light → REM, with brief awake
-    const cycleFrac = 1 / cycles;
-    const cDeep = Math.round(deep * cycleFrac * (c < cycles / 2 ? 1.3 : 0.7));
-    const cRem = Math.round(rem * cycleFrac * (c < cycles / 2 ? 0.7 : 1.3));
-    const cAwake = Math.round(awake * cycleFrac);
-    const cLight = Math.round((totalSec * cycleFrac) - cDeep - cRem - cAwake);
-    if (cAwake > 0) { stages.push({ stage: 0, dur: Math.min(cAwake, remainAwake) }); remainAwake -= cAwake; }
-    if (cLight > 0) { stages.push({ stage: 1, dur: Math.max(0, Math.min(cLight * 0.4, remainLight)) }); }
-    if (cDeep > 0) { stages.push({ stage: 3, dur: Math.min(cDeep, remainDeep) }); remainDeep -= cDeep; }
-    stages.push({ stage: 1, dur: Math.max(0, Math.min(cLight * 0.6, remainLight)) }); remainLight -= cLight;
-    if (cRem > 0) { stages.push({ stage: 2, dur: Math.min(cRem, remainRem) }); remainRem -= cRem; }
-  }
-  const colors = ['rgba(255,255,255,0.2)', '#60a5fa', '#06b6d4', '#818cf8'];
-  const glowColors = ['none', 'none', '0 0 4px #06b6d4', '0 0 4px #818cf8'];
-  const labels = ['Awake', 'Light', 'REM', 'Deep'];
-  const yMap = [4, 18, 30, 42]; // y positions for each stage
-  const w = 280, h = 52;
-  let x = 0;
-  const blocks = stages.filter(s => s.dur > 0).map((s, i) => {
-    const bw = Math.max(2, (s.dur / totalSec) * w);
-    const block = { x, y: yMap[s.stage], w: bw, color: colors[s.stage], glow: glowColors[s.stage], key: i };
-    x += bw;
-    return block;
-  });
-  // Time labels
-  const startHour = bedStart ? new Date(bedStart).getHours() : 23;
-  const durHours = Math.round(totalSec / 3600);
-
-  return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[9px] text-white/25 uppercase tracking-wider">Sleep Stages</span>
-        <div className="flex gap-3">
-          {[3, 2, 1, 0].map(s => (
-            <span key={s} className="flex items-center gap-1 text-[8px]" style={{ color: colors[s] }}>
-              <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: colors[s] }} />
-              {labels[s]}
-            </span>
-          ))}
-        </div>
-      </div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: '48px' }}>
-        <defs>
-          <filter id="stageGlow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5" result="blur" />
-            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-        </defs>
-        {/* Grid lines */}
-        {yMap.map((y, i) => (
-          <line key={i} x1="0" y1={y + 4} x2={w} y2={y + 4} stroke="white" strokeOpacity="0.03" />
-        ))}
-        {/* Stage blocks */}
-        {blocks.map(b => (
-          <rect key={b.key} x={b.x} y={b.y} width={b.w} height={8} rx="1.5" fill={b.color}
-            filter={b.glow !== 'none' ? 'url(#stageGlow)' : undefined} opacity="0.85" />
-        ))}
-      </svg>
-      <div className="flex justify-between text-[8px] text-white/20 mt-0.5">
-        <span>{startHour}:00</span>
-        <span>{(startHour + Math.floor(durHours / 2)) % 24}:00</span>
-        <span>{(startHour + durHours) % 24}:00</span>
-      </div>
-    </div>
-  );
-}
-
-function SleepHeatStrip({ days }: { days: { day: string; score: number }[] }) {
-  const last7 = days.slice(0, 7).reverse();
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-  return (
-    <div className="mt-3 pt-3 border-t border-white/5">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[9px] text-white/25 uppercase tracking-wider">Last 7 Nights</span>
-      </div>
-      <div className="flex gap-1.5">
-        {last7.map((d, i) => {
-          const intensity = Math.max(0.15, d.score / 100);
-          const hue = d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444';
-          return (
-            <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className="w-full aspect-square rounded-md transition-all"
-                style={{ background: hue, opacity: intensity, boxShadow: d.score >= 85 ? `0 0 8px ${hue}40` : 'none' }}
-              />
-              <span className="text-[7px] text-white/25">{dayLabels[new Date(d.day + 'T00:00:00').getDay() === 0 ? 6 : new Date(d.day + 'T00:00:00').getDay() - 1]}</span>
-              <span className="text-[7px] text-white/30 font-medium">{d.score}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export default function Dashboard() {
   const { isAuthenticated, isLoading, logout } = useAuth();
   const router = useRouter();
@@ -242,12 +138,11 @@ export default function Dashboard() {
         setDailyActivity(act);
         try { localStorage.setItem('activity_cache', JSON.stringify(act)); } catch {}
       }).catch(() => {}), 800);
-      // Glucose data — restore from cache first, then refresh from API
+      // Glucose data — restore from cache, then refresh via API (original 2s delay)
       try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
-      const fetchGlucose = () => fetch('/api/glucose').then(r => r.json()).then(d => {
+      setTimeout(() => fetch('/api/glucose').then(r => r.json()).then(d => {
         if (d.current) { setGlucose(d); try { localStorage.setItem('glucose_cache', JSON.stringify(d)); } catch {} }
-      });
-      fetchGlucose().catch(() => { setTimeout(() => fetchGlucose().catch(() => {}), 5000); });
+      }).catch(() => {}), 2000);
     }
   }, [isAuthenticated]);
 
@@ -686,20 +581,6 @@ export default function Dashboard() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Hypnogram */}
-                  {last.totalSleep && last.deepSleep && last.remSleep && last.lightSleep && (
-                    <SleepHypnogram
-                      deep={last.deepSleep} rem={last.remSleep} light={last.lightSleep}
-                      awake={last.awakeTime || 0} total={last.totalSleep}
-                      bedStart={last.bedtimeStart}
-                    />
-                  )}
-
-                  {/* 7-day heat strip */}
-                  {sleepData.length >= 3 && (
-                    <SleepHeatStrip days={sleepData} />
-                  )}
 
                   {sleepExpanded && (
                     <div className="mt-3 pt-3 border-t border-white/5">

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bb-shell-v5';
+const CACHE_NAME = 'bb-shell-v6';
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan'];
 
@@ -45,6 +45,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Skip API routes entirely — let them go straight to the network.
+  // Data caching is handled by localStorage/IndexedDB in the app layer.
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+
   // Static assets (immutable, hash-based filenames) — cache first
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
@@ -74,23 +80,6 @@ self.addEventListener('fetch', (event) => {
             return cached || caches.match('/');
           });
         })
-    );
-    return;
-  }
-
-  // API routes — serve cached immediately, refresh in background
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      caches.match(event.request).then((cached) => {
-        const networkFetch = fetch(event.request).then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        });
-        return cached || networkFetch;
-      })
     );
     return;
   }
