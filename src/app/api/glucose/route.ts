@@ -154,5 +154,7 @@ function formatResponse(graphData: any) {
     current,
     history,
     stats: { timeInRange, avgGlucose, avgMmol, estimatedA1c, readings: values.length },
+  }, {
+    headers: { 'Cache-Control': 'public, max-age=300' },
   });
 }

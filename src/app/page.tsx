@@ -226,9 +226,11 @@ export default function Dashboard() {
       // Priority 2: training + nutrition (instant from IDB, deferred Firestore sync)
       getTrainingSessions().then(setTrainingSessions);
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
-      // Priority 3: API calls (deferred)
+      // Priority 3: API calls — restore from cache first, then refresh
+      try { const sc = localStorage.getItem('sleep_cache'); if (sc) { const sd = JSON.parse(sc); if (sd.length) setSleepData(sd); } } catch {}
+      try { const ac = localStorage.getItem('activity_cache'); if (ac) { const ad = JSON.parse(ac); if (Object.keys(ad).length) setDailyActivity(ad); } } catch {}
       setTimeout(() => fetch('/api/oura?days=7').then(r => r.json()).then(d => {
-        if (d.data) setSleepData(d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)));
+        if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
       }).catch(() => {}), 300);
       setTimeout(() => fetch('/api/oura?days=60').then(r => r.json()).then(d => {
         const act: Record<string, { activeCalories: number }> = {};
@@ -238,10 +240,12 @@ export default function Dashboard() {
         if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
         if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
         setDailyActivity(act);
+        try { localStorage.setItem('activity_cache', JSON.stringify(act)); } catch {}
       }).catch(() => {}), 800);
-      // Glucose data from LibreLinkUp (lowest priority)
+      // Glucose data — restore from cache first, then refresh from API
+      try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
       setTimeout(() => fetch('/api/glucose').then(r => r.json()).then(d => {
-        if (d.current) setGlucose(d);
+        if (d.current) { setGlucose(d); try { localStorage.setItem('glucose_cache', JSON.stringify(d)); } catch {} }
       }).catch(() => {}), 2000);
     }
   }, [isAuthenticated]);
@@ -333,96 +337,7 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* Calorie Balance + Sleep */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            {/* Sleep Widget — second on mobile, first on desktop */}
-            {sleepData.length > 0 && (() => {
-              const last = sleepData[0];
-              return (
-                <div className="glass-card p-5 order-2 md:order-1 fade-up">
-                  <button
-                    onClick={() => setSleepExpanded(!sleepExpanded)}
-                    className="w-full flex items-center justify-between text-left"
-                  >
-                    <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                      <span className="text-lg">&#9790;</span> Sleep
-                    </h2>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-white/30">{formatDuration(last.totalSleep)}</span>
-                      <span className={`text-white/20 transition-transform duration-200 ${sleepExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
-                    </div>
-                  </button>
-
-                  <div className="flex items-center gap-4 mt-3">
-                    <SleepMultiRing score={last.score}
-                      deepPct={last.totalSleep && last.deepSleep ? Math.round((last.deepSleep / last.totalSleep) * 100) : 0}
-                      remPct={last.totalSleep && last.remSleep ? Math.round((last.remSleep / last.totalSleep) * 100) : 0}
-                    />
-                    <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2">
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Total</span>
-                        <p className="text-sm font-bold gradient-text data-value">{formatDuration(last.totalSleep)}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Deep</span>
-                        <p className="text-sm font-bold text-indigo-400 data-value" style={{ textShadow: '0 0 8px rgba(129,140,248,0.5)' }}>{formatDuration(last.deepSleep)}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">REM</span>
-                        <p className="text-sm font-bold text-cyan-400 data-value">{formatDuration(last.remSleep)}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Avg HR</span>
-                        <p className="text-sm font-bold text-red-400 data-value">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">HRV</span>
-                        <p className="text-sm font-bold text-green-400 data-value" style={{ textShadow: '0 0 8px rgba(34,197,94,0.4)' }}>{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</span>
-                        <p className="text-sm font-bold gradient-text data-value">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Hypnogram */}
-                  {last.totalSleep && last.deepSleep && last.remSleep && last.lightSleep && (
-                    <SleepHypnogram
-                      deep={last.deepSleep} rem={last.remSleep} light={last.lightSleep}
-                      awake={last.awakeTime || 0} total={last.totalSleep}
-                      bedStart={last.bedtimeStart}
-                    />
-                  )}
-
-                  {/* 7-day heat strip */}
-                  {sleepData.length >= 3 && (
-                    <SleepHeatStrip days={sleepData} />
-                  )}
-
-                  {sleepExpanded && (
-                    <div className="mt-3 pt-3 border-t border-white/5">
-                      <div className="space-y-1.5">
-                        {sleepData.map(d => (
-                          <div key={d.day} className="flex items-center gap-2 text-xs">
-                            <span className="text-white/30 w-14">
-                              {new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
-                            </span>
-                            <div className="flex-1 bg-white/5 rounded-full h-1.5 overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${d.score}%`, backgroundColor: d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444' }} />
-                            </div>
-                            <span className="text-white/50 w-6 text-right font-semibold">{d.score}</span>
-                            <span className="text-white/30 w-12 text-right">{formatDuration(d.totalSleep)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* Calorie Balance Chart */}
+          {/* Nutrition Balance */}
             {(() => {
               // Derive BMR and weight from measurements (same as training page)
               let bmr: number | undefined;
@@ -436,7 +351,7 @@ export default function Dashboard() {
               const { weeklyAvgKcal: intake } = calcWeeklyIntake(dailyKcal, nutritionPlan?.current.trainingDay.meals || []);
 
               // Cache TDEE once per day — only recompute if date or plan changes
-              const nbCacheKey = `nb_${new Date().toISOString().split('T')[0]}_${dailyKcal}`;
+              const nbCacheKey = `nb_${new Date().toISOString().split('T')[0]}_${dailyKcal}_${trainingSessions.length}_${Object.keys(dailyActivity).length}`;
               const nbCacheRaw = typeof window !== 'undefined' ? localStorage.getItem('nb_cache') : null;
               const nbCache = nbCacheRaw ? JSON.parse(nbCacheRaw) : null;
               let dailyBurn: number, dailyTrainingAvg: number, dailyNeat: number;
@@ -527,7 +442,7 @@ export default function Dashboard() {
               const pIntakeBarH = (trainingDayProtein / pMax) * barH;
 
               return (
-                <div className="glass-card p-5 order-1 md:order-2 fade-up">
+                <div className="glass-card p-5 mb-6 fade-up">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-sm font-semibold text-white">Nutrition Balance</h2>
                     <span className={`text-[10px] font-bold uppercase ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>{phase}</span>
@@ -644,7 +559,6 @@ export default function Dashboard() {
                 </div>
               );
             })()}
-          </div>
 
           {/* Glucose Monitor */}
           {glucose?.current && (() => {
@@ -720,6 +634,93 @@ export default function Dashboard() {
               </div>
             );
           })()}
+
+          {/* Sleep */}
+            {sleepData.length > 0 && (() => {
+              const last = sleepData[0];
+              return (
+                <div className="glass-card p-5 mb-6 fade-up">
+                  <button
+                    onClick={() => setSleepExpanded(!sleepExpanded)}
+                    className="w-full flex items-center justify-between text-left"
+                  >
+                    <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <span className="text-lg">&#9790;</span> Sleep
+                    </h2>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-white/30">{formatDuration(last.totalSleep)}</span>
+                      <span className={`text-white/20 transition-transform duration-200 ${sleepExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                    </div>
+                  </button>
+
+                  <div className="flex items-center gap-4 mt-3">
+                    <SleepMultiRing score={last.score}
+                      deepPct={last.totalSleep && last.deepSleep ? Math.round((last.deepSleep / last.totalSleep) * 100) : 0}
+                      remPct={last.totalSleep && last.remSleep ? Math.round((last.remSleep / last.totalSleep) * 100) : 0}
+                    />
+                    <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2">
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Total</span>
+                        <p className="text-sm font-bold gradient-text data-value">{formatDuration(last.totalSleep)}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Deep</span>
+                        <p className="text-sm font-bold text-indigo-400 data-value" style={{ textShadow: '0 0 8px rgba(129,140,248,0.5)' }}>{formatDuration(last.deepSleep)}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">REM</span>
+                        <p className="text-sm font-bold text-cyan-400 data-value">{formatDuration(last.remSleep)}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Avg HR</span>
+                        <p className="text-sm font-bold text-red-400 data-value">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">HRV</span>
+                        <p className="text-sm font-bold text-green-400 data-value" style={{ textShadow: '0 0 8px rgba(34,197,94,0.4)' }}>{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</span>
+                        <p className="text-sm font-bold gradient-text data-value">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Hypnogram */}
+                  {last.totalSleep && last.deepSleep && last.remSleep && last.lightSleep && (
+                    <SleepHypnogram
+                      deep={last.deepSleep} rem={last.remSleep} light={last.lightSleep}
+                      awake={last.awakeTime || 0} total={last.totalSleep}
+                      bedStart={last.bedtimeStart}
+                    />
+                  )}
+
+                  {/* 7-day heat strip */}
+                  {sleepData.length >= 3 && (
+                    <SleepHeatStrip days={sleepData} />
+                  )}
+
+                  {sleepExpanded && (
+                    <div className="mt-3 pt-3 border-t border-white/5">
+                      <div className="space-y-1.5">
+                        {sleepData.map(d => (
+                          <div key={d.day} className="flex items-center gap-2 text-xs">
+                            <span className="text-white/30 w-14">
+                              {new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
+                            </span>
+                            <div className="flex-1 bg-white/5 rounded-full h-1.5 overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${d.score}%`, backgroundColor: d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444' }} />
+                            </div>
+                            <span className="text-white/50 w-6 text-right font-semibold">{d.score}</span>
+                            <span className="text-white/30 w-12 text-right">{formatDuration(d.totalSleep)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {

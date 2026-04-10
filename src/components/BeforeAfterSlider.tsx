@@ -31,6 +31,9 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
 
   const onEnd = useCallback(() => { dragging.current = false; }, []);
 
+  // Both images: fill container width, natural height, top-anchored.
+  // clip-path ensures identical element dimensions for pixel-perfect alignment.
+  // min-h-full prevents gaps if an image is shorter than the container.
   return (
     <div
       ref={containerRef}
@@ -43,13 +46,11 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
       onTouchMove={e => onMove(e.touches[0].clientX)}
       onTouchEnd={onEnd}
     >
-      {/* After (full background) */}
-      <img src={afterSrc} alt="After" className="absolute inset-0 w-full h-full object-cover" />
-      {/* Before (clipped) */}
-      <div className="absolute inset-0 overflow-hidden" style={{ width: `${pos}%` }}>
-        <img src={beforeSrc} alt="Before" className="absolute inset-0 w-full h-full object-cover" style={{ width: `${100 / (pos / 100)}%`, maxWidth: 'none' }} />
-      </div>
-      {/* Divider */}
+      {/* After (full) */}
+      <img src={afterSrc} alt="After" className="absolute top-0 left-0 w-full min-h-full" />
+      {/* Before (clipped to left portion — same element size as after) */}
+      <img src={beforeSrc} alt="Before" className="absolute top-0 left-0 w-full min-h-full" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
+      {/* Divider line + drag handle */}
       <div className="absolute top-0 bottom-0" style={{ left: `${pos}%`, transform: 'translateX(-50%)' }}>
         <div className="w-0.5 h-full bg-white/80" />
         <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-white/90 rounded-full flex items-center justify-center shadow-lg">
@@ -58,7 +59,7 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
           </svg>
         </div>
       </div>
-      {/* Labels */}
+      {/* Date labels */}
       <div className="absolute top-3 left-3 bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1 text-[10px] text-white/80">{beforeLabel}</div>
       <div className="absolute top-3 right-3 bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1 text-[10px] text-white/80">{afterLabel}</div>
     </div>
