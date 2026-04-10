@@ -244,9 +244,10 @@ export default function Dashboard() {
       }).catch(() => {}), 800);
       // Glucose data — restore from cache first, then refresh from API
       try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
-      setTimeout(() => fetch('/api/glucose').then(r => r.json()).then(d => {
+      const fetchGlucose = () => fetch('/api/glucose').then(r => r.json()).then(d => {
         if (d.current) { setGlucose(d); try { localStorage.setItem('glucose_cache', JSON.stringify(d)); } catch {} }
-      }).catch(() => {}), 2000);
+      });
+      fetchGlucose().catch(() => { setTimeout(() => fetchGlucose().catch(() => {}), 5000); });
     }
   }, [isAuthenticated]);
 
