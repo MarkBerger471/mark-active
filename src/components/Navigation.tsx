@@ -19,8 +19,7 @@ export default function Navigation() {
   const { logout } = useAuth();
   const [online, setOnline] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
-  const touchStartX = useRef(0);
-  const touchStartY = useRef(0);
+  const touchRef = useRef<{ x: number; y: number; t: number }>({ x: 0, y: 0, t: 0 });
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -31,7 +30,7 @@ export default function Navigation() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
 
-  // Swipe navigation
+  // Swipe navigation — fast, edge-aware, Oura-like
   const handleSwipe = useCallback((dir: 'left' | 'right') => {
     const idx = navItems.findIndex(i => i.href === pathname);
     if (dir === 'left' && idx < navItems.length - 1) router.push(navItems[idx + 1].href);
@@ -40,13 +39,15 @@ export default function Navigation() {
 
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
-      touchStartX.current = e.touches[0].clientX;
-      touchStartY.current = e.touches[0].clientY;
+      touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
     };
     const onTouchEnd = (e: TouchEvent) => {
-      const dx = e.changedTouches[0].clientX - touchStartX.current;
-      const dy = e.changedTouches[0].clientY - touchStartY.current;
-      if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      const dx = e.changedTouches[0].clientX - touchRef.current.x;
+      const dy = e.changedTouches[0].clientY - touchRef.current.y;
+      const dt = Date.now() - touchRef.current.t;
+      const velocity = Math.abs(dx) / dt; // px/ms
+      // Quick flick (high velocity) or longer drag — must be horizontal
+      if (Math.abs(dx) > Math.abs(dy) * 1.8 && (Math.abs(dx) > 60 || (velocity > 0.4 && Math.abs(dx) > 30)) && dt < 500) {
         handleSwipe(dx < 0 ? 'left' : 'right');
       }
     };

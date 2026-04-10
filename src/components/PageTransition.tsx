@@ -9,29 +9,27 @@ export default function PageTransition({ children }: { children: React.ReactNode
   const pathname = usePathname();
   const prevPath = useRef(pathname);
   const [animClass, setAnimClass] = useState('');
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (prevPath.current === pathname) return;
     const prevIdx = navOrder.indexOf(prevPath.current);
     const currIdx = navOrder.indexOf(pathname);
-    const dir = currIdx > prevIdx ? 'left' : 'right';
+    const goingRight = currIdx > prevIdx;
 
-    // Start exit animation
-    setAnimClass(dir === 'left' ? 'page-exit-left' : 'page-exit-right');
+    // Slide out, then slide in from the opposite side
+    setAnimClass(goingRight ? 'slide-out-left' : 'slide-out-right');
 
     const timer = setTimeout(() => {
-      // Switch to enter animation
-      setAnimClass(dir === 'left' ? 'page-enter-left' : 'page-enter-right');
-      setTimeout(() => setAnimClass(''), 300);
-    }, 150);
+      setAnimClass(goingRight ? 'slide-in-right' : 'slide-in-left');
+      setTimeout(() => setAnimClass(''), 250);
+    }, 120);
 
     prevPath.current = pathname;
     return () => clearTimeout(timer);
   }, [pathname]);
 
   return (
-    <div ref={containerRef} className={`page-transition ${animClass}`}>
+    <div className={`page-transition ${animClass}`}>
       {children}
     </div>
   );
