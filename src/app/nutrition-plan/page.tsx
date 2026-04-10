@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan } from '@/utils/storage';
 import { calcWeeklyIntake } from '@/utils/calories';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
-import { calcNNU, optimizeMeal, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS } from '@/utils/eaa';
+import { calcNNU, optimizeMeal, calcDailyEAA, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS } from '@/utils/eaa';
 
 // Nutrition database: values per 100g
 const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
@@ -276,29 +276,70 @@ function parseFoodItem(item: FoodItem | string): FoodItem {
   return calcItemMacros(parsed);
 }
 
-function MealCard({ meal, allowedFoods, onSaveOptimized }: { meal: NutritionMeal; allowedFoods?: string[]; onSaveOptimized?: (meal: NutritionMeal) => void }) {
+function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealMg }: {
+  meal: NutritionMeal;
+  allowedFoods?: string[];
+  onSaveOptimized?: (meal: NutritionMeal) => void;
+  avgTargets?: { kcal: number; protein: number; carbs: number; fat: number };
+  eaaPerMealMg?: number;
+}) {
   const [showNNU, setShowNNU] = useState(false);
   const [level, setLevel] = useState(2);
 
-  // Compute NNU from food items that have amounts
-  const foods = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
-  const foodInputs = foods.map(f => ({ name: f.name, amount: f.amount }));
-  const nnu = foods.length > 0 ? calcNNU(foodInputs) : null;
-  const optimization = nnu && nnu.nnu < 95 ? optimizeMeal(foodInputs, 96, allowedFoods, level) : null;
+  const backupKey = `nnu_backup_${meal.name}`;
+  const hasBackup = typeof window !== 'undefined' && !!localStorage.getItem(backupKey);
+
+  // Per-meal macros and NNU (lazy — only if items exist)
+  const mealMacros = meal.items.length > 0 ? sumMacros([meal]) : { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  const parsedFoods = meal.items.map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } }).filter(it => it.name.trim() && it.amount);
+  const foodInputs = parsedFoods.map(f => ({ name: f.name, amount: f.amount }));
+  const nnu = parsedFoods.length > 0 ? calcNNU(foodInputs) : null;
+  const [optimization, setOptimization] = useState<ReturnType<typeof optimizeMeal>>(null);
+  const [optKey, setOptKey] = useState('');
+
+  // Recompute optimization only when NNU panel opens or level changes
+  const computeOptimization = () => {
+    if (!nnu || nnu.nnu >= 95) return;
+    const key = `${level}-${nnu.nnu}`;
+    if (key === optKey) return;
+    setTimeout(() => {
+      setOptimization(optimizeMeal(foodInputs, 96, allowedFoods, level));
+      setOptKey(key);
+    }, 100);
+  };
 
   return (
     <div className="py-3 border-b border-white/5 last:border-0">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-1">
         <div>
           <span className="text-sm font-semibold text-white">{meal.name}</span>
           {meal.subtitle && <span className="text-xs text-white/30 ml-2">({meal.subtitle})</span>}
         </div>
         {nnu && (
-          <button onClick={() => setShowNNU(!showNNU)}
+          <button onClick={() => { const next = !showNNU; setShowNNU(next); if (next) computeOptimization(); }}
             className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${nnu.nnu >= 95 ? 'bg-green-500/15 text-green-400' : nnu.nnu >= 80 ? 'bg-yellow-500/15 text-yellow-400' : 'bg-red-500/15 text-red-400'}`}>
             NNU {nnu.nnu}%
           </button>
         )}
+      </div>
+      {/* Per-meal macros + delta vs average */}
+      <div className="flex gap-3 mb-2 text-[10px]">
+        {[
+          { label: 'kcal', val: mealMacros.kcal, avg: avgTargets?.kcal },
+          { label: 'P', val: mealMacros.protein, avg: avgTargets?.protein },
+          { label: 'C', val: mealMacros.carbs, avg: avgTargets?.carbs },
+          { label: 'F', val: mealMacros.fat, avg: avgTargets?.fat },
+        ].map(m => {
+          const delta = m.avg ? m.val - m.avg : 0;
+          return (
+            <span key={m.label} className="text-white/30">
+              {m.val}<span className="text-white/15">{m.label}</span>
+              {m.avg && delta !== 0 && (
+                <span className={delta > 0 ? ' text-red-400/40' : ' text-green-400/40'}> {delta > 0 ? '+' : ''}{Math.round(delta)}</span>
+              )}
+            </span>
+          );
+        })}
       </div>
       {meal.items.length > 0 && (
         <table className="w-full" style={{ tableLayout: 'fixed' }}>
@@ -379,7 +420,7 @@ function MealCard({ meal, allowedFoods, onSaveOptimized }: { meal: NutritionMeal
               </div>
               <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map(l => (
-                  <button key={l} onClick={() => setLevel(l)}
+                  <button key={l} onClick={() => { setLevel(l); setOptKey(''); setTimeout(computeOptimization, 50); }}
                     className={`flex-1 h-6 rounded-lg transition-all flex items-center justify-center text-[9px] font-bold ${l <= level ? 'bg-green-400/60 text-white/70' : 'bg-white/10 text-white/20'}`}>{l}</button>
                 ))}
               </div>
@@ -444,11 +485,12 @@ function MealCard({ meal, allowedFoods, onSaveOptimized }: { meal: NutritionMeal
                 </div>
               )}
 
-              {/* Save button */}
+              {/* Apply / Undo buttons */}
               {onSaveOptimized && (
                 <button
                   onClick={() => {
-                    // Build the optimized meal
+                    // Backup original meal before applying
+                    try { localStorage.setItem(backupKey, JSON.stringify(meal)); } catch {}
                     const newItems = [...meal.items].map(rawItem => {
                       const item = parseFoodItem(rawItem);
                       const change = optimization.changes.find(c => item.name.toLowerCase().includes(c.food) || c.food.includes(item.name.toLowerCase()));
@@ -469,16 +511,128 @@ function MealCard({ meal, allowedFoods, onSaveOptimized }: { meal: NutritionMeal
           )}
         </div>
       )}
+
+      {/* Undo optimization button */}
+      {hasBackup && onSaveOptimized && (
+        <div className="mt-2 flex justify-end">
+          <button
+            onClick={() => {
+              try {
+                const backup = JSON.parse(localStorage.getItem(backupKey)!);
+                localStorage.removeItem(backupKey);
+                onSaveOptimized(backup);
+              } catch {}
+            }}
+            className="text-[10px] text-red-400/50 hover:text-red-400 uppercase tracking-wider"
+          >
+            Undo Optimization
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, weeklyAvgKcal, allowedFoods, onSaveOptimizedMeal }: {
+function DailyEAAPanel({ plan, allowedFoods, onTotalChange }: { plan: NutritionPlan; allowedFoods: string[]; onTotalChange?: (gPerDay: number) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [daily, setDaily] = useState<ReturnType<typeof calcDailyEAA>>(null);
+  const [computing, setComputing] = useState(false);
+
+  const compute = () => {
+    if (daily) { setExpanded(!expanded); return; }
+    setExpanded(true);
+    setComputing(true);
+    // Defer to next frame so UI shows "Computing..."
+    setTimeout(() => {
+      const allMeals = plan.current.trainingDay.meals.map(meal => {
+        const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
+        return items.map(f => ({ name: f.name, amount: f.amount }));
+      }).filter(m => m.length > 0);
+      const result = allMeals.length > 0 ? calcDailyEAA(allMeals, allowedFoods, 2) : null;
+      setDaily(result);
+      setComputing(false);
+      if (onTotalChange) onTotalChange(result ? result.totalPerDay / 1000 : 0);
+    }, 50);
+  };
+
+  return (
+    <div className="mb-6">
+      <button onClick={compute} className="text-xs text-white/30 hover:text-white/50 uppercase tracking-wider flex items-center gap-2">
+        <span className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
+        Daily EAA Supplement
+      </button>
+      {expanded && (
+        <div className="mt-3 glass-card p-5">
+          {computing ? (
+            <div className="text-xs text-white/30">Computing optimal supplements...</div>
+          ) : daily ? (
+            <>
+              <div className="flex items-baseline gap-2 mb-3">
+                <span className="text-lg font-bold text-cyan-400">Avg NNU {daily.avgNNUBefore}% → {daily.avgNNUAfter}%</span>
+                <span className="text-xs text-white/20">{daily.mealCount} meals · {(daily.totalPerDay / 1000).toFixed(1)}g/day</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Total per day</div>
+                  {daily.perDay.map((p, i) => (
+                    <div key={i} className="flex justify-between text-xs mb-1">
+                      <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
+                      <span className="text-white/40 font-mono">{p.mg < 1000 ? `${p.mg}mg` : `${(p.mg / 1000).toFixed(1)}g`}</span>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Per meal (~{daily.mealCount} meals)</div>
+                  {daily.perMeal.map((p, i) => (
+                    <div key={i} className="flex justify-between text-xs mb-1">
+                      <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
+                      <span className="text-white/40 font-mono">{p.mg}mg</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-white/5 text-[10px] text-white/20">
+                Mix into a single powder. Take {Math.round(daily.totalPerDay / daily.mealCount / 100) / 10}g per meal.
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-white/30">No supplement needed — all meals above 95% NNU.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MacroTarget({ label, value, onChange, unit, color }: { label: string; value: number; onChange: (v: number) => void; unit: string; color: string }) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState(String(value));
+  return editing ? (
+    <div className="flex items-center gap-1">
+      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+      <input type="number" className="glass-input w-16 text-sm font-bold text-white text-center py-0.5 px-1"
+        value={input} onChange={e => setInput(e.target.value)} autoFocus
+        onBlur={() => { onChange(parseInt(input) || value); setEditing(false); }}
+        onKeyDown={e => { if (e.key === 'Enter') { onChange(parseInt(input) || value); setEditing(false); } }} />
+      <span className="text-[10px] text-white/30">{unit}</span>
+    </div>
+  ) : (
+    <button onClick={() => { setInput(String(value)); setEditing(true); }} className="flex items-center gap-1.5 hover:bg-white/5 rounded-lg px-1 py-0.5 transition-all">
+      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+      <span className="text-xs text-white/40">{label}</span>
+      <span className="text-sm font-bold text-white">{value}</span>
+      <span className="text-[10px] text-white/30">{unit}</span>
+    </button>
+  );
+}
+
+function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, weeklyAvgKcal, allowedFoods, eaaSupplementGPerDay, onSaveOptimizedMeal }: {
   dayPlan: DayPlan;
   title: string;
   color: string;
   weeklyAvgKcal?: number;
   allowedFoods?: string[];
+  eaaSupplementGPerDay?: number;
   onSaveOptimizedMeal?: (mealIdx: number, meal: NutritionMeal) => void;
   editing: boolean;
   onStartEdit: () => void;
@@ -488,6 +642,31 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   setEditPlan: (p: DayPlan) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
+
+  // Target macros — editable, stored in localStorage
+  const [targets, setTargets] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('macro_targets');
+      if (stored) return JSON.parse(stored);
+    }
+    return { kcal: dayPlan.macros.kcal, protein: dayPlan.macros.protein, carbs: dayPlan.macros.carbs, fat: dayPlan.macros.fat };
+  });
+  const updateTarget = (key: string, value: number) => {
+    const next = { ...targets, [key]: value };
+    setTargets(next);
+    localStorage.setItem('macro_targets', JSON.stringify(next));
+  };
+
+  // Actual macros — computed in real-time from all meals + EAA supplement
+  const foodMacros = sumMacros(dayPlan.meals);
+  const eaaG = eaaSupplementGPerDay || 0;
+  const actualMacros = {
+    kcal: foodMacros.kcal + Math.round(eaaG * 4),
+    protein: foodMacros.protein + Math.round(eaaG),
+    carbs: foodMacros.carbs,
+    fat: foodMacros.fat,
+  };
+
   // Parsed supplement state: avoids re-parsing joined strings on every keystroke
   const [supState, setSupState] = useState<Record<string, { name: string; amount: string }>>({});
 
@@ -581,24 +760,58 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
   return (
     <div className="glass-card overflow-hidden p-5">
-          {/* Macros — use stored values (source of truth); recomputed only on save */}
-          <div className="grid grid-cols-4 gap-2 mb-2 p-3 rounded-xl bg-white/5">
-            <MacroBar label="Kcal" value={plan.macros.kcal} unit="" color="#b90a0a" />
-            <MacroBar label="Protein" value={plan.macros.protein} unit="g" color="#3b82f6" />
-            <MacroBar label="Carbs" value={plan.macros.carbs} unit="g" color="#f59e0b" />
-            <MacroBar label="Fat" value={plan.macros.fat} unit="g" color="#10b981" />
+          {/* Target macros — editable */}
+          <div className="mb-1">
+            <div className="text-[9px] text-white/20 uppercase tracking-wider mb-1">Target <span className="text-white/10">(tap to edit)</span></div>
+            <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
+              <MacroTarget label="Kcal" value={targets.kcal} onChange={v => updateTarget('kcal', v)} unit="" color="#b90a0a" />
+              <MacroTarget label="Protein" value={targets.protein} onChange={v => updateTarget('protein', v)} unit="g" color="#3b82f6" />
+              <MacroTarget label="Carbs" value={targets.carbs} onChange={v => updateTarget('carbs', v)} unit="g" color="#f59e0b" />
+              <MacroTarget label="Fat" value={targets.fat} onChange={v => updateTarget('fat', v)} unit="g" color="#10b981" />
+            </div>
           </div>
-          {weeklyAvgKcal != null && weeklyAvgKcal !== plan.macros.kcal && (
-            <p className="text-[11px] text-white/30 mb-3 ml-1">Weekly avg: ~{weeklyAvgKcal} kcal (incl. Sunday cheat)</p>
-          )}
+
+          {/* Actual macros — computed from meals */}
+          <div className="mb-3">
+            <div className="text-[9px] text-white/20 uppercase tracking-wider mb-1">Actual</div>
+            <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
+              {[
+                { label: 'Kcal', actual: actualMacros.kcal, target: targets.kcal, unit: '', color: '#b90a0a' },
+                { label: 'Protein', actual: actualMacros.protein, target: targets.protein, unit: 'g', color: '#3b82f6' },
+                { label: 'Carbs', actual: actualMacros.carbs, target: targets.carbs, unit: 'g', color: '#f59e0b' },
+                { label: 'Fat', actual: actualMacros.fat, target: targets.fat, unit: 'g', color: '#10b981' },
+              ].map(m => {
+                const diff = m.actual - m.target;
+                const pct = m.target > 0 ? m.actual / m.target : 1;
+                const statusColor = pct >= 0.95 && pct <= 1.05 ? 'text-green-400' : pct < 0.95 ? 'text-yellow-400' : 'text-red-400';
+                return (
+                  <div key={m.label} className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                    <span className="text-xs text-white/40">{m.label}</span>
+                    <span className={`text-sm font-bold ${statusColor}`}>{m.actual}</span>
+                    <span className="text-[10px] text-white/30">{m.unit}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {weeklyAvgKcal != null && weeklyAvgKcal !== actualMacros.kcal && (
+              <p className="text-[11px] text-white/20 mt-1 ml-1">Weekly avg: ~{weeklyAvgKcal} kcal (incl. Sunday cheat)</p>
+            )}
+          </div>
 
           {/* Meals */}
           {!editing ? (
             <div>
-              {plan.meals.map((meal, i) => (
-                <MealCard key={i} meal={meal} allowedFoods={allowedFoods}
-                  onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
-              ))}
+              {(() => {
+                const mealCount = plan.meals.length || 1;
+                const avg = { kcal: Math.round(targets.kcal / mealCount), protein: Math.round(targets.protein / mealCount), carbs: Math.round(targets.carbs / mealCount), fat: Math.round(targets.fat / mealCount) };
+                const eaaPerMeal = eaaSupplementGPerDay ? Math.round(eaaSupplementGPerDay * 1000 / mealCount) : 0;
+                return plan.meals.map((meal, i) => (
+                  <MealCard key={i} meal={meal} allowedFoods={allowedFoods}
+                    avgTargets={avg} eaaPerMealMg={eaaPerMeal}
+                    onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
+                ));
+              })()}
               <div className="flex justify-end mt-3">
                 <button onClick={(e) => { e.stopPropagation(); onStartEdit(); }} className="text-xs text-white/40 hover:text-white/60 uppercase tracking-wider">
                   Edit Plan
@@ -712,6 +925,7 @@ export default function NutritionPlanPage() {
   const [editingDay, setEditingDay] = useState<'training' | 'rest' | null>(null);
   const [editPlan, setEditPlan] = useState<DayPlan | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [eaaGPerDay, setEaaGPerDay] = useState(0);
   const [showFoodPrefs, setShowFoodPrefs] = useState(false);
   const [allowedFoods, setAllowedFoods] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
@@ -915,9 +1129,13 @@ export default function NutritionPlanPage() {
               setEditPlan={setEditPlan}
               weeklyAvgKcal={calcWeeklyIntake(plan.current.trainingDay.macros.kcal, plan.current.trainingDay.meals).weeklyAvgKcal}
               allowedFoods={allowedFoods}
+              eaaSupplementGPerDay={eaaGPerDay}
               onSaveOptimizedMeal={saveOptimizedMeal}
             />
           </div>
+
+          {/* Daily EAA Supplement Summary — computed lazily */}
+          <DailyEAAPanel plan={plan} allowedFoods={allowedFoods} onTotalChange={setEaaGPerDay} />
 
           {/* NNU Food Preferences */}
           <div className="mb-6">

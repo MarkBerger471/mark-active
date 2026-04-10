@@ -245,7 +245,12 @@ const KCAL_PER_100G: Record<string, number> = {
   'peanut butter': 588, 'almond butter': 614,
   'lentils': 360, 'soy': 446,
   'oatmeal': 389, 'oats': 389, 'cheese': 403, 'feta': 264,
-  'rice': 130, 'bread': 265, 'rye bread': 259, 'pasta': 131,
+  'yogurt': 59,
+  'rice': 130, 'white rice': 130, 'jasmine rice': 130, 'brown rice': 112,
+  'rice dry': 360, 'dry rice': 360, 'cream of rice': 370,
+  'bread': 265, 'rye bread': 259, 'whole rye bread': 259,
+  'pasta': 131, 'pasta dry': 371, 'dry pasta': 371,
+  'nuts': 607,
   'chickpeas': 164, 'black beans': 132, 'edamame': 121, 'tofu': 76, 'tempeh': 193,
   'kidney beans': 127, 'navy beans': 140, 'pinto beans': 143, 'mung beans': 105,
   'soy milk': 33, 'pea protein': 370,
@@ -264,6 +269,70 @@ const KCAL_PER_100G: Record<string, number> = {
   'broccoli': 34, 'spinach': 23, 'peas': 81, 'asparagus': 20,
   'mushrooms': 22, 'sweet potato': 86, 'potato': 77, 'avocado': 160, 'banana': 89,
   'spirulina': 290, 'nutritional yeast': 325, 'chlorella': 280, 'bee pollen': 314, 'collagen': 340,
+};
+
+// Carbs per 100g
+const CARBS_PER_100G: Record<string, number> = {
+  'eggs': 0.7, 'egg': 0.7, 'egg whites': 0.7,
+  'greek yogurt': 3.6, 'yogurt': 3.6, 'cottage cheese': 3.4, 'milk': 5, 'whole milk': 4.8,
+  'cheese': 1.3, 'feta': 4, 'mozzarella': 2.2, 'parmesan': 3.2, 'ricotta': 3,
+  'quark': 4, 'skyr': 4, 'kefir': 4.5, 'gouda': 2.2, 'cream cheese': 4,
+  'whey': 10, 'whey protein': 10, 'whey isolate': 2, 'casein': 12, 'pea protein': 5, 'collagen': 0,
+  'chicken breast': 0, 'chicken': 0, 'chicken thigh': 0, 'turkey breast': 0, 'turkey': 0, 'duck': 0,
+  'beef': 0, 'ground beef': 0, 'steak': 0, 'bison': 0, 'venison': 0,
+  'pork': 0, 'pork tenderloin': 0, 'lamb': 0, 'rabbit': 0, 'goat': 0,
+  'liver (beef)': 4, 'bacon': 1.4, 'prosciutto': 0.5,
+  'salmon': 0, 'tuna': 0, 'cod': 0, 'tilapia': 0, 'shrimp': 0.2,
+  'sardines': 0, 'mackerel': 0, 'trout': 0, 'halibut': 0, 'swordfish': 0,
+  'sea bass': 0, 'crab': 0, 'lobster': 0, 'scallops': 2.4, 'mussels': 3.7,
+  'octopus': 2.2, 'squid': 3.1, 'anchovies': 0,
+  'oatmeal': 66, 'oats': 66, 'rice': 28, 'white rice': 28, 'brown rice': 24,
+  'rice dry': 79, 'dry rice': 79, 'cream of rice': 83, 'jasmine rice': 28,
+  'bread': 49, 'rye bread': 48, 'whole rye bread': 48, 'pasta': 25, 'pasta dry': 74, 'dry pasta': 74,
+  'quinoa': 21, 'buckwheat': 20, 'amaranth': 19, 'spelt': 26, 'millet': 23, 'barley': 28, 'corn': 19,
+  'almonds': 22, 'walnuts': 14, 'cashews': 30, 'pistachios': 28, 'pine nuts': 13,
+  'brazil nuts': 12, 'hazelnuts': 17, 'pecans': 14, 'macadamia nuts': 14,
+  'peanut butter': 20, 'almond butter': 19, 'pumpkin seeds': 5, 'sunflower seeds': 20,
+  'hemp seeds': 2.7, 'chia seeds': 42, 'flax seeds': 29, 'sesame seeds': 23,
+  'lentils': 20, 'chickpeas': 27, 'black beans': 24, 'kidney beans': 23,
+  'tofu': 2, 'tempeh': 10, 'edamame': 8.6, 'soy milk': 1.8,
+  'soy': 30, 'coconut': 15, 'nuts': 21,
+  'navy beans': 27, 'pinto beans': 26, 'mung beans': 19,
+  'peas': 14, 'broccoli': 7, 'spinach': 3.6, 'asparagus': 3.9, 'mushrooms': 3.3,
+  'sweet potato': 20, 'potato': 17, 'avocado': 9, 'banana': 23,
+  'spirulina': 24, 'chlorella': 23, 'nutritional yeast': 36, 'bee pollen': 40,
+};
+
+// Fat per 100g
+const FAT_PER_100G: Record<string, number> = {
+  'eggs': 9.5, 'egg': 9.5, 'egg whites': 0.2,
+  'greek yogurt': 0.4, 'yogurt': 0.4, 'cottage cheese': 4.3, 'milk': 1, 'whole milk': 3.3,
+  'cheese': 33, 'feta': 21, 'mozzarella': 17, 'parmesan': 29, 'ricotta': 13,
+  'quark': 0.3, 'skyr': 0.2, 'kefir': 1, 'gouda': 27, 'cream cheese': 34,
+  'whey': 5, 'whey protein': 5, 'whey isolate': 1, 'casein': 3, 'pea protein': 2, 'collagen': 0,
+  'chicken breast': 3.6, 'chicken': 3.6, 'chicken thigh': 8.2, 'turkey breast': 2.1, 'turkey': 2.1, 'duck': 11,
+  'beef': 17, 'ground beef': 17, 'steak': 18, 'bison': 2.4, 'venison': 3.2,
+  'pork': 14, 'pork tenderloin': 3.5, 'lamb': 17, 'rabbit': 3.5, 'goat': 3,
+  'liver (beef)': 3.6, 'bacon': 42, 'prosciutto': 8,
+  'salmon': 13, 'tuna': 1.3, 'cod': 0.7, 'tilapia': 1.7, 'shrimp': 0.3,
+  'sardines': 11, 'mackerel': 14, 'trout': 6.6, 'halibut': 2.3, 'swordfish': 4.4,
+  'sea bass': 2, 'crab': 1.5, 'lobster': 0.9, 'scallops': 0.5, 'mussels': 2.2,
+  'octopus': 1, 'squid': 1.4, 'anchovies': 10,
+  'oatmeal': 7, 'oats': 7, 'rice': 0.3, 'white rice': 0.3, 'brown rice': 0.8,
+  'rice dry': 0.6, 'dry rice': 0.6, 'cream of rice': 0.5, 'jasmine rice': 0.3,
+  'bread': 3.2, 'rye bread': 3.3, 'whole rye bread': 3.3, 'pasta': 1.1, 'pasta dry': 1.5, 'dry pasta': 1.5,
+  'quinoa': 1.9, 'buckwheat': 0.6, 'amaranth': 1.6, 'spelt': 1.7, 'millet': 1, 'barley': 0.4, 'corn': 1.2,
+  'almonds': 50, 'walnuts': 65, 'cashews': 44, 'pistachios': 45, 'pine nuts': 68,
+  'brazil nuts': 66, 'hazelnuts': 61, 'pecans': 72, 'macadamia nuts': 76,
+  'peanut butter': 50, 'almond butter': 56, 'pumpkin seeds': 49, 'sunflower seeds': 51,
+  'hemp seeds': 49, 'chia seeds': 31, 'flax seeds': 42, 'sesame seeds': 50,
+  'lentils': 0.4, 'chickpeas': 2.6, 'black beans': 0.5, 'kidney beans': 0.5,
+  'tofu': 4.8, 'tempeh': 11, 'edamame': 5, 'soy milk': 1.8,
+  'soy': 20, 'coconut': 33, 'nuts': 54,
+  'navy beans': 0.6, 'pinto beans': 0.7, 'mung beans': 0.4,
+  'peas': 0.4, 'broccoli': 0.4, 'spinach': 0.4, 'asparagus': 0.1, 'mushrooms': 0.3,
+  'sweet potato': 0.1, 'potato': 0.1, 'avocado': 15, 'banana': 0.3,
+  'spirulina': 8, 'chlorella': 9, 'nutritional yeast': 4, 'bee pollen': 7,
 };
 
 const PIECE_G: Record<string, number> = { 'egg': 60, 'eggs': 60, 'banana': 120 };
@@ -760,28 +829,22 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     }
   }
 
-  // Compute macro deltas
+  // Compute macro deltas using actual food composition
   let deltaProtein = 0, deltaCarbs = 0, deltaFat = 0;
+  const getFoodCarbs = (name: string) => CARBS_PER_100G[name] ?? Object.entries(CARBS_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
+  const getFoodFat = (name: string) => FAT_PER_100G[name] ?? Object.entries(FAT_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
+
   for (const c of best.changes) {
-    const p = PROTEIN_PER_100G[c.food] || 0;
-    const k = KCAL_PER_100G[c.food] || 0;
-    const f = k > 0 ? (k - p * 4) : 0; // rough: remaining kcal split carbs+fat
-    deltaProtein += p * (c.newG - c.originalG) / 100;
-    // Estimate carbs/fat from kcal - protein*4
-    const carbFatPer100 = k - p * 4;
-    // Use food DB ratios if available, otherwise assume 60/40 carb/fat split
-    deltaCarbs += (carbFatPer100 * 0.6 / 4) * (c.newG - c.originalG) / 100;
-    deltaFat += (carbFatPer100 * 0.4 / 9) * (c.newG - c.originalG) / 100;
+    const diff = c.newG - c.originalG;
+    deltaProtein += (PROTEIN_PER_100G[c.food] || 0) * diff / 100;
+    deltaCarbs += getFoodCarbs(c.food) * diff / 100;
+    deltaFat += getFoodFat(c.food) * diff / 100;
   }
   for (const a of best.additions) {
-    const p = PROTEIN_PER_100G[a.food] || 0;
-    const k = KCAL_PER_100G[a.food] || 0;
-    deltaProtein += p * a.grams / 100;
-    const carbFatPer100 = k - p * 4;
-    deltaCarbs += (carbFatPer100 * 0.6 / 4) * a.grams / 100;
-    deltaFat += (carbFatPer100 * 0.4 / 9) * a.grams / 100;
+    deltaProtein += (PROTEIN_PER_100G[a.food] || 0) * a.grams / 100;
+    deltaCarbs += getFoodCarbs(a.food) * a.grams / 100;
+    deltaFat += getFoodFat(a.food) * a.grams / 100;
   }
-  // Supplements add ~1g protein per 1g AAs
   deltaProtein += supplementTotalMg / 1000;
 
   return {
@@ -797,6 +860,88 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     deltaCarbs: Math.round(deltaCarbs),
     deltaFat: Math.round(deltaFat),
   };
+}
+
+/**
+ * Compute a single daily EAA supplement recipe by averaging gaps across all meals.
+ * Simplifies to the top AAs that matter most (>200mg/day).
+ */
+export interface DailyEAASupplement {
+  perDay: { aa: EAA; mg: number }[];
+  perMeal: { aa: EAA; mg: number }[];
+  totalPerDay: number;
+  mealCount: number;
+  avgNNUBefore: number;
+  avgNNUAfter: number;
+}
+
+export function calcDailyEAA(meals: FoodInput[][], allowedFoods?: string[], level: number = 2): DailyEAASupplement | null {
+  const mealResults: { nnu: number; gaps: Record<string, number> }[] = [];
+
+  for (const foods of meals) {
+    const nnu = calcNNU(foods);
+    if (!nnu || nnu.nnu >= 96) {
+      mealResults.push({ nnu: nnu?.nnu || 100, gaps: {} });
+      continue;
+    }
+
+    const opt = optimizeMeal(foods, 96, allowedFoods, level);
+    if (!opt || opt.supplements.length === 0) {
+      mealResults.push({ nnu: nnu.nnu, gaps: {} });
+      continue;
+    }
+
+    const gaps: Record<string, number> = {};
+    for (const s of opt.supplements) gaps[s.aa] = s.mg;
+    mealResults.push({ nnu: nnu.nnu, gaps });
+  }
+
+  if (mealResults.length === 0) return null;
+
+  // Sum all gaps across meals
+  const totalGaps: Record<string, number> = {};
+  for (const r of mealResults) {
+    for (const [aa, mg] of Object.entries(r.gaps)) {
+      totalGaps[aa] = (totalGaps[aa] || 0) + mg;
+    }
+  }
+
+  // Filter to significant AAs (>200mg/day) and sort by amount
+  const perDay = EAA_ORDER
+    .filter(aa => (totalGaps[aa] || 0) > 200)
+    .map(aa => ({ aa, mg: Math.round((totalGaps[aa] || 0) / 100) * 100 })) // round to 100mg
+    .sort((a, b) => b.mg - a.mg);
+
+  if (perDay.length === 0) return null;
+
+  const mealCount = meals.length;
+  const perMeal = perDay.map(({ aa, mg }) => ({
+    aa,
+    mg: Math.round(mg / mealCount / 50) * 50, // round to 50mg
+  })).filter(p => p.mg > 0);
+
+  const totalPerDay = perDay.reduce((s, p) => s + p.mg, 0);
+  const avgNNUBefore = Math.round(mealResults.reduce((s, r) => s + r.nnu, 0) / mealResults.length * 10) / 10;
+
+  // Estimate NNU after: apply the averaged supplement to each meal and recalculate
+  let totalNNUAfter = 0;
+  for (const foods of meals) {
+    const base = calcNNU(foods);
+    if (!base) { totalNNUAfter += 100; continue; }
+    // Add the per-meal supplement as raw AA mg to the profile
+    const profile = { ...base.profile };
+    for (const p of perMeal) profile[p.aa] += p.mg;
+    const total = EAA_ORDER.reduce((s, aa) => s + profile[aa], 0);
+    let minR = Infinity;
+    for (const aa of EAA_ORDER) {
+      const r = (profile[aa] / total * 100) / MAP[aa];
+      if (r < minR) minR = r;
+    }
+    totalNNUAfter += Math.round(minR * 1000) / 10;
+  }
+  const avgNNUAfter = Math.round(totalNNUAfter / meals.length * 10) / 10;
+
+  return { perDay, perMeal, totalPerDay, mealCount, avgNNUBefore, avgNNUAfter };
 }
 
 // Keep simple suggestFix as a wrapper for backward compat
