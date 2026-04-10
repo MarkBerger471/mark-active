@@ -961,7 +961,7 @@ export default function Dashboard() {
                       <div className="flex items-center justify-between mb-2">
                         <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider">{label}</h3>
                       </div>
-                      <svg viewBox={`0 0 ${cW} ${cH}`} className="w-full" style={{ minWidth: '280px' }}>
+                      <svg viewBox={`0 0 ${cW} ${cH}`} className="w-full">
                         <defs>
                           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor={color} stopOpacity="0.35" />
