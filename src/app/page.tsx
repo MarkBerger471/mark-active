@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Navigation from '@/components/Navigation';
 import Link from 'next/link';
 import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
@@ -89,7 +89,8 @@ export default function Dashboard() {
   const [showTargetInput, setShowTargetInput] = useState(false);
   const [targetInput, setTargetInput] = useState('');
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
-  const [sleepExpanded, setSleepExpanded] = useState(false);
+  const [sleepIdx, setSleepIdx] = useState(0);
+  const sleepTouchRef = useRef<{ x: number; t: number } | null>(null);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number }>>({});
@@ -533,73 +534,69 @@ export default function Dashboard() {
 
           {/* Sleep */}
             {sleepData.length > 0 && (() => {
-              const last = sleepData[0];
+              const d = sleepData[sleepIdx] || sleepData[0];
+              const onTouchStart = (e: React.TouchEvent) => { sleepTouchRef.current = { x: e.touches[0].clientX, t: Date.now() }; };
+              const onTouchEnd = (e: React.TouchEvent) => {
+                if (!sleepTouchRef.current) return;
+                const dx = e.changedTouches[0].clientX - sleepTouchRef.current.x;
+                const dt = Date.now() - sleepTouchRef.current.t;
+                if (Math.abs(dx) > 40 && dt < 400) {
+                  if (dx < 0 && sleepIdx < sleepData.length - 1) setSleepIdx(sleepIdx + 1);
+                  if (dx > 0 && sleepIdx > 0) setSleepIdx(sleepIdx - 1);
+                }
+                sleepTouchRef.current = null;
+              };
+              const dayLabel = new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
               return (
-                <div className="glass-card p-5 mb-6 fade-up">
-                  <button
-                    onClick={() => setSleepExpanded(!sleepExpanded)}
-                    className="w-full flex items-center justify-between text-left"
-                  >
+                <div className="glass-card p-5 mb-6 fade-up overflow-hidden touch-pan-y"
+                  onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+                  <div className="flex items-center justify-between mb-1">
                     <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                       <span className="text-lg">&#9790;</span> Sleep
                     </h2>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-white/30">{formatDuration(last.totalSleep)}</span>
-                      <span className={`text-white/20 transition-transform duration-200 ${sleepExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
-                    </div>
-                  </button>
+                    <span className="text-xs text-white/30">{dayLabel}</span>
+                  </div>
 
-                  <div className="flex items-center gap-4 mt-3">
-                    <SleepMultiRing score={last.score}
-                      deepPct={last.totalSleep && last.deepSleep ? Math.round((last.deepSleep / last.totalSleep) * 100) : 0}
-                      remPct={last.totalSleep && last.remSleep ? Math.round((last.remSleep / last.totalSleep) * 100) : 0}
+                  {/* Dot indicators */}
+                  <div className="flex justify-center gap-1.5 mb-3">
+                    {sleepData.map((_, i) => (
+                      <button key={i} onClick={() => setSleepIdx(i)}
+                        className={`rounded-full transition-all ${i === sleepIdx ? 'w-4 h-1.5 bg-white/60' : 'w-1.5 h-1.5 bg-white/15'}`} />
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <SleepMultiRing score={d.score}
+                      deepPct={d.totalSleep && d.deepSleep ? Math.round((d.deepSleep / d.totalSleep) * 100) : 0}
+                      remPct={d.totalSleep && d.remSleep ? Math.round((d.remSleep / d.totalSleep) * 100) : 0}
                     />
                     <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2">
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">Total</span>
-                        <p className="text-sm font-bold gradient-text data-value">{formatDuration(last.totalSleep)}</p>
+                        <p className="text-sm font-bold gradient-text data-value">{formatDuration(d.totalSleep)}</p>
                       </div>
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">Deep</span>
-                        <p className="text-sm font-bold text-indigo-400 data-value" style={{ textShadow: '0 0 8px rgba(129,140,248,0.5)' }}>{formatDuration(last.deepSleep)}</p>
+                        <p className="text-sm font-bold text-indigo-400 data-value" style={{ textShadow: '0 0 8px rgba(129,140,248,0.5)' }}>{formatDuration(d.deepSleep)}</p>
                       </div>
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">REM</span>
-                        <p className="text-sm font-bold text-cyan-400 data-value">{formatDuration(last.remSleep)}</p>
+                        <p className="text-sm font-bold text-cyan-400 data-value">{formatDuration(d.remSleep)}</p>
                       </div>
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">Avg HR</span>
-                        <p className="text-sm font-bold text-red-400 data-value">{last.avgHr ? `${Math.round(last.avgHr)} bpm` : '—'}</p>
+                        <p className="text-sm font-bold text-red-400 data-value">{d.avgHr ? `${Math.round(d.avgHr)} bpm` : '—'}</p>
                       </div>
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">HRV</span>
-                        <p className="text-sm font-bold text-green-400 data-value" style={{ textShadow: '0 0 8px rgba(34,197,94,0.4)' }}>{last.avgHrv ? `${last.avgHrv} ms` : '—'}</p>
+                        <p className="text-sm font-bold text-green-400 data-value" style={{ textShadow: '0 0 8px rgba(34,197,94,0.4)' }}>{d.avgHrv ? `${d.avgHrv} ms` : '—'}</p>
                       </div>
                       <div>
                         <span className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</span>
-                        <p className="text-sm font-bold gradient-text data-value">{last.efficiency ? `${last.efficiency}%` : '—'}</p>
+                        <p className="text-sm font-bold gradient-text data-value">{d.efficiency ? `${d.efficiency}%` : '—'}</p>
                       </div>
                     </div>
                   </div>
-
-                  {sleepExpanded && (
-                    <div className="mt-3 pt-3 border-t border-white/5">
-                      <div className="space-y-1.5">
-                        {sleepData.map(d => (
-                          <div key={d.day} className="flex items-center gap-2 text-xs">
-                            <span className="text-white/30 w-14">
-                              {new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}
-                            </span>
-                            <div className="flex-1 bg-white/5 rounded-full h-1.5 overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${d.score}%`, backgroundColor: d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444' }} />
-                            </div>
-                            <span className="text-white/50 w-6 text-right font-semibold">{d.score}</span>
-                            <span className="text-white/30 w-12 text-right">{formatDuration(d.totalSleep)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })()}
