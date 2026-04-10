@@ -7,6 +7,7 @@ import Navigation from '@/components/Navigation';
 import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan } from '@/utils/storage';
 import { calcWeeklyIntake } from '@/utils/calories';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
+import { calcNNU, optimizeMeal, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS } from '@/utils/eaa';
 
 // Nutrition database: values per 100g
 const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
@@ -211,8 +212,8 @@ function lookupSupplement(name: string): { kcal: number; protein: number; carbs:
 function sumMacros(meals: NutritionMeal[]): { kcal: number; protein: number; carbs: number; fat: number } {
   let kcal = 0, protein = 0, carbs = 0, fat = 0;
   for (const meal of meals) {
-    for (const item of meal.items) {
-      const computed = calcItemMacros(item as FoodItem);
+    for (const rawItem of meal.items) {
+      const computed = calcItemMacros(parseFoodItem(rawItem));
       kcal += computed.kcal || 0;
       protein += computed.protein || 0;
       carbs += computed.carbs || 0;
@@ -275,14 +276,29 @@ function parseFoodItem(item: FoodItem | string): FoodItem {
   return calcItemMacros(parsed);
 }
 
-function MealCard({ meal }: { meal: NutritionMeal }) {
+function MealCard({ meal, allowedFoods, onSaveOptimized }: { meal: NutritionMeal; allowedFoods?: string[]; onSaveOptimized?: (meal: NutritionMeal) => void }) {
+  const [showNNU, setShowNNU] = useState(false);
+  const [level, setLevel] = useState(2);
+
+  // Compute NNU from food items that have amounts
+  const foods = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
+  const foodInputs = foods.map(f => ({ name: f.name, amount: f.amount }));
+  const nnu = foods.length > 0 ? calcNNU(foodInputs) : null;
+  const optimization = nnu && nnu.nnu < 95 ? optimizeMeal(foodInputs, 96, allowedFoods, level) : null;
+
   return (
     <div className="py-3 border-b border-white/5 last:border-0">
-      <div className="flex items-baseline justify-between mb-2">
+      <div className="flex items-center justify-between mb-2">
         <div>
           <span className="text-sm font-semibold text-white">{meal.name}</span>
           {meal.subtitle && <span className="text-xs text-white/30 ml-2">({meal.subtitle})</span>}
         </div>
+        {nnu && (
+          <button onClick={() => setShowNNU(!showNNU)}
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${nnu.nnu >= 95 ? 'bg-green-500/15 text-green-400' : nnu.nnu >= 80 ? 'bg-yellow-500/15 text-yellow-400' : 'bg-red-500/15 text-red-400'}`}>
+            NNU {nnu.nnu}%
+          </button>
+        )}
       </div>
       {meal.items.length > 0 && (
         <table className="w-full" style={{ tableLayout: 'fixed' }}>
@@ -297,7 +313,10 @@ function MealCard({ meal }: { meal: NutritionMeal }) {
               const hasMacros = item.kcal != null && item.kcal > 0;
               return (
                 <tr key={i} className="text-sm">
-                  <td className="py-0.5 text-white/60 pr-4">{item.name}</td>
+                  <td className="py-0.5 text-white/60 pr-4">
+                    {item.leading && <span className="text-amber-400 mr-1 text-xs">★</span>}
+                    {item.name}
+                  </td>
                   <td className="py-0.5 text-white/40 text-right whitespace-nowrap font-mono text-xs">{item.amount || ''}</td>
                   <td className="py-0.5 text-right whitespace-nowrap pl-3">
                     {hasMacros && (
@@ -330,15 +349,137 @@ function MealCard({ meal }: { meal: NutritionMeal }) {
           })}
         </div>
       )}
+
+      {/* NNU Analysis Panel */}
+      {showNNU && nnu && (
+        <div className="mt-3 p-3 rounded-xl bg-white/5 border border-white/5">
+          <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Amino Acid Profile</div>
+          <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-xs mb-2">
+            {EAA_ORDER.map(aa => {
+              const pct = nnu.pcts[aa];
+              const target = MAP[aa];
+              const isLimiting = aa === nnu.limiting;
+              const isLow = pct < target * 0.95;
+              return (
+                <div key={aa} className={`flex justify-between ${isLimiting ? 'text-red-400 font-bold' : isLow ? 'text-yellow-400/70' : 'text-white/40'}`}>
+                  <span>{EAA_NAMES[aa]}</span>
+                  <span>{pct.toFixed(1)}% <span className="text-white/20">/ {target}%</span></span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="text-xs text-white/30 mb-1">{nnu.totalProtein}g protein · {nnu.usedProtein}g used · {nnu.wastedProtein}g wasted</div>
+
+          {/* Aggressiveness slider */}
+          {nnu && nnu.nnu < 95 && (
+            <div className="mt-3 mb-2">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] text-white/25 uppercase tracking-wider">Optimization Level</span>
+                <span className="text-[10px] text-white/40">{['Conservative', 'Moderate', 'Aggressive', 'Very Aggressive', 'Extreme'][level - 1]}</span>
+              </div>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map(l => (
+                  <button key={l} onClick={() => setLevel(l)}
+                    className={`flex-1 h-6 rounded-lg transition-all flex items-center justify-center text-[9px] font-bold ${l <= level ? 'bg-green-400/60 text-white/70' : 'bg-white/10 text-white/20'}`}>{l}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Optimization suggestion */}
+          {optimization && (
+            <div className="mt-2 p-3 rounded-lg bg-green-500/8 border border-green-500/15">
+              {/* NNU headline */}
+              <div className="flex items-baseline gap-2 mb-3">
+                <span className="text-lg font-bold text-green-400">NNU {optimization.finalNNU}%</span>
+                {optimization.foodOnlyNNU !== optimization.finalNNU && (
+                  <span className="text-xs text-white/25">food {optimization.foodOnlyNNU}%</span>
+                )}
+                <span className="text-xs text-white/15">from {optimization.originalNNU}%</span>
+              </div>
+              {/* Macro deltas */}
+              <div className="flex gap-3 mb-3 text-[11px]">
+                <span className={optimization.deltaKcal >= 0 ? 'text-white/40' : 'text-green-400/60'}>{optimization.deltaKcal > 0 ? '+' : ''}{optimization.deltaKcal} kcal</span>
+                <span className={optimization.deltaProtein >= 0 ? 'text-blue-400/60' : 'text-white/40'}>{optimization.deltaProtein > 0 ? '+' : ''}{optimization.deltaProtein}g protein</span>
+                <span className="text-yellow-400/40">{optimization.deltaCarbs > 0 ? '+' : ''}{optimization.deltaCarbs}g carbs</span>
+                <span className="text-green-600/40">{optimization.deltaFat > 0 ? '+' : ''}{optimization.deltaFat}g fat</span>
+              </div>
+
+              {/* Food changes */}
+              {optimization.changes.length > 0 && (
+                <div className="mb-2">
+                  {optimization.changes.map((c, i) => (
+                    <div key={i} className="text-xs flex justify-between">
+                      <span className="text-yellow-400/70">{c.food.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}</span>
+                      <span className="text-white/30">{c.originalG}g → <span className="text-yellow-400/70">{c.newG}g</span></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Food additions */}
+              {optimization.additions.length > 0 && (
+                <div className="mb-2">
+                  {optimization.additions.map((a, i) => (
+                    <div key={i} className="text-xs flex justify-between">
+                      <span className="text-green-400">+ {a.food.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}</span>
+                      <span className="text-green-400/60">{a.grams}g (+{a.kcal} kcal)</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* AA supplements */}
+              {optimization.supplements.length > 0 && (
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[10px] text-white/25 uppercase mb-1">Remaining gap ({(optimization.supplementTotalMg / 1000).toFixed(1)}g targeted AAs)</div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                    {optimization.supplements.map((s, i) => (
+                      <div key={i} className="text-xs flex justify-between">
+                        <span className="text-cyan-400/60">{EAA_NAMES[s.aa]}</span>
+                        <span className="text-cyan-400/40">{s.mg}mg</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Save button */}
+              {onSaveOptimized && (
+                <button
+                  onClick={() => {
+                    // Build the optimized meal
+                    const newItems = [...meal.items].map(rawItem => {
+                      const item = parseFoodItem(rawItem);
+                      const change = optimization.changes.find(c => item.name.toLowerCase().includes(c.food) || c.food.includes(item.name.toLowerCase()));
+                      if (change) return { ...item, amount: `${change.newG} gr` };
+                      return item;
+                    });
+                    for (const a of optimization.additions) {
+                      newItems.push({ name: a.food.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join(' '), amount: `${a.grams} gr` });
+                    }
+                    onSaveOptimized({ ...meal, items: newItems });
+                  }}
+                  className="mt-3 w-full text-xs font-bold text-green-400 bg-green-500/15 hover:bg-green-500/25 py-2 rounded-lg transition-all uppercase tracking-wider"
+                >
+                  Apply Changes
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, weeklyAvgKcal }: {
+function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, weeklyAvgKcal, allowedFoods, onSaveOptimizedMeal }: {
   dayPlan: DayPlan;
   title: string;
   color: string;
   weeklyAvgKcal?: number;
+  allowedFoods?: string[];
+  onSaveOptimizedMeal?: (mealIdx: number, meal: NutritionMeal) => void;
   editing: boolean;
   onStartEdit: () => void;
   onSave: () => void;
@@ -346,7 +487,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   editPlan: DayPlan | null;
   setEditPlan: (p: DayPlan) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   // Parsed supplement state: avoids re-parsing joined strings on every keystroke
   const [supState, setSupState] = useState<Record<string, { name: string; amount: string }>>({});
 
@@ -439,31 +580,15 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   const computedMacros = sumMacros(plan.meals);
 
   return (
-    <div className="glass-card overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full p-5 flex items-center justify-between text-left"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-          <h2 className="text-lg font-bold text-white">{title}</h2>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-xs text-white/30">{computedMacros.kcal || plan.macros.kcal} kcal</span>
-          <span className={`text-white/20 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
-        </div>
-      </button>
-
-      {expanded && (
-        <div className="px-5 pb-5">
-          {/* Macros — always computed from food items */}
+    <div className="glass-card overflow-hidden p-5">
+          {/* Macros — use stored values (source of truth); recomputed only on save */}
           <div className="grid grid-cols-4 gap-2 mb-2 p-3 rounded-xl bg-white/5">
-            <MacroBar label="Kcal" value={computedMacros.kcal || plan.macros.kcal} unit="" color="#b90a0a" />
-            <MacroBar label="Protein" value={computedMacros.protein || plan.macros.protein} unit="g" color="#3b82f6" />
-            <MacroBar label="Carbs" value={computedMacros.carbs || plan.macros.carbs} unit="g" color="#f59e0b" />
-            <MacroBar label="Fat" value={computedMacros.fat || plan.macros.fat} unit="g" color="#10b981" />
+            <MacroBar label="Kcal" value={plan.macros.kcal} unit="" color="#b90a0a" />
+            <MacroBar label="Protein" value={plan.macros.protein} unit="g" color="#3b82f6" />
+            <MacroBar label="Carbs" value={plan.macros.carbs} unit="g" color="#f59e0b" />
+            <MacroBar label="Fat" value={plan.macros.fat} unit="g" color="#10b981" />
           </div>
-          {weeklyAvgKcal != null && weeklyAvgKcal !== (computedMacros.kcal || plan.macros.kcal) && (
+          {weeklyAvgKcal != null && weeklyAvgKcal !== plan.macros.kcal && (
             <p className="text-[11px] text-white/30 mb-3 ml-1">Weekly avg: ~{weeklyAvgKcal} kcal (incl. Sunday cheat)</p>
           )}
 
@@ -471,7 +596,8 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
           {!editing ? (
             <div>
               {plan.meals.map((meal, i) => (
-                <MealCard key={i} meal={meal} />
+                <MealCard key={i} meal={meal} allowedFoods={allowedFoods}
+                  onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
               ))}
               <div className="flex justify-end mt-3">
                 <button onClick={(e) => { e.stopPropagation(); onStartEdit(); }} className="text-xs text-white/40 hover:text-white/60 uppercase tracking-wider">
@@ -509,7 +635,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                           placeholder="Food name"
                         />
                         <input
-                          type="text" className="glass-input flex-1 text-sm text-right"
+                          type="text" className="glass-input w-24 text-sm text-right pr-2"
                           value={item.amount || ''} onChange={e => updateMealItemAmount(mealIdx, itemIdx, e.target.value)}
                           placeholder="Amount"
                         />
@@ -545,7 +671,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                               placeholder="Supplement name"
                             />
                             <input
-                              type="text" className="glass-input flex-1 text-sm text-right"
+                              type="text" className="glass-input w-24 text-sm text-right pr-2"
                               value={parts.amount}
                               onChange={e => updateSupplementField(mealIdx, supIdx, 'amount', e.target.value)}
                               placeholder="Amount"
@@ -574,8 +700,6 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
               </div>
             </div>
           )}
-        </div>
-      )}
     </div>
   );
 }
@@ -588,6 +712,20 @@ export default function NutritionPlanPage() {
   const [editingDay, setEditingDay] = useState<'training' | 'rest' | null>(null);
   const [editPlan, setEditPlan] = useState<DayPlan | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showFoodPrefs, setShowFoodPrefs] = useState(false);
+  const [allowedFoods, setAllowedFoods] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('nnu_allowed_foods');
+      if (stored) return JSON.parse(stored);
+    }
+    return DEFAULT_OPTIMIZER_FOODS;
+  });
+
+  const toggleFood = (food: string) => {
+    const next = allowedFoods.includes(food) ? allowedFoods.filter(f => f !== food) : [...allowedFoods, food];
+    setAllowedFoods(next);
+    localStorage.setItem('nnu_allowed_foods', JSON.stringify(next));
+  };
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -599,9 +737,10 @@ export default function NutritionPlanPage() {
     if (isAuthenticated) {
       getNutritionPlan().then(stored => {
         if (stored && 'current' in stored) {
-          setPlan(stored as NutritionPlan);
+          const p = stored as NutritionPlan;
+
+          setPlan(p);
         } else {
-          // No plan or legacy plan — initialize with defaults
           const defaultVersion = getDefaultNutritionPlan();
           const newPlan: NutritionPlan = { current: defaultVersion, history: [] };
           setPlan(newPlan);
@@ -616,6 +755,17 @@ export default function NutritionPlanPage() {
     setPlan(updated);
     await saveNutritionPlan(updated);
   }, []);
+
+  // Save an optimized meal (from NNU optimizer)
+  const saveOptimizedMeal = useCallback(async (mealIdx: number, meal: NutritionMeal) => {
+    if (!plan) return;
+    // mealIdx includes the prepended empty stomach meal
+    const esOffset = plan.current.emptyStomach?.length ? 1 : 0;
+    const realIdx = mealIdx - esOffset;
+    if (realIdx < 0) return;
+    const meals = plan.current.trainingDay.meals.map((m, i) => i === realIdx ? meal : m);
+    await persist({ ...plan, current: { ...plan.current, trainingDay: { ...plan.current.trainingDay, meals } } });
+  }, [plan, persist]);
 
   // Build "empty stomach" meal from the shared items
   const emptyStomachItems = plan?.current.emptyStomach;
@@ -764,22 +914,45 @@ export default function NutritionPlanPage() {
               editPlan={editingDay === 'training' ? editPlan : null}
               setEditPlan={setEditPlan}
               weeklyAvgKcal={calcWeeklyIntake(plan.current.trainingDay.macros.kcal, plan.current.trainingDay.meals).weeklyAvgKcal}
+              allowedFoods={allowedFoods}
+              onSaveOptimizedMeal={saveOptimizedMeal}
             />
           </div>
 
-          {/* Rest Day */}
+          {/* NNU Food Preferences */}
           <div className="mb-6">
-            <DayPlanView
-              dayPlan={withEmptyStomach(plan.current.restDay)}
-              title="Rest Day"
-              color="#ef4444"
-              editing={editingDay === 'rest'}
-              onStartEdit={() => startEdit('rest')}
-              onSave={saveEdit}
-              onCancel={cancelEdit}
-              editPlan={editingDay === 'rest' ? editPlan : null}
-              setEditPlan={setEditPlan}
-            />
+            <button
+              onClick={() => setShowFoodPrefs(!showFoodPrefs)}
+              className="text-xs text-white/30 hover:text-white/50 uppercase tracking-wider flex items-center gap-2"
+            >
+              <span className={`transition-transform duration-200 ${showFoodPrefs ? 'rotate-90' : ''}`}>&#9654;</span>
+              NNU Optimizer Foods ({allowedFoods.length} selected)
+            </button>
+            {showFoodPrefs && (
+              <div className="mt-3 glass-card p-4">
+                {Object.entries(
+                  ALL_OPTIMIZER_FOODS.reduce((acc, f) => {
+                    (acc[f.category] = acc[f.category] || []).push(f);
+                    return acc;
+                  }, {} as Record<string, typeof ALL_OPTIMIZER_FOODS>)
+                ).map(([category, foods]) => (
+                  <div key={category} className="mb-3">
+                    <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">{category}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {foods.map(f => {
+                        const active = allowedFoods.includes(f.food);
+                        return (
+                          <button key={f.food} onClick={() => toggleFood(f.food)}
+                            className={`text-xs px-2.5 py-1 rounded-lg transition-all ${active ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-white/5 text-white/30 border border-white/5 hover:border-white/15'}`}>
+                            {f.food.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Version History */}
@@ -802,15 +975,8 @@ export default function NutritionPlanPage() {
                           {version.startDate} → {version.endDate || 'current'}
                         </span>
                       </div>
-                      <div className="grid grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <span className="text-white/50 font-medium">Training Day</span>
-                          <span className="text-white/30 ml-2">{version.trainingDay.macros.kcal} kcal · {version.trainingDay.meals.length} meals</span>
-                        </div>
-                        <div>
-                          <span className="text-white/50 font-medium">Rest Day</span>
-                          <span className="text-white/30 ml-2">{version.restDay.macros.kcal} kcal · {version.restDay.meals.length} meals</span>
-                        </div>
+                      <div className="text-xs">
+                        <span className="text-white/30">{version.trainingDay.macros.kcal} kcal · {version.trainingDay.meals.length} meals</span>
                       </div>
                     </div>
                   ))}

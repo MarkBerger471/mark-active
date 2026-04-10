@@ -99,6 +99,7 @@ export interface FoodItem {
   protein?: number;
   carbs?: number;
   fat?: number;
+  leading?: boolean;   // EAA/NNU analysis: must-have food for this meal
 }
 
 export interface NutritionMeal {
