@@ -1568,6 +1568,22 @@ export default function NutritionPlanPage() {
         if (stored && 'current' in stored) {
           const p = stored as NutritionPlan;
 
+          // One-time macro sync: recompute from food + EAA and save if different
+          const liveFoodMacros = sumMacros(p.current.trainingDay.meals);
+          const eaaG = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('eaa_g_per_day') || '0') : 0;
+          const live = {
+            kcal: liveFoodMacros.kcal + Math.round(eaaG * 4),
+            protein: liveFoodMacros.protein + Math.round(eaaG),
+            carbs: liveFoodMacros.carbs,
+            fat: liveFoodMacros.fat,
+          };
+          const s = p.current.trainingDay.macros;
+          if (Math.abs(live.kcal - s.kcal) > 10 || Math.abs(live.protein - s.protein) > 3) {
+            p.current.trainingDay.macros = live;
+            p.current.restDay.macros = live;
+            saveNutritionPlan(p);
+          }
+
           setPlan(p);
         } else {
           const defaultVersion = getDefaultNutritionPlan();
