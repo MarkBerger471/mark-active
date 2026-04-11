@@ -1450,7 +1450,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                           value={item.amount || ''} onChange={e => updateMealItemAmount(mealIdx, itemIdx, e.target.value)}
                           placeholder="Amount"
                         />
-                        {meal.items.length > 1 && (
+                        {(
                           <button onClick={() => removeMealItem(mealIdx, itemIdx)} className="text-red-400/40 hover:text-red-400 px-1.5 text-xs">x</button>
                         )}
                       </div>
