@@ -428,7 +428,7 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
   const isWorkoutMeal = meal.name.toLowerCase().includes('during workout') || meal.name.toLowerCase().includes('intra');
 
   // Per-meal macros and NNU (lazy — only if items exist)
-  const mealMacros = meal.items.length > 0 ? sumMacros([meal]) : { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  const mealMacros = sumMacros([meal]);
   const parsedFoods = meal.items.map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } }).filter(it => it.name.trim() && it.amount);
   const foodInputs = parsedFoods.map(f => ({ name: f.name, amount: f.amount }));
   const nnu = !isWorkoutMeal && parsedFoods.length > 0 ? calcNNU(foodInputs) : null;
