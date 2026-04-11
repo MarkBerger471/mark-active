@@ -26,23 +26,25 @@ export function hapticLight() { pulse(10); }
 export function hapticMedium() { pulse(25); }
 export function hapticSuccess() { pulse(30); }
 
-export function playTimerBeep() {
+export async function playTimerBeep() {
   try {
     const ctx = getAudioCtx();
-    // Three short beeps
+    // Resume context (required on iOS after user interaction)
+    if (ctx.state === 'suspended') await ctx.resume();
+    // Three loud beeps at 880Hz — audible through AirPods and speakers
     for (let i = 0; i < 3; i++) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.frequency.value = 880;
-      osc.type = 'sine';
-      gain.gain.value = 0.3;
-      const start = ctx.currentTime + i * 0.2;
+      osc.type = 'square'; // square wave is louder/more noticeable than sine
+      const vol = 0.8; // loud enough for AirPods
+      const start = ctx.currentTime + i * 0.25;
+      gain.gain.setValueAtTime(vol, start);
+      gain.gain.exponentialRampToValueAtTime(0.01, start + 0.15);
       osc.start(start);
-      osc.stop(start + 0.1);
-      gain.gain.setValueAtTime(0.3, start);
-      gain.gain.exponentialRampToValueAtTime(0.01, start + 0.1);
+      osc.stop(start + 0.15);
     }
   } catch {}
 }

@@ -265,22 +265,46 @@ export default function TrainingPlanPage() {
     return () => clearInterval(id);
   }, [sessionId, activeWorkout]);
 
-  // Rest timer — starts when a set is toggled done
-  const startRestTimer = (seconds = 60) => {
+  // Rest timer — uses wall-clock time so it survives screen lock / background
+  const timerEndRef = useRef<number>(0);
+  const timerFiredRef = useRef<boolean>(false);
+
+  const startRestTimer = (seconds = 45) => {
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    timerEndRef.current = Date.now() + seconds * 1000;
+    timerFiredRef.current = false;
     setRestTimer(seconds);
+    // Pre-warm audio context (required for iOS — needs user gesture context)
+    try { const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); ctx.resume(); } catch {}
     restIntervalRef.current = setInterval(() => {
-      setRestTimer(prev => {
-        if (prev <= 1) {
+      const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
+      setRestTimer(remaining);
+      if (remaining <= 0 && !timerFiredRef.current) {
+        timerFiredRef.current = true;
+        if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+        playTimerBeep();
+        hapticSuccess();
+      }
+    }, 500); // check every 500ms for accuracy
+  };
+
+  // When app returns from background, immediately update timer and fire if expired
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && timerEndRef.current > 0) {
+        const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
+        setRestTimer(remaining);
+        if (remaining <= 0 && !timerFiredRef.current) {
+          timerFiredRef.current = true;
           if (restIntervalRef.current) clearInterval(restIntervalRef.current);
           playTimerBeep();
           hapticSuccess();
-          return 0;
         }
-        return prev - 1;
-      });
-    }, 1000);
-  };
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -405,7 +429,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
-    if (!wasDone) startRestTimer(60);
+    if (!wasDone) startRestTimer(45);
     triggerAutoSave();
   };
 

@@ -2,12 +2,11 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Navigation from '@/components/Navigation';
 import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan } from '@/utils/storage';
-import { calcWeeklyIntake } from '@/utils/calories';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
-import { calcNNU, optimizeMeal, calcDailyEAA, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS } from '@/utils/eaa';
+import { calcNNU, optimizeMeal, calcDailyEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult } from '@/utils/eaa';
 
 // Nutrition database: values per 100g
 const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
@@ -138,6 +137,46 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   // Superfoods
   'spirulina': { kcal: 290, protein: 57, carbs: 24, fat: 8 },
   'nutritional yeast': { kcal: 325, protein: 50, carbs: 36, fat: 4 },
+  // Remaining from EAA DB
+  'soy': { kcal: 446, protein: 36, carbs: 30, fat: 20 },
+  'whey isolate': { kcal: 370, protein: 90, carbs: 2, fat: 1 },
+  'liver (beef)': { kcal: 135, protein: 20, carbs: 4, fat: 3.6 },
+  'bacon': { kcal: 541, protein: 37, carbs: 1.4, fat: 42 },
+  'prosciutto': { kcal: 195, protein: 26, carbs: 0.5, fat: 8 },
+  'amaranth': { kcal: 102, protein: 4, carbs: 19, fat: 1.6 },
+  'spelt': { kcal: 127, protein: 5.5, carbs: 26, fat: 1.7 },
+  'millet': { kcal: 119, protein: 3.5, carbs: 23, fat: 1 },
+  'barley': { kcal: 123, protein: 2.3, carbs: 28, fat: 0.4 },
+  'corn': { kcal: 86, protein: 3.2, carbs: 19, fat: 1.2 },
+  'swordfish': { kcal: 144, protein: 20, carbs: 0, fat: 4.4 },
+  'sea bass': { kcal: 97, protein: 18, carbs: 0, fat: 2 },
+  'octopus': { kcal: 82, protein: 15, carbs: 2.2, fat: 1 },
+  'peas': { kcal: 81, protein: 5.4, carbs: 14, fat: 0.4 },
+  'asparagus': { kcal: 20, protein: 2.2, carbs: 3.9, fat: 0.1 },
+  'mushrooms': { kcal: 22, protein: 3.1, carbs: 3.3, fat: 0.3 },
+  'navy beans': { kcal: 140, protein: 22, carbs: 27, fat: 0.6 },
+  'pinto beans': { kcal: 143, protein: 21, carbs: 26, fat: 0.7 },
+  'mung beans': { kcal: 105, protein: 24, carbs: 19, fat: 0.4 },
+  'soy milk': { kcal: 33, protein: 3.3, carbs: 1.8, fat: 1.8 },
+  'pea protein': { kcal: 370, protein: 80, carbs: 5, fat: 2 },
+  'chlorella': { kcal: 280, protein: 58, carbs: 23, fat: 9 },
+  'bee pollen': { kcal: 314, protein: 20, carbs: 40, fat: 7 },
+  'collagen': { kcal: 340, protein: 90, carbs: 0, fat: 0 },
+  // Common fruits
+  'apple': { kcal: 52, protein: 0.3, carbs: 14, fat: 0.2 },
+  'orange': { kcal: 47, protein: 0.9, carbs: 12, fat: 0.1 },
+  'grapes': { kcal: 69, protein: 0.7, carbs: 18, fat: 0.2 },
+  'watermelon': { kcal: 30, protein: 0.6, carbs: 8, fat: 0.2 },
+  'mango': { kcal: 60, protein: 0.8, carbs: 15, fat: 0.4 },
+  'pineapple': { kcal: 50, protein: 0.5, carbs: 13, fat: 0.1 },
+  'kiwi': { kcal: 61, protein: 1.1, carbs: 15, fat: 0.5 },
+  'pear': { kcal: 57, protein: 0.4, carbs: 15, fat: 0.1 },
+  'peach': { kcal: 39, protein: 0.9, carbs: 10, fat: 0.3 },
+  // Other common
+  'cream of rice dry': { kcal: 370, protein: 6, carbs: 83, fat: 0.5 },
+  'dates': { kcal: 277, protein: 1.8, carbs: 75, fat: 0.2 },
+  'dried cranberries': { kcal: 308, protein: 0.1, carbs: 82, fat: 1.4 },
+  'raisins': { kcal: 299, protein: 3.1, carbs: 79, fat: 0.5 },
 };
 
 // Supplements: fixed macros per serving (not per 100g)
@@ -176,8 +215,14 @@ const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: numb
 
 function lookupFood(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
   const key = name.toLowerCase().trim();
+  // Check custom foods first
+  const custom = getCustomFoods();
+  if (custom[key]) return { kcal: custom[key].kcal, protein: custom[key].protein, carbs: custom[key].carbs, fat: custom[key].fat };
+  for (const [ck, food] of Object.entries(custom)) {
+    if (key.includes(ck) || ck.includes(key)) return { kcal: food.kcal, protein: food.protein, carbs: food.carbs, fat: food.fat };
+  }
+  // Built-in DB
   if (FOOD_DB[key]) return FOOD_DB[key];
-  // Fuzzy: find the longest (most specific) matching DB key
   let bestKey = '';
   let bestVal: { kcal: number; protein: number; carbs: number; fat: number } | null = null;
   for (const [dbKey, val] of Object.entries(FOOD_DB)) {
@@ -222,6 +267,20 @@ function parseGrams(amount: string | undefined, foodName: string): number | null
   // Explicit ml (treat as grams for liquids)
   const mlMatch = amount.match(/([\d.]+)\s*ml$/i);
   if (mlMatch) return parseFloat(mlMatch[1]);
+  // Cups (1 cup ≈ 240ml for liquids, 150g for solids)
+  const cupMatch = amount.match(/([\d.]*)\s*cups?$/i);
+  if (cupMatch) {
+    const count = parseFloat(cupMatch[1] || '1');
+    return count * 240;
+  }
+  // Tablespoon / teaspoon
+  const tbspMatch = amount.match(/([\d.]+)\s*(?:tbsp|tablespoons?)$/i);
+  if (tbspMatch) return parseFloat(tbspMatch[1]) * 15;
+  const tspMatch = amount.match(/([\d.]+)\s*(?:tsp|teaspoons?)$/i);
+  if (tspMatch) return parseFloat(tspMatch[1]) * 5;
+  // Scoop (assume ~30g per scoop for protein powder)
+  const scoopMatch = amount.match(/([\d.]*)\s*scoops?$/i);
+  if (scoopMatch) return parseFloat(scoopMatch[1] || '1') * 30;
   // Bare number — check if this food is countable (pieces)
   const bare = amount.match(/^([\d.]+)$/);
   if (bare) {
@@ -334,12 +393,12 @@ function parseFoodItem(item: FoodItem | string): FoodItem {
   return calcItemMacros(parsed);
 }
 
-function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealMg }: {
+function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPerMeal }: {
   meal: NutritionMeal;
   allowedFoods?: string[];
   onSaveOptimized?: (meal: NutritionMeal) => void;
   avgTargets?: { kcal: number; protein: number; carbs: number; fat: number };
-  eaaPerMealMg?: number;
+  dailyEAAPerMeal?: { aa: string; mg: number }[];
 }) {
   const [showNNU, setShowNNU] = useState(false);
   const [level, setLevel] = useState(2);
@@ -347,23 +406,73 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealM
   const backupKey = `nnu_backup_${meal.name}`;
   const hasBackup = typeof window !== 'undefined' && !!localStorage.getItem(backupKey);
 
+  // Skip NNU for workout/intra meals (only supplements, no real food)
+  const isWorkoutMeal = meal.name.toLowerCase().includes('during workout') || meal.name.toLowerCase().includes('intra');
+
   // Per-meal macros and NNU (lazy — only if items exist)
   const mealMacros = meal.items.length > 0 ? sumMacros([meal]) : { kcal: 0, protein: 0, carbs: 0, fat: 0 };
   const parsedFoods = meal.items.map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } }).filter(it => it.name.trim() && it.amount);
   const foodInputs = parsedFoods.map(f => ({ name: f.name, amount: f.amount }));
-  const nnu = parsedFoods.length > 0 ? calcNNU(foodInputs) : null;
-  const [optimization, setOptimization] = useState<ReturnType<typeof optimizeMeal>>(null);
-  const [optKey, setOptKey] = useState('');
+  const nnu = !isWorkoutMeal && parsedFoods.length > 0 ? calcNNU(foodInputs) : null;
 
-  // Recompute optimization only when NNU panel opens or level changes
-  const computeOptimization = () => {
+  // Compute NNU with EAA supplement — use individual for After WO, avg for others
+  const isAfterWO = meal.name.toLowerCase().includes('after workout');
+  let nnuWithEAA: number | null = null;
+  if (nnu) {
+    const eaaData: { aa: string; mg: number }[] = (() => {
+      if (typeof window === 'undefined') return [];
+      if (isAfterWO) {
+        // Use individual After WO supplement
+        try {
+          const wo = JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null');
+          return wo?.aas || [];
+        } catch { return []; }
+      }
+      // Use avg per-meal supplement
+      if (dailyEAAPerMeal && dailyEAAPerMeal.length > 0) return dailyEAAPerMeal;
+      try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; }
+    })();
+    if (eaaData.length > 0) {
+      const p = { ...nnu.profile };
+      for (const s of eaaData) {
+        const k = s.aa as keyof typeof p;
+        if (p[k] !== undefined) p[k] += s.mg;
+      }
+      const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
+      let minR = Infinity;
+      for (const aa of EAA_ORDER) { const r = (p[aa] / t * 100) / MAP[aa]; if (r < minR) minR = r; }
+      nnuWithEAA = Math.round(minR * 1000) / 10;
+    }
+  }
+
+  const [optimization, setOptimization] = useState<ReturnType<typeof optimizeMeal>>(null);
+  const [lookingUp, setLookingUp] = useState<string | null>(null);
+
+  const lookupUnknownFood = async (foodName: string) => {
+    setLookingUp(foodName);
+    try {
+      const res = await fetch('/api/food-lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ food: foodName }) });
+      const data = await res.json();
+      if (!res.ok) { console.error('Food lookup error:', data.error); setLookingUp(null); return; }
+      saveCustomFood({ name: data.name || foodName.toLowerCase(), kcal: data.kcal, protein: data.protein, carbs: data.carbs, fat: data.fat, eaa: data.eaa });
+    } catch (e) { console.error('Food lookup failed:', e); }
+    setLookingUp(null);
+  };
+
+  // Recompute optimization — runs in setTimeout to not block UI
+  const [optimizing, setOptimizing] = useState(false);
+  const computeOptimization = (lvl?: number) => {
     if (!nnu || nnu.nnu >= 95) return;
-    const key = `${level}-${nnu.nnu}`;
-    if (key === optKey) return;
+    const useLevel = lvl ?? level;
+    setOptimizing(true);
+    setOptimization(null);
     setTimeout(() => {
-      setOptimization(optimizeMeal(foodInputs, 96, allowedFoods, level));
-      setOptKey(key);
-    }, 100);
+      try {
+        const result = optimizeMeal(foodInputs, 96, allowedFoods, useLevel);
+        setOptimization(result);
+      } catch { setOptimization(null); }
+      setOptimizing(false);
+    }, 50);
   };
 
   return (
@@ -376,26 +485,29 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealM
         {nnu && (
           <button onClick={() => { const next = !showNNU; setShowNNU(next); if (next) computeOptimization(); }}
             className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${nnu.nnu >= 95 ? 'bg-green-500/15 text-green-400' : nnu.nnu >= 80 ? 'bg-yellow-500/15 text-yellow-400' : 'bg-red-500/15 text-red-400'}`}>
-            NNU {nnu.nnu}%
+            NNU {nnu.nnu}%{nnuWithEAA !== null && nnuWithEAA !== nnu.nnu && (
+              <span className={nnuWithEAA > nnu.nnu ? (isAfterWO ? ' text-amber-400/70' : ' text-cyan-400/70') : ' text-red-400/70'}> → {nnuWithEAA}%</span>
+            )}
           </button>
         )}
       </div>
       {/* Per-meal macros + delta vs average */}
-      <div className="flex gap-3 mb-2 text-[10px]">
+      <div className="flex gap-4 mb-2">
         {[
-          { label: 'kcal', val: mealMacros.kcal, avg: avgTargets?.kcal },
-          { label: 'P', val: mealMacros.protein, avg: avgTargets?.protein },
-          { label: 'C', val: mealMacros.carbs, avg: avgTargets?.carbs },
-          { label: 'F', val: mealMacros.fat, avg: avgTargets?.fat },
+          { label: 'Kcal', val: mealMacros.kcal, avg: avgTargets?.kcal },
+          { label: 'Protein', val: mealMacros.protein, avg: avgTargets?.protein, unit: 'g' },
+          { label: 'Carbs', val: mealMacros.carbs, avg: avgTargets?.carbs, unit: 'g' },
+          { label: 'Fat', val: mealMacros.fat, avg: avgTargets?.fat, unit: 'g' },
         ].map(m => {
           const delta = m.avg ? m.val - m.avg : 0;
           return (
-            <span key={m.label} className="text-white/30">
-              {m.val}<span className="text-white/15">{m.label}</span>
+            <div key={m.label}>
+              <span className="text-xs text-white/50 font-semibold">{m.val}</span>
+              <span className="text-[10px] text-white/25 ml-0.5">{m.label}</span>
               {m.avg && delta !== 0 && (
-                <span className={delta > 0 ? ' text-red-400/40' : ' text-green-400/40'}> {delta > 0 ? '+' : ''}{Math.round(delta)}</span>
+                <span className={`text-[10px] ml-1 ${delta > 0 ? 'text-red-400/50' : 'text-green-400/50'}`}>{delta > 0 ? '+' : ''}{Math.round(delta)}</span>
               )}
-            </span>
+            </div>
           );
         })}
       </div>
@@ -410,11 +522,19 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealM
             {meal.items.map((rawItem, i) => {
               const item = calcItemMacros(parseFoodItem(rawItem));
               const hasMacros = item.kcal != null && item.kcal > 0;
+              const unknown = item.name.trim() && !isKnownFood(item.name);
               return (
                 <tr key={i} className="text-sm">
-                  <td className="py-0.5 text-white/60 pr-4">
-                    {item.leading && <span className="text-amber-400 mr-1 text-xs">★</span>}
-                    {item.name}
+                  <td className="py-0.5 pr-4">
+                    <span className={unknown ? 'text-red-400/60' : 'text-white/60'}>
+                      {item.leading && <span className="text-amber-400 mr-1 text-xs">★</span>}
+                      {item.name}
+                    </span>
+                    {unknown && (
+                      lookingUp === item.name
+                        ? <span className="text-[9px] text-white/30 ml-2">looking up...</span>
+                        : <button onClick={() => lookupUnknownFood(item.name)} className="text-[9px] text-cyan-400/60 hover:text-cyan-400 ml-2">look up</button>
+                    )}
                   </td>
                   <td className="py-0.5 text-white/40 text-right whitespace-nowrap font-mono text-xs">{item.amount || ''}</td>
                   <td className="py-0.5 text-right whitespace-nowrap pl-3">
@@ -478,7 +598,7 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealM
               </div>
               <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map(l => (
-                  <button key={l} onClick={() => { setLevel(l); setOptKey(''); setTimeout(computeOptimization, 50); }}
+                  <button key={l} onClick={() => { setLevel(l); computeOptimization(l); }}
                     className={`flex-1 h-6 rounded-lg transition-all flex items-center justify-center text-[9px] font-bold ${l <= level ? 'bg-green-400/60 text-white/70' : 'bg-white/10 text-white/20'}`}>{l}</button>
                 ))}
               </div>
@@ -486,15 +606,13 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealM
           )}
 
           {/* Optimization suggestion */}
-          {optimization && (
+          {optimizing && <div className="mt-2 text-xs text-white/30">Optimizing...</div>}
+          {optimization && !optimizing && (
             <div className="mt-2 p-3 rounded-lg bg-green-500/8 border border-green-500/15">
-              {/* NNU headline */}
+              {/* NNU headline — food only */}
               <div className="flex items-baseline gap-2 mb-3">
-                <span className="text-lg font-bold text-green-400">NNU {optimization.finalNNU}%</span>
-                {optimization.foodOnlyNNU !== optimization.finalNNU && (
-                  <span className="text-xs text-white/25">food {optimization.foodOnlyNNU}%</span>
-                )}
-                <span className="text-xs text-white/15">from {optimization.originalNNU}%</span>
+                <span className="text-lg font-bold text-green-400">NNU {optimization.foodOnlyNNU}%</span>
+                <span className="text-xs text-white/20">from {optimization.originalNNU}%</span>
               </div>
               {/* Macro deltas */}
               <div className="flex gap-3 mb-3 text-[11px]">
@@ -528,20 +646,33 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealM
                 </div>
               )}
 
-              {/* AA supplements */}
-              {optimization.supplements.length > 0 && (
-                <div className="pt-2 border-t border-white/5">
-                  <div className="text-[10px] text-white/25 uppercase mb-1">Remaining gap ({(optimization.supplementTotalMg / 1000).toFixed(1)}g targeted AAs)</div>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                    {optimization.supplements.map((s, i) => (
-                      <div key={i} className="text-xs flex justify-between">
-                        <span className="text-cyan-400/60">{EAA_NAMES[s.aa]}</span>
-                        <span className="text-cyan-400/40">{s.mg}mg</span>
-                      </div>
-                    ))}
+              {/* EAA supplement per meal — individual for After WO, avg for others */}
+              {(() => {
+                const supData: { aa: string; mg: number }[] = (() => {
+                  if (typeof window === 'undefined') return [];
+                  if (isAfterWO) {
+                    try { const wo = JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null'); return wo?.aas || []; } catch { return []; }
+                  }
+                  if (dailyEAAPerMeal && dailyEAAPerMeal.length > 0) return dailyEAAPerMeal;
+                  try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; }
+                })();
+                if (supData.length === 0) return null;
+                return (
+                  <div className="pt-2 border-t border-white/5">
+                    <div className={`text-[10px] uppercase mb-1 ${isAfterWO ? 'text-amber-400/40' : 'text-white/25'}`}>
+                      + {isAfterWO ? 'Individual' : 'Daily avg'} EAA supplement
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                      {supData.map((s, i) => (
+                        <div key={i} className="text-xs flex justify-between">
+                          <span className={isAfterWO ? 'text-amber-400/60' : 'text-cyan-400/60'}>{EAA_NAMES[s.aa as keyof typeof EAA_NAMES] || s.aa}</span>
+                          <span className="text-white/40 font-mono">{s.mg}mg</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Apply / Undo buttons */}
               {onSaveOptimized && (
@@ -591,72 +722,423 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, eaaPerMealM
   );
 }
 
-function DailyEAAPanel({ plan, allowedFoods, onTotalChange }: { plan: NutritionPlan; allowedFoods: string[]; onTotalChange?: (gPerDay: number) => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const [daily, setDaily] = useState<ReturnType<typeof calcDailyEAA>>(null);
-  const [computing, setComputing] = useState(false);
+function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPlan; allowedFoods: string[]; persist: (p: NutritionPlan) => Promise<void> }) {
+  const [result, setResult] = useState<AutoOptimizeResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [level, setLevel] = useState(3);
 
-  const compute = () => {
-    if (daily) { setExpanded(!expanded); return; }
-    setExpanded(true);
-    setComputing(true);
-    // Defer to next frame so UI shows "Computing..."
+  const [roundProgress, setRoundProgress] = useState(0);
+  const [totalRounds, setTotalRounds] = useState(5);
+
+  const run = () => {
+    setRunning(true);
+    setResult(null);
+    setRoundProgress(0);
+    setProgress('Preparing...');
+
+    // Run 1 round per setTimeout so UI can update between rounds
     setTimeout(() => {
-      const allMeals = plan.current.trainingDay.meals.map(meal => {
-        const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
-        return items.map(f => ({ name: f.name, amount: f.amount }));
-      }).filter(m => m.length > 0);
-      const result = allMeals.length > 0 ? calcDailyEAA(allMeals, allowedFoods, 2) : null;
-      setDaily(result);
-      setComputing(false);
-      if (onTotalChange) onTotalChange(result ? result.totalPerDay / 1000 : 0);
+      const isExcluded = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra') || l.includes('after workout'); };
+      const mainMeals = plan.current.trainingDay.meals.filter(m => !isExcluded(m.name));
+      const mealFoods: { name: string; amount?: string }[][] = mainMeals.map(m =>
+        m.items.map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
+          .filter(it => it.name.trim() && it.amount)
+          .map(f => ({ name: f.name, amount: f.amount }))
+      );
+
+      // Run round by round with yielding
+      const maxR = 5;
+      let round = 0;
+      const runRound = () => {
+        setRoundProgress(round + 1);
+        setProgress(`Round ${round + 1}/${maxR}...`);
+        setTimeout(() => {
+          // Run single-round optimization (maxRounds=1 from current state)
+          const res = autoOptimize(mealFoods, allowedFoods, level, round + 1);
+          // Update mealFoods with optimized result for next round
+          if (res.finalMeals.length > 0) {
+            for (let i = 0; i < mealFoods.length; i++) {
+              if (res.finalMeals[i]) mealFoods[i] = res.finalMeals[i];
+            }
+          }
+          round++;
+          // Check convergence or max rounds
+          if (round >= maxR || (round > 1 && res.rounds.length > 0 && res.rounds[res.rounds.length - 1].withEAANNU === res.rounds[Math.max(0, res.rounds.length - 2)]?.withEAANNU)) {
+            setResult(res);
+            setRunning(false);
+            setProgress('');
+          } else {
+            runRound();
+          }
+        }, 50); // yield to browser
+      };
+      runRound();
     }, 50);
   };
 
+  const applyAll = async () => {
+    if (!result) return;
+
+    // Save current plan to history first (protection)
+    const archived = { ...plan.current, endDate: new Date().toISOString().split('T')[0] };
+    const newHistory = [archived, ...(plan.history || [])];
+
+    // Save per-meal backups for undo (localStorage)
+    const isExcluded = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra') || l.includes('after workout'); };
+    for (const meal of plan.current.trainingDay.meals) {
+      if (!isExcluded(meal.name)) {
+        try { localStorage.setItem(`nnu_backup_${meal.name}`, JSON.stringify(meal)); } catch {}
+      }
+    }
+
+    const mainMealIndices = plan.current.trainingDay.meals.map((m, i) => ({ m, i })).filter(({ m }) => !isExcluded(m.name));
+
+    const newMeals = plan.current.trainingDay.meals.map((meal, i) => {
+      const mainIdx = mainMealIndices.findIndex(({ i: mi }) => mi === i);
+      if (mainIdx === -1 || !result.finalMeals[mainIdx]) return meal;
+      return {
+        ...meal,
+        items: result.finalMeals[mainIdx].map(f => ({ name: f.name, amount: f.amount })),
+      };
+    });
+
+    const newMacros = sumMacros(newMeals.map(m => ({ ...m, items: m.items.map(it => parseFoodItem(it)) })));
+
+    await persist({
+      current: {
+        ...plan.current,
+        id: Date.now().toString(),
+        startDate: new Date().toISOString().split('T')[0],
+        trainingDay: { ...plan.current.trainingDay, meals: newMeals, macros: newMacros },
+      },
+      history: newHistory,
+    });
+
+    // Write supplement to localStorage
+    if (result.finalSupplement) {
+      try {
+        localStorage.setItem('eaa_daily_result', JSON.stringify(result.finalSupplement));
+        localStorage.setItem('eaa_g_per_day', String(result.finalSupplement.totalPerDay / 1000));
+        localStorage.setItem('eaa_per_meal', JSON.stringify(result.finalSupplement.perMeal));
+      } catch {}
+    }
+
+    setResult(null);
+  };
+
   return (
-    <div className="mb-6">
-      <button onClick={compute} className="text-xs text-white/30 hover:text-white/50 uppercase tracking-wider flex items-center gap-2">
-        <span className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
-        Daily EAA Supplement
-      </button>
-      {expanded && (
-        <div className="mt-3 glass-card p-5">
-          {computing ? (
-            <div className="text-xs text-white/30">Computing optimal supplements...</div>
-          ) : daily ? (
-            <>
-              <div className="flex items-baseline gap-2 mb-3">
-                <span className="text-lg font-bold text-cyan-400">Avg NNU {daily.avgNNUBefore}% → {daily.avgNNUAfter}%</span>
-                <span className="text-xs text-white/20">{daily.mealCount} meals · {(daily.totalPerDay / 1000).toFixed(1)}g/day</span>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Total per day</div>
-                  {daily.perDay.map((p, i) => (
-                    <div key={i} className="flex justify-between text-xs mb-1">
-                      <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
-                      <span className="text-white/40 font-mono">{p.mg < 1000 ? `${p.mg}mg` : `${(p.mg / 1000).toFixed(1)}g`}</span>
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Per meal (~{daily.mealCount} meals)</div>
-                  {daily.perMeal.map((p, i) => (
-                    <div key={i} className="flex justify-between text-xs mb-1">
-                      <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
-                      <span className="text-white/40 font-mono">{p.mg}mg</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-3 pt-3 border-t border-white/5 text-[10px] text-white/20">
-                Mix into a single powder. Take {Math.round(daily.totalPerDay / daily.mealCount / 100) / 10}g per meal.
-              </div>
-            </>
-          ) : (
-            <div className="text-xs text-white/30">No supplement needed — all meals above 95% NNU.</div>
-          )}
+    <div className="mb-6 glass-card p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-white">Auto-Optimize NNU</h3>
+        <div className="flex items-center gap-2">
+          {/* Level selector */}
+          <div className="flex gap-0.5">
+            {[1, 2, 3, 4, 5].map(l => (
+              <button key={l} onClick={() => setLevel(l)}
+                className={`w-5 h-5 rounded text-[8px] font-bold ${l <= level ? 'bg-purple-500/50 text-white/70' : 'bg-white/5 text-white/20'}`}>{l}</button>
+            ))}
+          </div>
+          <button onClick={run} disabled={running}
+            className="text-[10px] font-bold text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 px-3 py-1.5 rounded-lg transition-all uppercase tracking-wider disabled:opacity-30">
+            {running ? progress : 'Optimize'}
+          </button>
         </div>
+      </div>
+
+      {/* Progress bar while computing */}
+      {running && (
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-purple-400/60">{progress}</span>
+            <span className="text-[10px] text-white/20">Round {roundProgress}/5</span>
+          </div>
+          <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+            <div className="h-full bg-purple-500/60 rounded-full transition-all duration-300" style={{ width: `${Math.max(10, roundProgress * 20)}%` }} />
+          </div>
+        </div>
+      )}
+
+      {result && (() => {
+        const isExcluded = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra') || l.includes('after workout'); };
+        const mainMeals = plan.current.trainingDay.meals.filter(m => !isExcluded(m.name));
+        const sup = result.finalSupplement;
+
+        // Compute total macros from optimized plan + EAA
+        const allOptMeals = plan.current.trainingDay.meals.map((meal, i) => {
+          const mainIdx = mainMeals.findIndex(m => m.name === meal.name);
+          if (mainIdx === -1 || !result.finalMeals[mainIdx]) return meal;
+          return { ...meal, items: result.finalMeals[mainIdx].map(f => ({ name: f.name, amount: f.amount })) };
+        });
+        const optFoodMacros = sumMacros(allOptMeals);
+        const optEaaG = sup ? sup.totalPerDay / 1000 : 0;
+        const optMacros = {
+          kcal: optFoodMacros.kcal + Math.round(optEaaG * 4),
+          protein: optFoodMacros.protein + Math.round(optEaaG),
+          carbs: optFoodMacros.carbs,
+          fat: optFoodMacros.fat,
+        };
+
+        // Read targets
+        const tgts: { kcal: number; protein: number; carbs: number; fat: number } = (() => {
+          try { const s = localStorage.getItem('macro_targets'); if (s) return JSON.parse(s); } catch {}
+          return { kcal: 3400, protein: 250, carbs: 400, fat: 80 };
+        })();
+
+        return (
+          <>
+            {/* Header with NNU */}
+            <div className="p-3 rounded-lg bg-purple-500/8 border border-purple-500/15 mb-3">
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-lg font-bold text-purple-400">NNU {result.originalNNU}% → {result.finalWithEAANNU}%</span>
+                <span className="text-xs text-white/20">{result.rounds.length} rounds</span>
+              </div>
+              <div className="text-xs text-white/30 mb-2">
+                Food: {result.originalNNU}% → {result.finalFoodNNU}% | EAA: {sup ? (sup.totalPerDay / 1000).toFixed(1) : 0}g/day ({sup ? (sup.totalPerDay / sup.mealCount / 1000).toFixed(1) : 0}g/meal)
+              </div>
+
+              {/* Optimized total macros vs target */}
+              <div className="grid grid-cols-4 gap-2 p-2 rounded-lg bg-white/5">
+                {[
+                  { label: 'Kcal', val: optMacros.kcal, target: tgts.kcal, color: '#b90a0a' },
+                  { label: 'Protein', val: optMacros.protein, target: tgts.protein, unit: 'g', color: '#3b82f6' },
+                  { label: 'Carbs', val: optMacros.carbs, target: tgts.carbs, unit: 'g', color: '#f59e0b' },
+                  { label: 'Fat', val: optMacros.fat, target: tgts.fat, unit: 'g', color: '#10b981' },
+                ].map(m => {
+                  const pct = m.target > 0 ? Math.round((m.val / m.target - 1) * 100) : 0;
+                  const statusColor = Math.abs(pct) <= 5 ? 'text-green-400' : pct < -5 ? 'text-yellow-400' : 'text-red-400';
+                  return (
+                    <div key={m.label}>
+                      <div className="flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: m.color }} />
+                        <span className={`text-xs font-bold ${statusColor}`}>{m.val}</span>
+                        <span className="text-[9px] text-white/20">{m.label}</span>
+                      </div>
+                      {pct !== 0 && <div className={`text-[9px] ml-3 ${statusColor}`}>{pct > 0 ? '+' : ''}{pct}%</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Full optimized meal plan preview */}
+            {mainMeals.map((meal, i) => {
+              const optimizedFoods = result.finalMeals[i] || [];
+              const origNNU = calcNNU(meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount })));
+              const optNNU = calcNNU(optimizedFoods);
+              const optMacros = sumMacros([{ ...meal, items: optimizedFoods.map(f => ({ name: f.name, amount: f.amount })) }]);
+
+              // NNU with EAA supplement
+              let optNNUWithEAA = optNNU?.nnu || 0;
+              if (optNNU && sup) {
+                const p = { ...optNNU.profile };
+                for (const s of sup.perMeal) p[s.aa] += s.mg;
+                const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
+                let minR = Infinity;
+                for (const aa of EAA_ORDER) { const r = (p[aa] / t * 100) / MAP[aa]; if (r < minR) minR = r; }
+                optNNUWithEAA = Math.round(minR * 1000) / 10;
+              }
+
+              // Find what changed
+              const origItems = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim());
+
+              return (
+                <div key={i} className="mb-3 p-3 rounded-lg bg-white/3 border border-white/5">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-semibold text-white">{meal.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-white/20">{origNNU?.nnu || 0}%</span>
+                      <span className="text-[10px] text-purple-400 font-bold">→ {optNNUWithEAA}%</span>
+                    </div>
+                  </div>
+
+                  {/* Macros */}
+                  <div className="flex gap-3 mb-2 text-[10px] text-white/30">
+                    <span>{optMacros.kcal} kcal</span>
+                    <span>{optMacros.protein}g P</span>
+                    <span>{optMacros.carbs}g C</span>
+                    <span>{optMacros.fat}g F</span>
+                  </div>
+
+                  {/* Food items — show changes */}
+                  {optimizedFoods.map((food, fi) => {
+                    const orig = origItems.find(o => o.name.toLowerCase() === food.name.toLowerCase());
+                    const isNew = !orig;
+                    const isChanged = orig && orig.amount !== food.amount;
+                    return (
+                      <div key={fi} className={`flex justify-between text-xs py-0.5 ${isNew ? 'text-green-400/70' : isChanged ? 'text-yellow-400/70' : 'text-white/40'}`}>
+                        <span>{isNew ? '+ ' : ''}{food.name}</span>
+                        <span className="font-mono text-[10px]">
+                          {isChanged && <span className="text-white/15 line-through mr-1">{orig.amount}</span>}
+                          {food.amount || ''}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
+            {/* EAA Supplement */}
+            {sup && (
+              <div className="mb-3 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/10">
+                <div className="text-[10px] text-cyan-400/60 uppercase tracking-wider mb-2">Daily EAA Supplement ({(sup.totalPerDay / 1000).toFixed(1)}g/day)</div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[9px] text-white/20 mb-1">Per day</div>
+                    {sup.perDay.map((p, i) => (
+                      <div key={i} className="flex justify-between text-xs">
+                        <span className="text-cyan-400/60">{EAA_NAMES[p.aa]}</span>
+                        <span className="text-white/30 font-mono">{p.mg < 1000 ? `${p.mg}mg` : `${(p.mg / 1000).toFixed(1)}g`}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-white/20 mb-1">Per meal</div>
+                    {sup.perMeal.map((p, i) => (
+                      <div key={i} className="flex justify-between text-xs">
+                        <span className="text-cyan-400/60">{EAA_NAMES[p.aa]}</span>
+                        <span className="text-white/30 font-mono">{p.mg}mg</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button onClick={applyAll} className="flex-1 text-xs font-bold text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 py-2.5 rounded-lg transition-all uppercase tracking-wider">
+                Apply All Changes
+              </button>
+              <button onClick={() => setResult(null)} className="text-xs text-white/30 hover:text-white/50 uppercase tracking-wider px-4">
+                Dismiss
+              </button>
+            </div>
+          </>
+        );
+      })()}
+    </div>
+  );
+}
+
+function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoods: string[] }) {
+  const [daily, setDaily] = useState<ReturnType<typeof calcDailyEAA>>(() => {
+    if (typeof window === 'undefined') return null;
+    try { const s = localStorage.getItem('eaa_daily_result'); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  const [computing, setComputing] = useState(false);
+  const [woSupplement, setWoSupplement] = useState<ReturnType<typeof calcIndividualSupplement>>(() => {
+    if (typeof window === 'undefined') return null;
+    try { return JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null'); } catch { return null; }
+  });
+  const lastKeyRef = useRef('');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const doCompute = () => {
+    setComputing(true);
+    setTimeout(() => {
+      const mainMeals = plan.current.trainingDay.meals
+        .filter(meal => !meal.name.toLowerCase().includes('during workout') && !meal.name.toLowerCase().includes('intra')
+          && !meal.name.toLowerCase().includes('after workout'))
+        .map(meal => {
+          const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
+          return items.map(f => ({ name: f.name, amount: f.amount }));
+        }).filter(m => m.length > 0);
+      const result = mainMeals.length > 0 ? calcDailyEAA(mainMeals, allowedFoods, 2) : null;
+      setDaily(result);
+
+      const woMeal = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
+      let woResult = null;
+      if (woMeal) {
+        const woFoods = woMeal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount }));
+        if (woFoods.length > 0) woResult = calcIndividualSupplement(woFoods, 96);
+      }
+      setWoSupplement(woResult);
+      setComputing(false);
+      try {
+        localStorage.setItem('eaa_daily_result', JSON.stringify(result));
+        localStorage.setItem('eaa_g_per_day', String(result ? result.totalPerDay / 1000 : 0));
+        localStorage.setItem('eaa_per_meal', JSON.stringify(result ? result.perMeal : []));
+        localStorage.setItem('eaa_wo_supplement', JSON.stringify(woResult));
+      } catch {}
+    }, 100);
+  };
+
+  // Auto-recompute when plan content changes (ref-based, no render loops)
+  const planKey = JSON.stringify(plan.current.trainingDay.meals.map(m =>
+    m.items.map(it => typeof it === 'string' ? it : `${it.name}|${it.amount}`)
+  ));
+  if (planKey !== lastKeyRef.current) {
+    lastKeyRef.current = planKey;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(doCompute, 300);
+  }
+
+  return (
+    <div className="mb-6 glass-card p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-white">Daily EAA Supplement</h3>
+        {computing && <span className="text-[10px] text-cyan-400/40">Computing...</span>}
+      </div>
+      {computing ? (
+        <div className="text-xs text-white/30">Computing optimal supplements...</div>
+      ) : daily ? (
+        <>
+          <div className="flex items-baseline gap-2 mb-3">
+            <span className="text-lg font-bold text-cyan-400">NNU {daily.avgNNUBefore}% → {daily.avgNNUAfter}%</span>
+            <span className="text-xs text-white/20">{daily.mealCount} meals · {(daily.totalPerDay / 1000).toFixed(1)}g/day</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Total per day</div>
+              {daily.perDay.map((p, i) => (
+                <div key={i} className="flex justify-between text-xs mb-1">
+                  <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
+                  <span className="text-white/40 font-mono">{p.mg < 1000 ? `${p.mg}mg` : `${(p.mg / 1000).toFixed(1)}g`}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Per meal (~{daily.mealCount} meals)</div>
+              {daily.perMeal.map((p, i) => (
+                <div key={i} className="flex justify-between text-xs mb-1">
+                  <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
+                  <span className="text-white/40 font-mono">{p.mg}mg</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-white/5 text-[10px] text-white/20">
+            Mix into a single powder. Take {Math.round(daily.totalPerDay / daily.mealCount / 100) / 10}g per meal.
+          </div>
+
+          {/* After Workout individual supplement */}
+          {woSupplement && (
+            <div className="mt-4 pt-4 border-t border-white/10">
+              <div className="flex items-baseline gap-2 mb-2">
+                <span className="text-sm font-semibold text-amber-400">After Workout</span>
+                <span className="text-xs text-white/20">{(woSupplement.totalMg / 1000).toFixed(1)}g · NNU {woSupplement.foodNNU}% → {woSupplement.finalNNU}%</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                {woSupplement.aas.map((s, i) => (
+                  <div key={i} className="text-xs flex justify-between">
+                    <span className="text-amber-400/60">{EAA_NAMES[s.aa]}</span>
+                    <span className="text-white/40 font-mono">{s.mg}mg</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Total daily */}
+          <div className="mt-3 pt-3 border-t border-white/5 text-[10px] text-white/30">
+            Total daily: {((daily.totalPerDay + (woSupplement?.totalMg || 0)) / 1000).toFixed(1)}g
+            <span className="text-white/15"> ({(daily.totalPerDay / 1000).toFixed(1)}g main + {((woSupplement?.totalMg || 0) / 1000).toFixed(1)}g after WO)</span>
+          </div>
+        </>
+      ) : (
+        <div className="text-xs text-white/30">No supplement needed — all meals above 95% NNU.</div>
       )}
     </div>
   );
@@ -684,13 +1166,11 @@ function MacroTarget({ label, value, onChange, unit, color }: { label: string; v
   );
 }
 
-function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, weeklyAvgKcal, allowedFoods, eaaSupplementGPerDay, onSaveOptimizedMeal }: {
+function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, allowedFoods, onSaveOptimizedMeal }: {
   dayPlan: DayPlan;
   title: string;
   color: string;
-  weeklyAvgKcal?: number;
   allowedFoods?: string[];
-  eaaSupplementGPerDay?: number;
   onSaveOptimizedMeal?: (mealIdx: number, meal: NutritionMeal) => void;
   editing: boolean;
   onStartEdit: () => void;
@@ -699,13 +1179,10 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   editPlan: DayPlan | null;
   setEditPlan: (p: DayPlan) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
-
   // Target macros — editable, stored in localStorage
   const [targets, setTargets] = useState(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('macro_targets');
-      if (stored) return JSON.parse(stored);
+      try { const stored = localStorage.getItem('macro_targets'); if (stored) return JSON.parse(stored); } catch {}
     }
     return { kcal: dayPlan.macros.kcal, protein: dayPlan.macros.protein, carbs: dayPlan.macros.carbs, fat: dayPlan.macros.fat };
   });
@@ -715,9 +1192,12 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     localStorage.setItem('macro_targets', JSON.stringify(next));
   };
 
-  // Actual macros — computed in real-time from all meals + EAA supplement
+  // Actual macros — computed in real-time from all meals + EAA supplement (from localStorage)
   const foodMacros = sumMacros(dayPlan.meals);
-  const eaaG = eaaSupplementGPerDay || 0;
+  const eaaG = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('eaa_g_per_day') || '0') : 0;
+  const dailyEAAFromStorage: { aa: string; mg: number }[] = typeof window !== 'undefined'
+    ? (() => { try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; } })()
+    : [];
   const actualMacros = {
     kcal: foodMacros.kcal + Math.round(eaaG * 4),
     protein: foodMacros.protein + Math.round(eaaG),
@@ -818,55 +1298,115 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
   return (
     <div className="glass-card overflow-hidden p-5">
-          {/* Target macros — editable */}
-          <div className="mb-1">
-            <div className="text-[9px] text-white/20 uppercase tracking-wider mb-1">Target <span className="text-white/10">(tap to edit)</span></div>
-            <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
-              <MacroTarget label="Kcal" value={targets.kcal} onChange={v => updateTarget('kcal', v)} unit="" color="#b90a0a" />
-              <MacroTarget label="Protein" value={targets.protein} onChange={v => updateTarget('protein', v)} unit="g" color="#3b82f6" />
-              <MacroTarget label="Carbs" value={targets.carbs} onChange={v => updateTarget('carbs', v)} unit="g" color="#f59e0b" />
-              <MacroTarget label="Fat" value={targets.fat} onChange={v => updateTarget('fat', v)} unit="g" color="#10b981" />
-            </div>
-          </div>
+          {/* Compute per-meal weighted average NNU */}
+          {(() => {
+            const isExcludedMeal = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra'); };
+            const mainMeals = dayPlan.meals.filter(m => !isExcludedMeal(m.name));
 
-          {/* Actual macros — computed from meals */}
-          <div className="mb-3">
-            <div className="text-[9px] text-white/20 uppercase tracking-wider mb-1">Actual</div>
-            <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
-              {[
-                { label: 'Kcal', actual: actualMacros.kcal, target: targets.kcal, unit: '', color: '#b90a0a' },
-                { label: 'Protein', actual: actualMacros.protein, target: targets.protein, unit: 'g', color: '#3b82f6' },
-                { label: 'Carbs', actual: actualMacros.carbs, target: targets.carbs, unit: 'g', color: '#f59e0b' },
-                { label: 'Fat', actual: actualMacros.fat, target: targets.fat, unit: 'g', color: '#10b981' },
-              ].map(m => {
-                const diff = m.actual - m.target;
-                const pct = m.target > 0 ? m.actual / m.target : 1;
-                const statusColor = pct >= 0.95 && pct <= 1.05 ? 'text-green-400' : pct < 0.95 ? 'text-yellow-400' : 'text-red-400';
-                return (
-                  <div key={m.label} className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                    <span className="text-xs text-white/40">{m.label}</span>
-                    <span className={`text-sm font-bold ${statusColor}`}>{m.actual}</span>
-                    <span className="text-[10px] text-white/30">{m.unit}</span>
+            // Per-meal NNU: food only
+            let totalProt = 0, weightedNNU = 0;
+            const mealNNUs: { nnu: number; protein: number; withEAA: number }[] = [];
+            const isAfterWOMeal = (n: string) => n.toLowerCase().includes('after workout');
+
+            // Read EAA supplements from localStorage
+            const avgEAA: { aa: string; mg: number }[] = (() => { try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; } })();
+            const woEAA: { aa: string; mg: number }[] = (() => { try { const w = JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null'); return w?.aas || []; } catch { return []; } })();
+
+            for (const meal of mainMeals) {
+              const foods = meal.items.map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } }).filter(it => it.name.trim() && it.amount);
+              const inputs = foods.map(f => ({ name: f.name, amount: f.amount }));
+              const nnu = inputs.length > 0 ? calcNNU(inputs) : null;
+              if (!nnu) continue;
+
+              // NNU with appropriate EAA supplement
+              const eaaData = isAfterWOMeal(meal.name) ? woEAA : avgEAA;
+              let nnuWithEAA = nnu.nnu;
+              if (eaaData.length > 0) {
+                const p = { ...nnu.profile };
+                for (const s of eaaData) { const k = s.aa as keyof typeof p; if (p[k] !== undefined) p[k] += s.mg; }
+                const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
+                let minR = Infinity;
+                for (const aa of EAA_ORDER) { const r = (p[aa] / t * 100) / MAP[aa]; if (r < minR) minR = r; }
+                nnuWithEAA = Math.round(minR * 1000) / 10;
+              }
+
+              mealNNUs.push({ nnu: nnu.nnu, protein: nnu.totalProtein, withEAA: nnuWithEAA });
+              totalProt += nnu.totalProtein;
+              weightedNNU += nnu.nnu * nnu.totalProtein;
+            }
+
+            const avgNNUFood = totalProt > 0 ? Math.round(weightedNNU / totalProt * 10) / 10 : null;
+            const avgNNUWithEAA = totalProt > 0 ? Math.round(mealNNUs.reduce((s, m) => s + m.withEAA * m.protein, 0) / totalProt * 10) / 10 : null;
+
+            return (
+              <>
+                {/* Target macros — editable */}
+                <div className="mb-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[9px] text-white/20 uppercase tracking-wider">Target <span className="text-white/10">(tap to edit)</span></div>
+                    {avgNNUFood !== null && (
+                      <span className="text-[10px] text-white/25">
+                        NNU <span className="font-bold text-white/40">{avgNNUFood}%</span>
+                        {avgNNUWithEAA !== null && avgNNUWithEAA !== avgNNUFood && (
+                          <span className={avgNNUWithEAA > avgNNUFood ? ' text-cyan-400/60' : ' text-red-400/60'}> → {avgNNUWithEAA}%</span>
+                        )}
+                      </span>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-            {weeklyAvgKcal != null && weeklyAvgKcal !== actualMacros.kcal && (
-              <p className="text-[11px] text-white/20 mt-1 ml-1">Weekly avg: ~{weeklyAvgKcal} kcal (incl. Sunday cheat)</p>
-            )}
-          </div>
+                  <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
+                    <MacroTarget label="Kcal" value={targets.kcal} onChange={v => updateTarget('kcal', v)} unit="" color="#b90a0a" />
+                    <MacroTarget label="Protein" value={targets.protein} onChange={v => updateTarget('protein', v)} unit="g" color="#3b82f6" />
+                    <MacroTarget label="Carbs" value={targets.carbs} onChange={v => updateTarget('carbs', v)} unit="g" color="#f59e0b" />
+                    <MacroTarget label="Fat" value={targets.fat} onChange={v => updateTarget('fat', v)} unit="g" color="#10b981" />
+                  </div>
+                </div>
+
+                {/* Actual macros — computed from meals */}
+                <div className="mb-3">
+                  <div className="text-[9px] text-white/20 uppercase tracking-wider mb-1">Actual</div>
+                  <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
+                    {[
+                      { label: 'Kcal', actual: actualMacros.kcal, target: targets.kcal, unit: '', color: '#b90a0a' },
+                      { label: 'Protein', actual: actualMacros.protein, target: targets.protein, unit: 'g', color: '#3b82f6' },
+                      { label: 'Carbs', actual: actualMacros.carbs, target: targets.carbs, unit: 'g', color: '#f59e0b' },
+                      { label: 'Fat', actual: actualMacros.fat, target: targets.fat, unit: 'g', color: '#10b981' },
+                    ].map(m => {
+                      const pct = m.target > 0 ? Math.round((m.actual / m.target - 1) * 100) : 0;
+                      const statusColor = Math.abs(pct) <= 5 ? 'text-green-400' : pct < -5 ? 'text-yellow-400' : 'text-red-400';
+                      return (
+                        <div key={m.label}>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                            <span className="text-xs text-white/40">{m.label}</span>
+                            <span className={`text-sm font-bold ${statusColor}`}>{m.actual}</span>
+                            <span className="text-[10px] text-white/30">{m.unit}</span>
+                          </div>
+                          {pct !== 0 && (
+                            <div className={`text-[9px] ml-4 ${statusColor}`}>{pct > 0 ? '+' : ''}{pct}%</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {/* Meals */}
           {!editing ? (
             <div>
               {(() => {
-                const mealCount = plan.meals.length || 1;
+                // Only count real food meals (exclude supplement-only meals like During Workout)
+                const realMeals = plan.meals.filter(m => {
+                  const l = m.name.toLowerCase();
+                  return !l.includes('during workout') && !l.includes('intra') && !l.includes('empty stomach');
+                });
+                const mealCount = realMeals.length || 1;
                 const avg = { kcal: Math.round(targets.kcal / mealCount), protein: Math.round(targets.protein / mealCount), carbs: Math.round(targets.carbs / mealCount), fat: Math.round(targets.fat / mealCount) };
-                const eaaPerMeal = eaaSupplementGPerDay ? Math.round(eaaSupplementGPerDay * 1000 / mealCount) : 0;
                 return plan.meals.map((meal, i) => (
                   <MealCard key={i} meal={meal} allowedFoods={allowedFoods}
-                    avgTargets={avg} eaaPerMealMg={eaaPerMeal}
+                    avgTargets={avg} dailyEAAPerMeal={dailyEAAFromStorage}
                     onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
                 ));
               })()}
@@ -983,12 +1523,11 @@ export default function NutritionPlanPage() {
   const [editingDay, setEditingDay] = useState<'training' | 'rest' | null>(null);
   const [editPlan, setEditPlan] = useState<DayPlan | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [eaaGPerDay, setEaaGPerDay] = useState(0);
+  // EAA data read from localStorage (written by DailyEAAPanel, no re-render loop)
   const [showFoodPrefs, setShowFoodPrefs] = useState(false);
   const [allowedFoods, setAllowedFoods] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('nnu_allowed_foods');
-      if (stored) return JSON.parse(stored);
+      try { const stored = localStorage.getItem('nnu_allowed_foods'); if (stored) return JSON.parse(stored); } catch {}
     }
     return DEFAULT_OPTIMIZER_FOODS;
   });
@@ -1024,6 +1563,16 @@ export default function NutritionPlanPage() {
   }, [isAuthenticated]);
 
   const persist = useCallback(async (updated: NutritionPlan) => {
+    // Recompute macros (food + EAA) so dashboard always matches
+    const foodMacros = sumMacros(updated.current.trainingDay.meals);
+    const eaaG = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('eaa_g_per_day') || '0') : 0;
+    updated.current.trainingDay.macros = {
+      kcal: foodMacros.kcal + Math.round(eaaG * 4),
+      protein: foodMacros.protein + Math.round(eaaG),
+      carbs: foodMacros.carbs,
+      fat: foodMacros.fat,
+    };
+    updated.current.restDay.macros = updated.current.trainingDay.macros;
     setPlan(updated);
     await saveNutritionPlan(updated);
   }, []);
@@ -1031,50 +1580,18 @@ export default function NutritionPlanPage() {
   // Save an optimized meal (from NNU optimizer)
   const saveOptimizedMeal = useCallback(async (mealIdx: number, meal: NutritionMeal) => {
     if (!plan) return;
-    // mealIdx includes the prepended empty stomach meal
-    const esOffset = plan.current.emptyStomach?.length ? 1 : 0;
-    const realIdx = mealIdx - esOffset;
-    if (realIdx < 0) return;
-    const meals = plan.current.trainingDay.meals.map((m, i) => i === realIdx ? meal : m);
+    const meals = plan.current.trainingDay.meals.map((m, i) => i === mealIdx ? meal : m);
     await persist({ ...plan, current: { ...plan.current, trainingDay: { ...plan.current.trainingDay, meals } } });
   }, [plan, persist]);
-
-  // Build "empty stomach" meal from the shared items
-  const emptyStomachItems = plan?.current.emptyStomach;
-  const buildEmptyStomachMeal = useCallback((): NutritionMeal | null => {
-    if (!emptyStomachItems || emptyStomachItems.length === 0) return null;
-    const foods: FoodItem[] = [];
-    const sups: string[] = [];
-    for (const s of emptyStomachItems) {
-      // If it matches the supplement DB, treat as supplement; otherwise as food
-      if (lookupSupplement(s)) {
-        sups.push(s);
-      } else {
-        foods.push(parseFoodItem(s));
-      }
-    }
-    return {
-      name: 'Empty Stomach',
-      subtitle: 'any day',
-      items: foods,
-      supplements: sups,
-    };
-  }, [emptyStomachItems]);
 
   const startEdit = (day: 'training' | 'rest') => {
     if (!plan) return;
     const source = day === 'training' ? plan.current.trainingDay : plan.current.restDay;
     const clone: DayPlan = JSON.parse(JSON.stringify(source));
-    // Normalize legacy string items to FoodItem objects
     clone.meals = clone.meals.map(m => ({
       ...m,
       items: m.items.map((item: FoodItem | string) => parseFoodItem(item)),
     }));
-    // Prepend empty stomach meal so it's editable
-    const esMeal = buildEmptyStomachMeal();
-    if (esMeal) {
-      clone.meals = [JSON.parse(JSON.stringify(esMeal)), ...clone.meals];
-    }
     setEditPlan(clone);
     setEditingDay(day);
   };
@@ -1101,43 +1618,14 @@ export default function NutritionPlanPage() {
       endDate: undefined,
     };
 
-    // Separate the empty stomach meal (first meal) back out
-    // It's always the first meal if we prepended it in startEdit
     const allMeals = [...editPlan.meals];
-    let updatedEmptyStomach: string[] | undefined = plan.current.emptyStomach;
-    if (plan.current.emptyStomach && plan.current.emptyStomach.length > 0 && allMeals.length > 0) {
-      const esMeal = allMeals.shift()!;
-      // Save both food items and supplements back to the flat emptyStomach array
-      const fromItems = esMeal.items
-        .filter(it => it.name.trim())
-        .map(it => {
-          const amount = it.amount ? ` ${it.amount}` : '';
-          return `${it.name}${amount}`;
-        });
-      const fromSupplements = (esMeal.supplements || [])
-        .filter(s => s.trim());
-      updatedEmptyStomach = [...fromItems, ...fromSupplements];
-      if (updatedEmptyStomach.length === 0) updatedEmptyStomach = undefined;
-    }
-
-    // Stored macros include empty stomach so dashboard matches nutrition page
-    const esMealForMacros = buildEmptyStomachMeal();
-    const allMealsWithEs = esMealForMacros ? [esMealForMacros, ...allMeals] : allMeals;
-    const computed = sumMacros(allMealsWithEs);
+    const computed = sumMacros(allMeals);
     const savedPlan = { ...editPlan, meals: allMeals, macros: computed };
-
-    newVersion.emptyStomach = updatedEmptyStomach;
 
     if (editingDay === 'training') {
       newVersion.trainingDay = savedPlan;
-      // Recompute rest day macros including empty stomach
-      const restWithEs = esMealForMacros ? [esMealForMacros, ...newVersion.restDay.meals] : newVersion.restDay.meals;
-      newVersion.restDay = { ...newVersion.restDay, macros: sumMacros(restWithEs) };
     } else {
       newVersion.restDay = savedPlan;
-      // Recompute training day macros including empty stomach
-      const trainWithEs = esMealForMacros ? [esMealForMacros, ...newVersion.trainingDay.meals] : newVersion.trainingDay.meals;
-      newVersion.trainingDay = { ...newVersion.trainingDay, macros: sumMacros(trainWithEs) };
     }
 
     await persist({
@@ -1159,13 +1647,6 @@ export default function NutritionPlanPage() {
 
   if (!plan) return null;
 
-  const emptyStomachMeal = buildEmptyStomachMeal();
-
-  const withEmptyStomach = (dayPlan: DayPlan): DayPlan => {
-    if (!emptyStomachMeal) return dayPlan;
-    return { ...dayPlan, meals: [emptyStomachMeal, ...dayPlan.meals] };
-  };
-
   return (
     <div className="min-h-screen">
       <Navigation />
@@ -1176,7 +1657,7 @@ export default function NutritionPlanPage() {
           {/* Training Day */}
           <div className="mb-4">
             <DayPlanView
-              dayPlan={withEmptyStomach(plan.current.trainingDay)}
+              dayPlan={plan.current.trainingDay}
               title="Training Day"
               color="#22c55e"
               editing={editingDay === 'training'}
@@ -1185,15 +1666,16 @@ export default function NutritionPlanPage() {
               onCancel={cancelEdit}
               editPlan={editingDay === 'training' ? editPlan : null}
               setEditPlan={setEditPlan}
-              weeklyAvgKcal={calcWeeklyIntake(plan.current.trainingDay.macros.kcal, plan.current.trainingDay.meals).weeklyAvgKcal}
               allowedFoods={allowedFoods}
-              eaaSupplementGPerDay={eaaGPerDay}
               onSaveOptimizedMeal={saveOptimizedMeal}
             />
           </div>
 
+          {/* Auto-Optimize */}
+          <AutoOptimizePanel plan={plan} allowedFoods={allowedFoods} persist={persist} />
+
           {/* Daily EAA Supplement Summary — computed lazily */}
-          <DailyEAAPanel plan={plan} allowedFoods={allowedFoods} onTotalChange={setEaaGPerDay} />
+          <DailyEAAPanel plan={plan} allowedFoods={allowedFoods} />
 
           {/* NNU Food Preferences */}
           <div className="mb-6">
@@ -1244,15 +1726,30 @@ export default function NutritionPlanPage() {
 
               {showHistory && (
                 <div className="mt-3 space-y-2">
-                  {plan.history.map((version) => (
-                    <div key={version.id} className="glass-card p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs text-white/40">
-                          {version.startDate} → {version.endDate || 'current'}
-                        </span>
-                      </div>
-                      <div className="text-xs">
-                        <span className="text-white/30">{version.trainingDay.macros.kcal} kcal · {version.trainingDay.meals.length} meals</span>
+                  {plan.history.map((version, idx) => (
+                    <div key={version.id || idx} className="glass-card p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-xs text-white/40">
+                            {version.startDate} → {version.endDate || 'current'}
+                          </span>
+                          <div className="text-xs text-white/30 mt-1">
+                            {version.trainingDay.macros.kcal} kcal · {version.trainingDay.meals.length} meals
+                          </div>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (!confirm('Restore this version? Current plan will be saved to history.')) return;
+                            const archived = { ...plan.current, endDate: new Date().toISOString().split('T')[0] };
+                            await persist({
+                              current: { ...version, endDate: undefined },
+                              history: [archived, ...plan.history.filter((_, i) => i !== idx)],
+                            });
+                          }}
+                          className="text-[10px] text-cyan-400/60 hover:text-cyan-400 uppercase tracking-wider"
+                        >
+                          Restore
+                        </button>
                       </div>
                     </div>
                   ))}

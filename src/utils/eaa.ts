@@ -231,6 +231,10 @@ const PROTEIN_PER_100G: Record<string, number> = {
   'broccoli': 2.8, 'spinach': 2.9, 'peas': 5.4, 'asparagus': 2.2,
   'mushrooms': 3.1, 'sweet potato': 1.6, 'potato': 2, 'avocado': 2, 'banana': 1.1,
   'spirulina': 57, 'nutritional yeast': 50, 'chlorella': 58, 'bee pollen': 20, 'collagen': 90,
+  // Zero/low protein items (so isKnownFood recognizes them)
+  'creatine': 0, 'dextrose': 0, 'maltodextrin': 0, 'cluster dextrin': 0,
+  'apple': 0.3, 'orange': 0.9, 'berries': 1.2, 'blueberries': 0.7,
+  'honey': 0.3, 'olive oil': 0, 'coconut oil': 0, 'rice cakes': 8,
 };
 
 // Kcal per 100g
@@ -335,7 +339,52 @@ const FAT_PER_100G: Record<string, number> = {
   'spirulina': 8, 'chlorella': 9, 'nutritional yeast': 4, 'bee pollen': 7,
 };
 
-const PIECE_G: Record<string, number> = { 'egg': 60, 'eggs': 60, 'banana': 120 };
+const PIECE_G: Record<string, number> = {
+  'egg': 60, 'eggs': 60, 'egg whites': 33, 'banana': 120, 'avocado': 150,
+  'bagel': 100, 'tortilla': 45, 'rice cakes': 9, 'rice cake': 9,
+  'protein bar': 60, 'apple': 180, 'orange': 150,
+};
+
+// ─── Custom food DB (localStorage) ───
+
+export interface CustomFood {
+  name: string;
+  kcal: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  eaa: EAAProfile;
+}
+
+export function getCustomFoods(): Record<string, CustomFood> {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(localStorage.getItem('custom_foods') || '{}'); } catch { return {}; }
+}
+
+export function saveCustomFood(food: CustomFood) {
+  const db = getCustomFoods();
+  db[food.name.toLowerCase().trim()] = food;
+  localStorage.setItem('custom_foods', JSON.stringify(db));
+}
+
+export function isKnownFood(name: string): boolean {
+  const lower = name.toLowerCase().trim();
+  // Check built-in DBs
+  if (EAA_DB[lower] || PROTEIN_PER_100G[lower]) return true;
+  for (const key of Object.keys(EAA_DB)) {
+    if (lower.includes(key) || key.includes(lower)) return true;
+  }
+  for (const key of Object.keys(PROTEIN_PER_100G)) {
+    if (lower.includes(key) || key.includes(lower)) return true;
+  }
+  // Check custom DB
+  const custom = getCustomFoods();
+  if (custom[lower]) return true;
+  for (const key of Object.keys(custom)) {
+    if (lower.includes(key) || key.includes(lower)) return true;
+  }
+  return false;
+}
 
 function parseGrams(amount: string | undefined, name: string): number {
   if (!amount) return 0;
@@ -343,16 +392,38 @@ function parseGrams(amount: string | undefined, name: string): number {
   if (gMatch) return parseFloat(gMatch[1]);
   const mlMatch = amount.match(/([\d.]+)\s*ml$/i);
   if (mlMatch) return parseFloat(mlMatch[1]);
+  // Cups (1 cup ≈ 240ml)
+  const cupMatch = amount.match(/([\d.]*)\s*cups?$/i);
+  if (cupMatch) return parseFloat(cupMatch[1] || '1') * 240;
+  // Tablespoon / teaspoon
+  const tbspMatch = amount.match(/([\d.]+)\s*(?:tbsp|tablespoons?)$/i);
+  if (tbspMatch) return parseFloat(tbspMatch[1]) * 15;
+  const tspMatch = amount.match(/([\d.]+)\s*(?:tsp|teaspoons?)$/i);
+  if (tspMatch) return parseFloat(tspMatch[1]) * 5;
+  // Scoop (~30g)
+  const scoopMatch = amount.match(/([\d.]*)\s*scoops?$/i);
+  if (scoopMatch) return parseFloat(scoopMatch[1] || '1') * 30;
+  // Bare number — check piece weights
   const bare = amount.match(/^([\d.]+)$/);
   if (bare) {
-    const pw = Object.entries(PIECE_G).find(([k]) => name.toLowerCase().includes(k));
-    return pw ? parseFloat(bare[1]) * pw[1] : parseFloat(bare[1]);
+    const lower = name.toLowerCase().trim();
+    for (const [k, w] of Object.entries(PIECE_G)) {
+      if (lower.includes(k) || k.includes(lower)) return parseFloat(bare[1]) * w;
+    }
+    return parseFloat(bare[1]);
   }
   return 0;
 }
 
 export function getEAAProfile(name: string): EAAProfile | null {
   const lower = name.toLowerCase().trim();
+  // Check custom DB first
+  const custom = getCustomFoods();
+  if (custom[lower]) return custom[lower].eaa;
+  for (const [key, food] of Object.entries(custom)) {
+    if (lower.includes(key) || key.includes(lower)) return food.eaa;
+  }
+  // Built-in DB
   if (EAA_DB[lower]) return EAA_DB[lower];
   for (const [key, profile] of Object.entries(EAA_DB)) {
     if (lower.includes(key) || key.includes(lower)) return profile;
@@ -362,6 +433,11 @@ export function getEAAProfile(name: string): EAAProfile | null {
 
 function getProteinPer100g(name: string): number {
   const lower = name.toLowerCase().trim();
+  const custom = getCustomFoods();
+  if (custom[lower]) return custom[lower].protein;
+  for (const [key, food] of Object.entries(custom)) {
+    if (lower.includes(key) || key.includes(lower)) return food.protein;
+  }
   if (PROTEIN_PER_100G[lower]) return PROTEIN_PER_100G[lower];
   for (const [key, val] of Object.entries(PROTEIN_PER_100G)) {
     if (lower.includes(key) || key.includes(lower)) return val;
@@ -583,6 +659,15 @@ export const DEFAULT_OPTIMIZER_FOODS = [
   'spirulina',
 ];
 
+// Shared fuzzy macro lookup
+function lookupMacro(db: Record<string, number>, name: string): number {
+  if (db[name] !== undefined) return db[name];
+  for (const [k, v] of Object.entries(db)) {
+    if (name.includes(k) || k.includes(name)) return v;
+  }
+  return 0;
+}
+
 function foodKcal(food: string, grams: number): number {
   return Math.round((KCAL_PER_100G[food] || 200) * grams / 100);
 }
@@ -662,11 +747,11 @@ function calcTargetedAAs(profile: Record<EAA, number>, targetNNU: number): { aas
  */
 // Aggressiveness presets: level 1 (conservative) to 5 (extreme)
 const AGGRESSIVENESS = [
-  { reduceFoods: 2, reductionFactors: [0.85],          maxAdditions: 1, maxKcalDelta: 100,  searchCap: 300  },  // 1
-  { reduceFoods: 3, reductionFactors: [0.8, 0.7],      maxAdditions: 2, maxKcalDelta: 200,  searchCap: 500  },  // 2
-  { reduceFoods: 4, reductionFactors: [0.8, 0.65, 0.5], maxAdditions: 2, maxKcalDelta: 300, searchCap: 800  },  // 3
-  { reduceFoods: 5, reductionFactors: [0.7, 0.5, 0.3], maxAdditions: 3, maxKcalDelta: 400,  searchCap: 1200 },  // 4
-  { reduceFoods: 6, reductionFactors: [0.6, 0.4, 0.2, 0], maxAdditions: 3, maxKcalDelta: 600, searchCap: 2000 }, // 5
+  { reduceFoods: 2, reductionFactors: [0.85],             maxAdditions: 1, maxKcalDelta: 100, searchCap: 200  },  // 1
+  { reduceFoods: 3, reductionFactors: [0.8, 0.7],         maxAdditions: 2, maxKcalDelta: 200, searchCap: 400  },  // 2
+  { reduceFoods: 4, reductionFactors: [0.8, 0.65, 0.5],   maxAdditions: 2, maxKcalDelta: 300, searchCap: 600  },  // 3
+  { reduceFoods: 5, reductionFactors: [0.7, 0.5, 0.3],    maxAdditions: 2, maxKcalDelta: 400, searchCap: 800  },  // 4
+  { reduceFoods: 6, reductionFactors: [0.6, 0.4, 0.2, 0], maxAdditions: 2, maxKcalDelta: 600, searchCap: 600 }, // 5
 ];
 
 export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowedFoods?: string[], level: number = 2): OptimizedMeal | null {
@@ -675,10 +760,50 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
 
   const agg = AGGRESSIVENESS[Math.max(0, Math.min(4, level - 1))];
 
-  // Build candidate list from allowed foods
-  const candidates = (allowedFoods || DEFAULT_OPTIMIZER_FOODS)
+  // Compute original meal macros for ±5% constraint
+  const origMacros = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  for (const f of foods) {
+    const name = f.name.toLowerCase().trim();
+    const g = parseGrams(f.amount, name);
+    if (g <= 0) continue;
+    const prot = getProteinPer100g(name);
+    const kcal = KCAL_PER_100G[name] ?? Object.entries(KCAL_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
+    const carb = CARBS_PER_100G[name] ?? Object.entries(CARBS_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
+    const fat = FAT_PER_100G[name] ?? Object.entries(FAT_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
+    origMacros.kcal += kcal * g / 100;
+    origMacros.protein += prot * g / 100;
+    origMacros.carbs += carb * g / 100;
+    origMacros.fat += fat * g / 100;
+  }
+  origMacros.kcal = Math.round(origMacros.kcal);
+  origMacros.protein = Math.round(origMacros.protein);
+  origMacros.carbs = Math.round(origMacros.carbs);
+  origMacros.fat = Math.round(origMacros.fat);
+
+  // Build candidate list — pre-filter to top 12 foods that best help the limiting AAs
+  const allCandidates = (allowedFoods || DEFAULT_OPTIMIZER_FOODS)
     .map(name => ALL_OPTIMIZER_FOODS.find(f => f.food === name))
-    .filter((f): f is OptimizerFood => !!f && !!EAA_DB[f.food]);
+    .filter((f): f is OptimizerFood => !!f && !!EAA_DB[f.food])
+    // Skip foods already in the meal
+    .filter(f => !foods.some(mf => {
+      const mfn = mf.name.toLowerCase().trim();
+      const cfn = f.food;
+      // Check both directions + singular/plural
+      return mfn.includes(cfn) || cfn.includes(mfn) || mfn.replace(/s$/, '') === cfn.replace(/s$/, '');
+    }));
+
+  // Score each candidate by how well its EAA profile addresses the deficient AAs
+  const deficientAAs = EAA_ORDER.filter(aa => (original.pcts[aa] / MAP[aa]) < 0.95);
+  const scored = allCandidates.map(c => {
+    const eaa = EAA_DB[c.food];
+    const total = EAA_ORDER.reduce((s, aa) => s + eaa[aa], 0);
+    // Score = sum of (pct / MAP) for deficient AAs — higher means this food helps more
+    let score = 0;
+    for (const aa of deficientAAs) score += (eaa[aa] / total * 100) / MAP[aa];
+    return { ...c, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const candidates = scored.slice(0, 12);
 
   // Identify which existing foods have EAA profiles and can be adjusted
   const adjustable: { idx: number; food: string; grams: number; kcalPer100: number }[] = [];
@@ -733,6 +858,8 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     }
     reductionOptions.length = 0;
     reductionOptions.push(...newOptions);
+    // Cap reduction combos to prevent combinatorial explosion
+    if (reductionOptions.length > 200) break;
   }
 
   // For each reduction combo, try adding complementary foods
@@ -760,8 +887,7 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     // Try adding 0, 1, or 2 complementary foods
     const addCombos: { food: string; grams: number }[][] = [[]];
     for (const cand of candidates) {
-      // Skip if already in the meal
-      if (foods.some(f => f.name.toLowerCase().includes(cand.food))) continue;
+      // Already filtered in pre-filter
       const newCombos: typeof addCombos = [];
       for (const existing of addCombos) {
         newCombos.push(existing);
@@ -782,12 +908,35 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
 
       if (totalDeltaKcal > agg.maxKcalDelta) continue;
 
+      // Check macro constraints: ±5% of original meal for kcal, protein, carbs, fat
+      if (origMacros.kcal > 0) {
+        let newKcal = 0, newProt = 0, newCarbs = 0, newFat = 0;
+        for (const c of changes) {
+          const diff = c.newG - c.originalG;
+          newKcal += foodKcal(c.food, c.newG) - foodKcal(c.food, c.originalG);
+          newProt += lookupMacro(PROTEIN_PER_100G, c.food) * diff / 100;
+          newCarbs += lookupMacro(CARBS_PER_100G, c.food) * diff / 100;
+          newFat += lookupMacro(FAT_PER_100G, c.food) * diff / 100;
+        }
+        for (const a of additions) {
+          newKcal += foodKcal(a.food, a.grams);
+          newProt += lookupMacro(PROTEIN_PER_100G, a.food) * a.grams / 100;
+          newCarbs += lookupMacro(CARBS_PER_100G, a.food) * a.grams / 100;
+          newFat += lookupMacro(FAT_PER_100G, a.food) * a.grams / 100;
+        }
+        // Tolerance scales with aggressiveness: L1=5%, L2=10%, L3=15%, L4=20%, L5=25%
+        const tol = 0.05 + (level - 1) * 0.05;
+        const check = (orig: number, delta: number) => orig === 0 || Math.abs(delta / orig) <= tol;
+        if (!check(origMacros.kcal, newKcal) || !check(origMacros.protein, newProt) ||
+            !check(origMacros.carbs, newCarbs) || !check(origMacros.fat, newFat)) continue;
+      }
+
       const testFoods = [
         ...reducedFoods,
         ...additions.map(a => ({ name: a.food, amount: `${a.grams} gr` })),
       ];
       const result = calcNNU(testFoods);
-      if (!result || result.nnu <= original.nnu) continue;
+      if (!result || result.nnu < original.nnu + 1) continue; // require at least 1% NNU improvement
 
       results.push({
         changes,
@@ -829,24 +978,19 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     }
   }
 
-  // Compute macro deltas using actual food composition
+  // Compute macro deltas using same fuzzy lookup as constraint check
   let deltaProtein = 0, deltaCarbs = 0, deltaFat = 0;
-  const getFoodCarbs = (name: string) => CARBS_PER_100G[name] ?? Object.entries(CARBS_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
-  const getFoodFat = (name: string) => FAT_PER_100G[name] ?? Object.entries(FAT_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
-
   for (const c of best.changes) {
     const diff = c.newG - c.originalG;
-    deltaProtein += (PROTEIN_PER_100G[c.food] || 0) * diff / 100;
-    deltaCarbs += getFoodCarbs(c.food) * diff / 100;
-    deltaFat += getFoodFat(c.food) * diff / 100;
+    deltaProtein += lookupMacro(PROTEIN_PER_100G, c.food) * diff / 100;
+    deltaCarbs += lookupMacro(CARBS_PER_100G, c.food) * diff / 100;
+    deltaFat += lookupMacro(FAT_PER_100G, c.food) * diff / 100;
   }
   for (const a of best.additions) {
-    deltaProtein += (PROTEIN_PER_100G[a.food] || 0) * a.grams / 100;
-    deltaCarbs += getFoodCarbs(a.food) * a.grams / 100;
-    deltaFat += getFoodFat(a.food) * a.grams / 100;
+    deltaProtein += lookupMacro(PROTEIN_PER_100G, a.food) * a.grams / 100;
+    deltaCarbs += lookupMacro(CARBS_PER_100G, a.food) * a.grams / 100;
+    deltaFat += lookupMacro(FAT_PER_100G, a.food) * a.grams / 100;
   }
-  deltaProtein += supplementTotalMg / 1000;
-
   return {
     changes: best.changes,
     additions: best.additions,
@@ -855,10 +999,10 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     originalNNU: original.nnu,
     foodOnlyNNU,
     finalNNU,
-    deltaKcal: best.deltaKcal + Math.round(supplementTotalMg * 4 / 1000),
-    deltaProtein: Math.round(deltaProtein),
-    deltaCarbs: Math.round(deltaCarbs),
-    deltaFat: Math.round(deltaFat),
+    deltaKcal: best.deltaKcal,
+    deltaProtein: Math.round(deltaProtein * 10) / 10,
+    deltaCarbs: Math.round(deltaCarbs * 10) / 10,
+    deltaFat: Math.round(deltaFat * 10) / 10,
   };
 }
 
@@ -885,14 +1029,15 @@ export function calcDailyEAA(meals: FoodInput[][], allowedFoods?: string[], leve
       continue;
     }
 
-    const opt = optimizeMeal(foods, 96, allowedFoods, level);
-    if (!opt || opt.supplements.length === 0) {
+    // Compute targeted AAs for CURRENT food (not after food optimization)
+    const fix = calcTargetedAAs(nnu.profile, 96);
+    if (!fix || fix.aas.length === 0) {
       mealResults.push({ nnu: nnu.nnu, gaps: {} });
       continue;
     }
 
     const gaps: Record<string, number> = {};
-    for (const s of opt.supplements) gaps[s.aa] = s.mg;
+    for (const s of fix.aas) gaps[s.aa] = s.mg;
     mealResults.push({ nnu: nnu.nnu, gaps });
   }
 
@@ -921,30 +1066,164 @@ export function calcDailyEAA(meals: FoodInput[][], allowedFoods?: string[], leve
   })).filter(p => p.mg > 0);
 
   const totalPerDay = perDay.reduce((s, p) => s + p.mg, 0);
-  const avgNNUBefore = Math.round(mealResults.reduce((s, r) => s + r.nnu, 0) / mealResults.length * 10) / 10;
 
-  // Estimate NNU after: apply the averaged supplement to each meal and recalculate
-  let totalNNUAfter = 0;
+  // Weighted average per-meal NNU (weighted by protein content per meal)
+  let totalProt = 0, weightedBefore = 0, weightedAfter = 0;
   for (const foods of meals) {
-    const base = calcNNU(foods);
-    if (!base) { totalNNUAfter += 100; continue; }
-    // Add the per-meal supplement as raw AA mg to the profile
-    const profile = { ...base.profile };
-    for (const p of perMeal) profile[p.aa] += p.mg;
-    const total = EAA_ORDER.reduce((s, aa) => s + profile[aa], 0);
+    const nnu = calcNNU(foods);
+    if (!nnu || nnu.totalProtein <= 0) continue;
+    totalProt += nnu.totalProtein;
+    weightedBefore += nnu.nnu * nnu.totalProtein;
+
+    // NNU with per-meal supplement
+    const p = { ...nnu.profile };
+    for (const s of perMeal) p[s.aa] += s.mg;
+    const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
     let minR = Infinity;
-    for (const aa of EAA_ORDER) {
-      const r = (profile[aa] / total * 100) / MAP[aa];
-      if (r < minR) minR = r;
-    }
-    totalNNUAfter += Math.round(minR * 1000) / 10;
+    for (const aa of EAA_ORDER) { const r = (p[aa] / t * 100) / MAP[aa]; if (r < minR) minR = r; }
+    weightedAfter += Math.round(minR * 1000) / 10 * nnu.totalProtein;
   }
-  const avgNNUAfter = Math.round(totalNNUAfter / meals.length * 10) / 10;
+  const avgNNUBefore = totalProt > 0 ? Math.round(weightedBefore / totalProt * 10) / 10 : 0;
+  const avgNNUAfter = totalProt > 0 ? Math.round(weightedAfter / totalProt * 10) / 10 : 0;
 
   return { perDay, perMeal, totalPerDay, mealCount, avgNNUBefore, avgNNUAfter };
 }
 
+// ─── Iterative AI Optimizer ───
+
+export interface IterationResult {
+  round: number;
+  foodNNU: number;       // weighted avg food-only NNU
+  withEAANNU: number;    // weighted avg with supplement
+  supplementG: number;   // total daily supplement grams
+  mealChanges: { mealIdx: number; changes: MealChange[]; additions: { food: string; grams: number; kcal: number }[] }[];
+  supplement: DailyEAASupplement | null;
+}
+
+export interface AutoOptimizeResult {
+  rounds: IterationResult[];
+  finalMeals: FoodInput[][];  // the optimized food per meal
+  finalSupplement: DailyEAASupplement | null;
+  originalNNU: number;
+  finalFoodNNU: number;
+  finalWithEAANNU: number;
+}
+
+export function autoOptimize(
+  meals: FoodInput[][],
+  allowedFoods?: string[],
+  level: number = 2,
+  maxRounds: number = 5,
+  onProgress?: (round: number, total: number) => void,
+): AutoOptimizeResult {
+  let currentMeals = meals.map(m => [...m]); // deep copy
+  const rounds: IterationResult[] = [];
+
+  // Original NNU
+  const origNNUs = currentMeals.map(m => calcNNU(m));
+  let totalP = 0, wNNU = 0;
+  for (const n of origNNUs) { if (n) { totalP += n.totalProtein; wNNU += n.nnu * n.totalProtein; } }
+  const originalNNU = totalP > 0 ? Math.round(wNNU / totalP * 10) / 10 : 0;
+
+  for (let round = 0; round < maxRounds; round++) {
+    onProgress?.(round + 1, maxRounds);
+    const prevMeals = currentMeals.map(m => [...m]); // save for revert
+
+    // Step 1: Optimize food per meal
+    const allMealChanges: IterationResult['mealChanges'] = [];
+    const optimizedMeals: FoodInput[][] = [];
+
+    for (let mi = 0; mi < currentMeals.length; mi++) {
+      const foods = currentMeals[mi];
+      const opt = optimizeMeal(foods, 96, allowedFoods, level);
+
+      if (opt && opt.foodOnlyNNU > (calcNNU(foods)?.nnu || 0) + 0.5) {
+        // Apply food changes
+        const newFoods = foods.map(f => {
+          const change = opt.changes.find(c => f.name.toLowerCase().includes(c.food) || c.food.includes(f.name.toLowerCase()));
+          return change ? { name: f.name, amount: `${change.newG} gr` } : f;
+        });
+        // Only add foods that aren't already in the meal (prevent duplicates like "salmon" + "Salmon or ground beef cooked")
+        for (const a of opt.additions) {
+          const isDup = newFoods.some(f => {
+            const fn = f.name.toLowerCase();
+            return fn.includes(a.food) || a.food.includes(fn) || fn.replace(/s$/, '') === a.food.replace(/s$/, '');
+          });
+          if (!isDup) newFoods.push({ name: a.food, amount: `${a.grams} gr` });
+        }
+        optimizedMeals.push(newFoods);
+        allMealChanges.push({ mealIdx: mi, changes: opt.changes, additions: opt.additions });
+      } else {
+        optimizedMeals.push([...foods]);
+        allMealChanges.push({ mealIdx: mi, changes: [], additions: [] });
+      }
+    }
+
+    currentMeals = optimizedMeals;
+
+    // Step 2: Compute daily EAA supplement for optimized food
+    const supplement = calcDailyEAA(currentMeals, allowedFoods, level);
+
+    // Compute weighted avg NNU
+    let tp = 0, wf = 0, we = 0;
+    for (let mi = 0; mi < currentMeals.length; mi++) {
+      const nnu = calcNNU(currentMeals[mi]);
+      if (!nnu) continue;
+      tp += nnu.totalProtein;
+      wf += nnu.nnu * nnu.totalProtein;
+
+      if (supplement) {
+        const p = { ...nnu.profile };
+        for (const s of supplement.perMeal) p[s.aa] += s.mg;
+        const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
+        let minR = Infinity;
+        for (const aa of EAA_ORDER) { const r = (p[aa] / t * 100) / MAP[aa]; if (r < minR) minR = r; }
+        we += Math.round(minR * 1000) / 10 * nnu.totalProtein;
+      } else {
+        we += nnu.nnu * nnu.totalProtein;
+      }
+    }
+
+    const foodNNU = tp > 0 ? Math.round(wf / tp * 10) / 10 : 0;
+    const withEAANNU = tp > 0 ? Math.round(we / tp * 10) / 10 : 0;
+    const supplementG = supplement ? Math.round(supplement.totalPerDay / 100) / 10 : 0;
+
+    // If this round is worse than previous, revert and stop
+    if (round > 0 && withEAANNU < rounds[round - 1].withEAANNU) {
+      currentMeals = prevMeals;
+      break;
+    }
+
+    rounds.push({ round: round + 1, foodNNU, withEAANNU, supplementG, mealChanges: allMealChanges, supplement });
+
+    // Stop if converged (< 0.5% improvement from previous round)
+    if (round > 0) {
+      const prev = rounds[round - 1];
+      if (Math.abs(withEAANNU - prev.withEAANNU) < 0.5 && Math.abs(supplementG - prev.supplementG) < 0.5) break;
+    }
+  }
+
+  const lastRound = rounds[rounds.length - 1];
+  return {
+    rounds,
+    finalMeals: currentMeals,
+    finalSupplement: lastRound.supplement,
+    originalNNU,
+    finalFoodNNU: lastRound.foodNNU,
+    finalWithEAANNU: lastRound.withEAANNU,
+  };
+}
+
 // Keep simple suggestFix as a wrapper for backward compat
+/** Calculate individual targeted supplement for a single meal (e.g., After Workout) */
+export function calcIndividualSupplement(foods: FoodInput[], targetNNU: number = 96): { aas: { aa: EAA; mg: number }[]; totalMg: number; foodNNU: number; finalNNU: number } | null {
+  const nnu = calcNNU(foods);
+  if (!nnu || nnu.nnu >= targetNNU) return null;
+  const fix = calcTargetedAAs(nnu.profile, targetNNU);
+  if (!fix) return null;
+  return { aas: fix.aas, totalMg: fix.totalMg, foodNNU: nnu.nnu, finalNNU: fix.newNNU };
+}
+
 export function suggestFix(foods: FoodInput[], targetNNU: number = 95): { label: string; addedKcal: number; addedProtein: number; newNNU: number } | null {
   const result = optimizeMeal(foods, targetNNU);
   if (!result) return null;

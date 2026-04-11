@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import Link from 'next/link';
 import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
-import { calcSessionCalories, calcRollingTDEE, calcWeeklyIntake } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE } from '@/utils/calories';
 import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import Sparkline from '@/components/Sparkline';
@@ -245,7 +245,7 @@ export default function Dashboard() {
               const dailyKcal = nutritionPlan?.current.trainingDay.macros.kcal;
               const trainingDayProtein = nutritionPlan?.current.trainingDay.macros.protein || 0;
               if (!bmr || !dailyKcal || trainingSessions.length === 0) return null;
-              const { weeklyAvgKcal: intake } = calcWeeklyIntake(dailyKcal, nutritionPlan?.current.trainingDay.meals || []);
+              const intake = dailyKcal;
 
               // Cache TDEE once per day — only recompute if date or plan changes
               const nbCacheKey = `nb_${new Date().toISOString().split('T')[0]}_${dailyKcal}_${trainingSessions.length}_${Object.keys(dailyActivity).length}`;
