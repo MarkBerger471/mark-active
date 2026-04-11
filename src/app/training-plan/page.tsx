@@ -8,7 +8,7 @@ import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTr
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, calcRollingTDEE, parseDurationMinutes } from '@/utils/calories';
-import { hapticLight, hapticSuccess, playTimerBeep } from '@/utils/haptics';
+import { hapticLight, hapticSuccess, playTimerBeep, unlockAudio } from '@/utils/haptics';
 
 // LEGACY — replaced by shared @/utils/calories.ts
 // MET values for cardio activities (HR 120-130 range)
@@ -274,8 +274,8 @@ export default function TrainingPlanPage() {
     timerEndRef.current = Date.now() + seconds * 1000;
     timerFiredRef.current = false;
     setRestTimer(seconds);
-    // Pre-warm audio context (required for iOS — needs user gesture context)
-    try { const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); ctx.resume(); } catch {}
+    // Unlock iOS audio during this user gesture so the beep plays later
+    unlockAudio();
     restIntervalRef.current = setInterval(() => {
       const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
       setRestTimer(remaining);

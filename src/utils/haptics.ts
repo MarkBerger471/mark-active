@@ -5,6 +5,20 @@ function getAudioCtx() {
   return audioCtx;
 }
 
+/** Call this during a user gesture (tap/click) to unlock audio on iOS */
+export function unlockAudio() {
+  try {
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    // Play a silent buffer to fully unlock iOS audio
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch {}
+}
+
 // iOS doesn't support Vibration API — use AudioContext pulse as workaround
 function pulse(duration = 10) {
   try { navigator?.vibrate?.(duration); } catch {}
