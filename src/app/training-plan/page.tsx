@@ -196,6 +196,15 @@ export default function TrainingPlanPage() {
   sessionDateRef.current = sessionDate;
   activeWorkoutRef.current = activeWorkout;
 
+  // Wake lock — keep screen on during active workout so timer/beep work
+  useEffect(() => {
+    let wakeLock: WakeLockSentinel | null = null;
+    if (activeWorkout && 'wakeLock' in navigator) {
+      navigator.wakeLock.request('screen').then(wl => { wakeLock = wl; }).catch(() => {});
+    }
+    return () => { wakeLock?.release(); };
+  }, [activeWorkout]);
+
   const flushSave = useCallback(async () => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
