@@ -63,10 +63,11 @@ export function unlockAudio() {
       beepAudio = new Audio(generateBeepDataUri());
       beepAudio.volume = 1.0;
     }
-    // iOS requires load() + play() during gesture to unlock
+    // iOS requires load() + play() during gesture to unlock — truly silent
     beepAudio.load();
-    beepAudio.volume = 0.01; // silent prime
-    beepAudio.play().then(() => { beepAudio!.pause(); beepAudio!.currentTime = 0; beepAudio!.volume = 1.0; }).catch(() => {});
+    beepAudio.volume = 0;
+    beepAudio.muted = true;
+    beepAudio.play().then(() => { beepAudio!.pause(); beepAudio!.currentTime = 0; beepAudio!.muted = false; }).catch(() => {});
   } catch {}
   // Also unlock Web Audio API as fallback
   try {
