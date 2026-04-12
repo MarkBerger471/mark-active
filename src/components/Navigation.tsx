@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: '◉' },
@@ -15,12 +15,9 @@ const navItems = [
 
 export default function Navigation() {
   const pathname = usePathname();
-  const router = useRouter();
   const { logout } = useAuth();
   const [online, setOnline] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
-  const touchRef = useRef<{ x: number; y: number; t: number }>({ x: 0, y: 0, t: 0 });
-
   useEffect(() => {
     setOnline(navigator.onLine);
     const on = () => setOnline(true);
@@ -29,32 +26,6 @@ export default function Navigation() {
     window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
-
-  // Swipe navigation — fast, edge-aware, Oura-like
-  const handleSwipe = useCallback((dir: 'left' | 'right') => {
-    const idx = navItems.findIndex(i => i.href === pathname);
-    if (dir === 'left' && idx < navItems.length - 1) router.push(navItems[idx + 1].href);
-    if (dir === 'right' && idx > 0) router.push(navItems[idx - 1].href);
-  }, [pathname, router]);
-
-  useEffect(() => {
-    const onTouchStart = (e: TouchEvent) => {
-      touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      const dx = e.changedTouches[0].clientX - touchRef.current.x;
-      const dy = e.changedTouches[0].clientY - touchRef.current.y;
-      const dt = Date.now() - touchRef.current.t;
-      const velocity = Math.abs(dx) / dt; // px/ms
-      // Quick flick (high velocity) or longer drag — must be horizontal
-      if (Math.abs(dx) > Math.abs(dy) * 1.8 && (Math.abs(dx) > 60 || (velocity > 0.4 && Math.abs(dx) > 30)) && dt < 500) {
-        handleSwipe(dx < 0 ? 'left' : 'right');
-      }
-    };
-    document.addEventListener('touchstart', onTouchStart, { passive: true });
-    document.addEventListener('touchend', onTouchEnd, { passive: true });
-    return () => { document.removeEventListener('touchstart', onTouchStart); document.removeEventListener('touchend', onTouchEnd); };
-  }, [handleSwipe]);
 
   return (
     <>
