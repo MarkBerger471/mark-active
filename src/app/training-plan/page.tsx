@@ -8,7 +8,7 @@ import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTr
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, calcRollingTDEE, parseDurationMinutes } from '@/utils/calories';
-import { hapticLight, hapticSuccess, playTimerBeep, unlockAudio } from '@/utils/haptics';
+import { hapticLight } from '@/utils/haptics';
 
 // LEGACY — replaced by shared @/utils/calories.ts
 // MET values for cardio activities (HR 120-130 range)
@@ -172,8 +172,6 @@ export default function TrainingPlanPage() {
   const [expandedExercise, setExpandedExercise] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
   const [elapsedStr, setElapsedStr] = useState('');
-  const [restTimer, setRestTimer] = useState(0);
-  const restIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [editingDuration, setEditingDuration] = useState<string | null>(null);
@@ -195,15 +193,6 @@ export default function TrainingPlanPage() {
   sessionIdRef.current = sessionId;
   sessionDateRef.current = sessionDate;
   activeWorkoutRef.current = activeWorkout;
-
-  // Wake lock — keep screen on during active workout so timer/beep work
-  useEffect(() => {
-    let wakeLock: WakeLockSentinel | null = null;
-    if (activeWorkout && 'wakeLock' in navigator) {
-      navigator.wakeLock.request('screen').then(wl => { wakeLock = wl; }).catch(() => {});
-    }
-    return () => { wakeLock?.release(); };
-  }, [activeWorkout]);
 
   const flushSave = useCallback(async () => {
     if (debounceRef.current) {
@@ -274,78 +263,6 @@ export default function TrainingPlanPage() {
     return () => clearInterval(id);
   }, [sessionId, activeWorkout]);
 
-  // Rest timer — uses wall-clock time + notifications for background
-  const timerEndRef = useRef<number>(0);
-  const timerFiredRef = useRef<boolean>(false);
-  const notifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Request notification permission on first timer start
-  const requestNotifPermission = () => {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  };
-
-  const fireTimerAlert = () => {
-    // Play beep (works if app is in foreground)
-    playTimerBeep();
-    hapticSuccess();
-    // Show notification (works even if app was in background)
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification('Rest Timer Done', { body: 'Time for your next set!', tag: 'rest-timer', requireInteraction: false });
-      }
-    } catch {}
-  };
-
-  const startRestTimer = (seconds = 45) => {
-    if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-    if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
-    timerEndRef.current = Date.now() + seconds * 1000;
-    timerFiredRef.current = false;
-    setRestTimer(seconds);
-
-    // Unlock iOS audio + request notification permission during user gesture
-    unlockAudio();
-    requestNotifPermission();
-
-    // Schedule a setTimeout as backup — fires even if setInterval is throttled
-    notifTimeoutRef.current = setTimeout(() => {
-      if (!timerFiredRef.current) {
-        timerFiredRef.current = true;
-        fireTimerAlert();
-        setRestTimer(0);
-      }
-    }, seconds * 1000);
-
-    // setInterval for countdown display
-    restIntervalRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
-      setRestTimer(remaining);
-      if (remaining <= 0 && !timerFiredRef.current) {
-        timerFiredRef.current = true;
-        if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-        fireTimerAlert();
-      }
-    }, 500);
-  };
-
-  // When app returns from background, immediately update timer and fire if expired
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible' && timerEndRef.current > 0) {
-        const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
-        setRestTimer(remaining);
-        if (remaining <= 0 && !timerFiredRef.current) {
-          timerFiredRef.current = true;
-          if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-          fireTimerAlert();
-        }
-      }
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -470,7 +387,7 @@ export default function TrainingPlanPage() {
       updated[exIdx] = ex;
       return updated;
     });
-    if (!wasDone) startRestTimer(45);
+    // (timer removed)
     triggerAutoSave();
   };
 
@@ -1044,13 +961,6 @@ export default function TrainingPlanPage() {
             <div className="flex items-center gap-2">
               {elapsedStr && (
                 <span className="text-xs text-white/40 font-mono data-value">{elapsedStr}</span>
-              )}
-              {restTimer > 0 && (
-                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
-                  restTimer <= 10 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-blue-500/15 text-blue-400'
-                }`}>
-                  Rest {Math.floor(restTimer / 60)}:{(restTimer % 60).toString().padStart(2, '0')}
-                </span>
               )}
             </div>
           </div>
