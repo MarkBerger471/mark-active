@@ -52,8 +52,8 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
       <img src={beforeSrc} alt="Before" className="absolute top-0 left-0 w-full min-h-full" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
       {/* Divider line + drag handle */}
       <div className="absolute top-0 bottom-0" style={{ left: `${pos}%`, transform: 'translateX(-50%)' }}>
-        <div className="w-0.5 h-full bg-white/80" />
-        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-white/90 rounded-full flex items-center justify-center shadow-lg">
+        <div className="w-0.5 h-full bg-white/80" style={{ boxShadow: '0 0 8px rgba(255,255,255,0.4)' }} />
+        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-9 h-9 bg-white/90 rounded-full flex items-center justify-center" style={{ boxShadow: '0 0 15px rgba(255,255,255,0.5), 0 0 30px rgba(255,255,255,0.2)' }}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M5 3L2 8L5 13M11 3L14 8L11 13" stroke="#1a1a2e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>

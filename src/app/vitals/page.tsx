@@ -1156,6 +1156,7 @@ export default function VitalsPage() {
                         const isLow = marker.refMin != null && val.value < marker.refMin;
                         const isHigh = marker.refMax != null && val.value > marker.refMax;
                         const color = isLow ? 'text-yellow-400' : isHigh ? 'text-red-400' : 'text-white/70';
+                        const glowStyle = isLow ? { textShadow: '0 0 6px rgba(245,158,11,1), 0 0 15px rgba(245,158,11,0.5)' } : isHigh ? { textShadow: '0 0 6px rgba(239,68,68,1), 0 0 15px rgba(239,68,68,0.5)' } : {};
 
                         // Show diff only on the last column (newest), compared to previous
                         const isLastCol = colIdx === reversed.length - 1;
@@ -1168,7 +1169,7 @@ export default function VitalsPage() {
                         const showDiff = !val.textValue && diff != null && diff !== 0;
 
                         return (
-                          <td key={test.id} className={`py-1.5 px-2 text-right font-mono text-xs ${val.textValue ? 'text-white/50 font-sans' : color}`}>
+                          <td key={test.id} className={`py-1.5 px-2 text-right font-mono text-xs ${val.textValue ? 'text-white/50 font-sans' : color}`} style={val.textValue ? {} : glowStyle}>
                             {displayValue}
                             {showDiff && (
                               <span className={`ml-1 text-[9px] ${diff! > 0 ? 'text-green-400/60' : 'text-red-400/60'}`}>

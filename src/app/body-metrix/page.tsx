@@ -487,13 +487,13 @@ export default function BodyMetrix() {
                 {photos[angle.key] && (
                   <button type="button" className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold flex items-center justify-center shadow-lg border-2 border-white/80" style={{ zIndex: 50 }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setPhotos(prev => { const updated = { ...prev }; delete updated[angle.key]; return updated; }); }}>✕</button>
                 )}
-                <div className={`aspect-[3/4] rounded-xl overflow-hidden bg-white/5 border flex items-center justify-center cursor-pointer transition-colors ${dragOver === angle.key ? 'border-va-red ring-2 ring-va-red/30 bg-va-red/10' : 'border-white/10 hover:border-va-red/30'}`} onClick={() => { if (photos[angle.key]) { setLightbox(photos[angle.key]!); } else { setSinglePhotoTarget(angle.key); singlePhotoRef.current?.click(); } }}>
+                <div className={`aspect-[3/4] rounded-xl overflow-hidden bg-white/5 border-2 flex items-center justify-center cursor-pointer transition-all ${dragOver === angle.key ? 'border-va-red ring-2 ring-va-red/30 bg-va-red/10 shadow-[0_0_20px_rgba(185,10,10,0.3)]' : photos[angle.key] ? 'border-white/10' : 'border-dashed border-white/15 hover:border-va-red/40 hover:shadow-[0_0_15px_rgba(185,10,10,0.15)]'}`} onClick={() => { if (photos[angle.key]) { setLightbox(photos[angle.key]!); } else { setSinglePhotoTarget(angle.key); singlePhotoRef.current?.click(); } }}>
                   {photos[angle.key] ? (
                     <img src={photos[angle.key]} alt={angle.label} className="w-full h-full object-cover" />
                   ) : (
-                    <div className="text-white/20 text-center p-2 pointer-events-none">
-                      <div className="text-2xl mb-1">+</div>
-                      <div className="text-xs">Drop or tap</div>
+                    <div className="text-white/15 text-center p-2 pointer-events-none">
+                      <div className="text-3xl mb-1 drop-shadow-[0_0_8px_rgba(255,255,255,0.1)]">+</div>
+                      <div className="text-[10px]">Drop or tap</div>
                     </div>
                   )}
                 </div>

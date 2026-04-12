@@ -61,7 +61,7 @@ export default function Navigation() {
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
                   isActive
-                    ? 'bg-va-red/20 text-white border border-va-red/30'
+                    ? 'bg-va-red/20 text-white border border-va-red/30 shadow-[0_0_15px_rgba(185,10,10,0.25)]'
                     : 'text-white/60 hover:text-white hover:bg-white/5'
                 } ${collapsed ? 'justify-center px-2' : ''}`}
                 title={collapsed ? item.label : undefined}
@@ -85,8 +85,8 @@ export default function Navigation() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors duration-200 min-w-[50px] ${
-                    isActive ? 'text-va-red' : 'text-white/40'
+                  className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all duration-200 min-w-[50px] ${
+                    isActive ? 'text-va-red drop-shadow-[0_0_6px_rgba(185,10,10,0.5)]' : 'text-white/40'
                   }`}
                 >
                   <span className="text-lg">{item.icon}</span>

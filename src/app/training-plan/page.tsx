@@ -975,12 +975,13 @@ export default function TrainingPlanPage() {
 
               const completionPct = ex.sets.length > 0 ? doneSets / ex.sets.length : 0;
               const statusTint = ex.skipped ? '' : completionPct >= 1 ? 'from-green-500/8 to-transparent' : completionPct > 0 ? 'from-amber-500/6 to-transparent' : '';
+              const cardGlow = ex.skipped ? {} : completionPct >= 1 ? { boxShadow: '0 0 10px rgba(34,197,94,0.2), inset 0 0 1px rgba(34,197,94,0.3)' } : completionPct > 0 ? { boxShadow: '0 0 8px rgba(245,158,11,0.15), inset 0 0 1px rgba(245,158,11,0.2)' } : {};
 
               return (
                 <div
                   key={exIdx}
                   className={`glass-card overflow-hidden transition-all card-animate bg-gradient-to-r ${statusTint} ${ex.skipped ? 'opacity-40' : ''}`}
-                  style={{ animationDelay: `${exIdx * 50}ms` }}
+                  style={{ ...cardGlow, animationDelay: `${exIdx * 50}ms` }}
                 >
                   {/* Exercise header - tap to expand */}
                   <button
@@ -1174,7 +1175,7 @@ function SetRow({
         onClick={() => onToggleDone(exIdx, setIdx)}
         className={`w-8 h-8 rounded-full border-2 flex items-center justify-center shrink-0 transition-all duration-300 ${
           set.done
-            ? 'bg-green-500 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)] scale-95'
+            ? 'bg-green-500 border-green-500 text-white shadow-[0_0_12px_rgba(34,197,94,0.5),0_0_25px_rgba(34,197,94,0.2)] scale-95'
             : 'border-white/15 text-transparent hover:border-white/30 hover:scale-105'
         }`}
       >

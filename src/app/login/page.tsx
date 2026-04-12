@@ -32,8 +32,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center p-4 relative">
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-va-red/15 flex items-center justify-center">
-            <svg viewBox="0 0 32 32" className="w-8 h-8 text-va-red" fill="currentColor">
+          <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-va-red/15 flex items-center justify-center shadow-[0_0_30px_rgba(185,10,10,0.4),0_0_60px_rgba(185,10,10,0.15)] border border-va-red/20">
+            <svg viewBox="0 0 32 32" className="w-10 h-10 text-va-red drop-shadow-[0_0_8px_rgba(185,10,10,0.6)]" fill="currentColor">
               <rect x="4" y="12" width="4" height="8" rx="1" opacity="0.8" />
               <rect x="24" y="12" width="4" height="8" rx="1" opacity="0.8" />
               <rect x="2" y="13.5" width="3" height="5" rx="1" opacity="0.6" />
@@ -42,9 +42,9 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1 className="text-4xl font-bold text-white mb-2 tracking-tight">
-            <span className="text-va-red">MARK</span> ACTIVE
+            <span className="text-va-red" style={{ textShadow: '0 0 20px rgba(185,10,10,0.5)' }}>MARK</span> ACTIVE
           </h1>
-          <div className="h-0.5 w-16 mx-auto bg-gradient-to-r from-transparent via-va-red to-transparent mt-3 rounded-full" />
+          <div className="h-1 w-20 mx-auto bg-gradient-to-r from-transparent via-va-red to-transparent mt-3 rounded-full shadow-[0_0_10px_rgba(185,10,10,0.4)]" />
           <p className="text-va-gray-dark tracking-widest uppercase text-sm mt-3">Body Tracker</p>
         </div>
 
@@ -58,7 +58,7 @@ export default function LoginPage() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="glass-input w-full px-4 py-3"
+                className="glass-input w-full px-4 py-3 focus:shadow-[0_0_15px_rgba(185,10,10,0.2)] focus:border-va-red/30 transition-shadow"
                 placeholder="Your name"
                 autoComplete="name"
               />
@@ -70,7 +70,7 @@ export default function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="glass-input w-full px-4 py-3"
+                className="glass-input w-full px-4 py-3 focus:shadow-[0_0_15px_rgba(185,10,10,0.2)] focus:border-va-red/30 transition-shadow"
                 placeholder="Enter password"
                 autoComplete="current-password"
               />

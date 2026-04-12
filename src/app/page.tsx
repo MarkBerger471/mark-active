@@ -188,6 +188,8 @@ export default function Dashboard() {
           {latestMeasurement && (() => {
             const sparkData = (field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs') =>
               measurements.map(m => m[field]).filter((v): v is number => v != null).slice(-8);
+            const fieldIcon: Record<string, string> = { weight: 'weight', bodyFat: 'body-fat', muscleMass: 'muscle-mass', arms: 'arms', chest: 'chest', waist: 'waist', legs: 'legs' };
+            const iconOffset: Record<string, string> = { muscleMass: '-top-1', weight: 'top-0' };
             const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean | 'phase'; hero?: boolean }, idx: number) => {
               const curVal = latestMeasurement[stat.field];
               const prevVal = previousMeasurement?.[stat.field];
@@ -202,9 +204,16 @@ export default function Dashboard() {
               const spark = sparkData(stat.field);
               const sparkColor = isGood ? '#22c55e' : isBad ? '#ef4444' : '#22c55e';
 
+              const glowShadow = isGood ? '0 0 10px rgba(34,197,94,0.25), 0 0 25px rgba(34,197,94,0.1)' : isBad ? '0 0 10px rgba(239,68,68,0.25), 0 0 25px rgba(239,68,68,0.1)' : 'none';
+              const meshColors = isGood
+                ? { '--mesh-c1': 'rgba(34,197,94,0.08)', '--mesh-c2': 'rgba(34,197,94,0.05)', '--mesh-c3': 'rgba(34,197,94,0.06)' }
+                : isBad
+                ? { '--mesh-c1': 'rgba(239,68,68,0.08)', '--mesh-c2': 'rgba(239,68,68,0.05)', '--mesh-c3': 'rgba(239,68,68,0.06)' }
+                : { '--mesh-c1': 'rgba(255,255,255,0.04)', '--mesh-c2': 'rgba(255,255,255,0.03)', '--mesh-c3': 'rgba(255,255,255,0.03)' };
               return (
-                <div key={stat.label} className={`glass-card p-4 stat-accent card-animate bg-gradient-to-br ${tint}`} style={{ animationDelay: `${idx * 60}ms` }}>
-                  <div className="flex items-start justify-between">
+                <div key={stat.label} className={`glass-card mesh-gradient p-4 stat-accent card-animate bg-gradient-to-br ${tint} relative overflow-hidden`} style={{ animationDelay: `${idx * 60}ms`, boxShadow: glowShadow, ...meshColors } as React.CSSProperties}>
+                  <img src={`/icons/${fieldIcon[stat.field]}.png`} alt="" className={`absolute ${stat.hero ? 'right-20 w-40 h-40' : stat.field === 'muscleMass' ? 'right-12 w-40 h-40' : 'right-16 w-32 h-32'} ${iconOffset[stat.field] || 'top-1/2 -translate-y-1/2'} object-contain opacity-[0.30] pointer-events-none`} />
+                  <div className="flex items-start justify-between relative z-10">
                     <div>
                       <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
                       <p className={`font-bold mt-1 data-value gradient-text ${stat.hero ? 'text-4xl' : 'text-2xl'}`}>{stat.value}</p>
@@ -519,7 +528,7 @@ export default function Dashboard() {
                     {[80, 110, 160].map(val => (
                       <g key={val}><line x1={gPad.left} y1={toGY(val)} x2={gPad.left + gIW} y2={toGY(val)} stroke={val === 110 ? '#22c55e' : val === 80 ? '#ef4444' : '#f59e0b'} strokeOpacity="0.2" strokeDasharray="3 3" /><text x={gPad.left - 3} y={toGY(val) + 3} textAnchor="end" fill="white" fillOpacity="0.25" fontSize="7">{val}</text></g>
                     ))}
-                    {gLinePath && <path d={`${gLinePath} L ${gPts[gPts.length - 1].x} ${gPad.top + gIH} L ${gPts[0].x} ${gPad.top + gIH} Z`} fill="url(#glucoseGrad)" opacity="0.5" />}
+                    {gLinePath && <path d={`${gLinePath} L ${gPts[gPts.length - 1].x} ${gPad.top + gIH} L ${gPts[0].x} ${gPad.top + gIH} Z`} fill="url(#glucoseGrad)" opacity="0.5" className="chart-area-fade" />}
                     {gPts.length >= 2 && gPts.slice(0, -1).map((p, i) => {
                       const p2 = gPts[i + 1], p3 = gPts[Math.min(gPts.length - 1, i + 2)], p0 = gPts[Math.max(0, i - 1)];
                       const segColor = (p.val + p2.val) / 2 < 80 ? '#ef4444' : (p.val + p2.val) / 2 <= 110 ? '#22c55e' : (p.val + p2.val) / 2 <= 160 ? '#f59e0b' : '#ef4444';
@@ -551,8 +560,9 @@ export default function Dashboard() {
               };
               const dayLabel = new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
               return (
-                <div className="glass-card p-5 mb-6 fade-up overflow-hidden touch-pan-y"
+                <div className="glass-card p-5 mb-6 fade-up overflow-hidden touch-pan-y relative"
                   onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+                  <img src="/icons/sleep.png" alt="" className="absolute right-2 top-1/2 -translate-y-1/2 w-24 h-24 object-contain opacity-[0.25] pointer-events-none" />
                   <div className="flex items-center justify-between mb-1">
                     <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                       <span className="text-lg">&#9790;</span> Sleep
@@ -700,6 +710,8 @@ export default function Dashboard() {
               return d;
             };
             const linePath = smoothLine(points);
+            // Approximate path length for draw-in animation
+            const lineLen = points.reduce((acc, p, i) => i === 0 ? 0 : acc + Math.hypot(p.x - points[i-1].x, p.y - points[i-1].y), 0) * 1.3;
             const areaPath = `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`;
 
             // Trend line across full data range
@@ -848,6 +860,10 @@ export default function Dashboard() {
                         <feGaussianBlur stdDeviation="2" result="blur" />
                         <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
                       </filter>
+                      <filter id="chartGlow" x="-100%" y="-100%" width="300%" height="300%">
+                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feMerge><feMergeNode in="blur" /><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
                       <linearGradient id="dashLineGrad" x1="0" y1="0" x2="1" y2="0">
                         <stop offset="0%" stopColor={accentColor} stopOpacity="0.5" />
                         <stop offset="100%" stopColor={accentColor} stopOpacity="1" />
@@ -867,23 +883,26 @@ export default function Dashboard() {
                     </defs>
 
                     {/* Area fill */}
-                    <path d={areaPath} fill="url(#dashWeightGrad)" />
+                    <path d={areaPath} fill="url(#dashWeightGrad)" className="chart-area-fade" />
 
                     {/* Projection line (future, subtle) */}
                     {projPoints.length > 0 && (
                       <path d={projPath} fill="none" stroke={accentColor} strokeWidth="1.5" strokeDasharray="4 4" opacity="0.3" />
                     )}
 
-                    {/* Main line (solid) */}
-                    <path d={linePath} fill="none" stroke="url(#dashLineGrad)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" filter="url(#glow)" />
+                    {/* Main line (solid, draw-in animation) */}
+                    <path d={linePath} fill="none" stroke="url(#dashLineGrad)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" filter="url(#glow)"
+                      strokeDasharray={lineLen} strokeDashoffset={lineLen} className="chart-line-draw" style={{ '--line-len': lineLen } as React.CSSProperties} />
 
                     {/* Data points */}
                     {points.map((p, i) => {
                       const isLast = i === points.length - 1;
+                      const dotDelay = 0.2 + (i / points.length) * 1.2;
                       return (
-                        <g key={i}>
-                          {isLast && <circle cx={p.x} cy={p.y} r="7" fill={accentColor} opacity="0.12" />}
-                          <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2} fill={accentColor} stroke="#fff" strokeWidth={isLast ? 1.5 : 0.8} />
+                        <g key={i} className="chart-dot-pop" style={{ animationDelay: `${dotDelay}s` }}>
+                          {isLast && <circle cx={p.x} cy={p.y} r="10" fill={accentColor} opacity="0.15" />}
+                          {isLast && <circle cx={p.x} cy={p.y} r="6" fill={accentColor} opacity="0.25" />}
+                          <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2} fill={accentColor} stroke="#fff" strokeWidth={isLast ? 1.5 : 0.8} filter={isLast ? 'url(#chartGlow)' : undefined} />
                           {isLast && (
                             <text x={p.x} y={p.y - 10} textAnchor="end" fill="white" fontSize="11" fontWeight="bold">{p.val}kg</text>
                           )}
@@ -945,6 +964,7 @@ export default function Dashboard() {
                   const toCY = (v: number) => cPad.top + cIH - ((v - mn) / rng) * cIH;
                   const pts = data.map(d => ({ x: toCX(d.week), y: toCY(d.val), val: d.val }));
                   const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+                  const compLineLen = pts.reduce((acc, p, i) => i === 0 ? 0 : acc + Math.hypot(p.x - pts[i-1].x, p.y - pts[i-1].y), 0) * 1.1;
                   const area = `${line} L ${pts[pts.length - 1].x} ${cPad.top + cIH} L ${pts[0].x} ${cPad.top + cIH} Z`;
                   const gradId = `compGrad-${label.replace(/\s/g, '')}`;
                   const glowId = `compGlow-${label.replace(/\s/g, '')}`;
@@ -987,15 +1007,17 @@ export default function Dashboard() {
                         ))}
 
                         {/* Area + line */}
-                        <path d={area} fill={`url(#${gradId})`} />
-                        <path d={line} fill="none" stroke={`url(#${gradId}Line)`} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" filter={`url(#${glowId})`} />
+                        <path d={area} fill={`url(#${gradId})`} className="chart-area-fade" />
+                        <path d={line} fill="none" stroke={`url(#${gradId}Line)`} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" filter={`url(#${glowId})`}
+                          strokeDasharray={compLineLen} strokeDashoffset={compLineLen} className="chart-line-draw" style={{ '--line-len': compLineLen } as React.CSSProperties} />
 
                         {/* Data points with labels */}
                         {pts.map((p, i) => {
                           const isLast = i === pts.length - 1;
                           const isFirst = i === 0;
+                          const compDotDelay = 0.2 + (i / pts.length) * 1.2;
                           return (
-                            <g key={i}>
+                            <g key={i} className="chart-dot-pop" style={{ animationDelay: `${compDotDelay}s` }}>
                               {isLast && <circle cx={p.x} cy={p.y} r="8" fill={color} opacity="0.12" />}
                               <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={color} stroke="#fff" strokeWidth={isLast ? 2 : 1.5} />
                               {isLast && <text x={p.x} y={p.y - 14} textAnchor="end" fill="white" fontSize="16" fontWeight="bold">{p.val}{unit}</text>}
