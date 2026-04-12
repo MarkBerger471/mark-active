@@ -212,7 +212,7 @@ export default function Dashboard() {
                 : { '--mesh-c1': 'rgba(255,255,255,0.04)', '--mesh-c2': 'rgba(255,255,255,0.03)', '--mesh-c3': 'rgba(255,255,255,0.03)' };
               return (
                 <div key={stat.label} className={`glass-card mesh-gradient p-4 stat-accent card-animate bg-gradient-to-br ${tint} relative overflow-hidden`} style={{ animationDelay: `${idx * 60}ms`, boxShadow: glowShadow, ...meshColors } as React.CSSProperties}>
-                  <img src={`/icons/${fieldIcon[stat.field]}.png`} alt="" className={`absolute ${stat.hero ? 'right-20 w-40 h-40' : stat.field === 'muscleMass' ? 'right-12 w-40 h-40' : 'right-16 w-32 h-32'} ${iconOffset[stat.field] || 'top-1/2 -translate-y-1/2'} object-contain opacity-[0.30] pointer-events-none`} />
+                  <img src={`/icons/${fieldIcon[stat.field]}.png`} alt="" className={`absolute ${stat.hero ? 'right-12 w-20 h-20 sm:right-20 sm:w-40 sm:h-40' : stat.field === 'muscleMass' ? 'right-6 w-20 h-20 sm:right-12 sm:w-40 sm:h-40' : 'right-8 w-16 h-16 sm:right-16 sm:w-32 sm:h-32'} ${iconOffset[stat.field] || 'top-1/2 -translate-y-1/2'} object-contain opacity-[0.30] pointer-events-none`} />
                   <div className="flex items-start justify-between relative z-10">
                     <div>
                       <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
@@ -562,7 +562,7 @@ export default function Dashboard() {
               return (
                 <div className="glass-card p-5 mb-6 fade-up overflow-hidden touch-pan-y relative"
                   onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-                  <img src="/icons/sleep.png" alt="" className="absolute right-2 top-1/2 -translate-y-1/2 w-24 h-24 object-contain opacity-[0.25] pointer-events-none" />
+                  <img src="/icons/sleep.png" alt="" className="absolute right-2 top-1/2 -translate-y-1/2 w-16 h-16 sm:w-24 sm:h-24 object-contain opacity-[0.25] pointer-events-none" />
                   <div className="flex items-center justify-between mb-1">
                     <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                       <span className="text-lg">&#9790;</span> Sleep
