@@ -1,11 +1,14 @@
 'use client';
 
+let sparkId = 0;
+
 export default function Sparkline({ data, color = '#22c55e', width = 60, height = 20 }: {
   data: number[];
   color?: string;
   width?: number;
   height?: number;
 }) {
+  const id = `spark-${++sparkId}`;
   if (data.length < 2) return null;
   const min = Math.min(...data);
   const max = Math.max(...data);
@@ -25,12 +28,12 @@ export default function Sparkline({ data, color = '#22c55e', width = 60, height 
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="opacity-60">
       <defs>
-        <linearGradient id={`spark-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.3" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={area} fill={`url(#spark-${color.replace('#', '')})`} />
+      <path d={area} fill={`url(#${id})`} />
       <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r="2" fill={color} />
     </svg>

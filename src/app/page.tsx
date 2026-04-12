@@ -200,10 +200,8 @@ export default function Dashboard() {
               const isBad = change !== undefined && change !== 0 && !isGood;
               const tint = isGood ? 'from-green-500/8 to-transparent' : isBad ? 'from-red-500/8 to-transparent' : '';
               const spark = sparkData(stat.field);
-              // Sparkline color based on actual trend direction: green if trending good, red if trending bad
-              const trendUp = spark.length >= 2 && spark[spark.length - 1] > spark[0];
-              const trendGood = effectiveLower ? !trendUp : trendUp;
-              const sparkColor = trendGood ? '#22c55e' : '#ef4444';
+              const sparkColor = isGood ? '#22c55e' : isBad ? '#ef4444' : '#22c55e';
+
               return (
                 <div key={stat.label} className={`glass-card p-4 stat-accent card-animate bg-gradient-to-br ${tint}`} style={{ animationDelay: `${idx * 60}ms` }}>
                   <div className="flex items-start justify-between">
@@ -214,7 +212,7 @@ export default function Dashboard() {
                         <p className="text-sm mt-1">{formatChange(change, effectiveLower)}</p>
                       )}
                     </div>
-                    {spark.length >= 2 && <Sparkline data={spark} color={sparkColor} width={56} height={28} />}
+                    {spark.length >= 2 && <Sparkline data={spark} color={sparkColor} width={56} height={28} key={`${stat.field}-${sparkColor}`} />}
                   </div>
                 </div>
               );
