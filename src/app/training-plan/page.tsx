@@ -151,11 +151,11 @@ function getWeekLabel(weekKey: string): string {
 }
 
 const workoutImages: Record<string, string> = {
-  'Shoulders + Abs': '/muscles/shoulders.png',
-  Legs: '/muscles/legs.png',
-  'Chest + Triceps': '/muscles/chest.png',
-  'Back + Biceps': '/muscles/back.png',
-  Cardio: '/muscles/cardio.png',
+  'Shoulders + Abs': '/muscles/shoulders-new-opt.png',
+  Legs: '/muscles/legs-new-opt.png',
+  'Chest + Triceps': '/muscles/chest-new-opt.png',
+  'Back + Biceps': '/muscles/back-new-opt.png',
+  Cardio: '/muscles/cardio-new-opt.png',
 };
 
 type View = 'select' | 'workout' | 'history';
@@ -518,7 +518,9 @@ export default function TrainingPlanPage() {
                   >
                     <div className={`absolute inset-0 bg-gradient-to-br ${colors[i % 5]} to-transparent rounded-2xl opacity-50`} />
                     {workoutImages[w.name] ? (
-                      <img src={workoutImages[w.name]} alt={w.name} className="absolute bottom-1 right-1 h-20 opacity-40 pointer-events-none" />
+                      <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl" style={{ maskImage: 'linear-gradient(to right, transparent 20%, rgba(0,0,0,0.3) 40%, rgba(0,0,0,0.7) 60%, black 80%)', WebkitMaskImage: 'linear-gradient(to right, transparent 20%, rgba(0,0,0,0.3) 40%, rgba(0,0,0,0.7) 60%, black 80%)' }}>
+                        <img src={workoutImages[w.name]} alt={w.name} className="absolute inset-0 w-[80%] h-full ml-auto object-cover mix-blend-screen" />
+                      </div>
                     ) : (
                       <DumbbellIcon className="absolute bottom-3 right-3 w-14 h-14 text-white opacity-[0.15]" />
                     )}
