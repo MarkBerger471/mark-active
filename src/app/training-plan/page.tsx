@@ -265,27 +265,60 @@ export default function TrainingPlanPage() {
     return () => clearInterval(id);
   }, [sessionId, activeWorkout]);
 
-  // Rest timer — uses wall-clock time so it survives screen lock / background
+  // Rest timer — uses wall-clock time + notifications for background
   const timerEndRef = useRef<number>(0);
   const timerFiredRef = useRef<boolean>(false);
+  const notifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Request notification permission on first timer start
+  const requestNotifPermission = () => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  };
+
+  const fireTimerAlert = () => {
+    // Play beep (works if app is in foreground)
+    playTimerBeep();
+    hapticSuccess();
+    // Show notification (works even if app was in background)
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification('Rest Timer Done', { body: 'Time for your next set!', tag: 'rest-timer', requireInteraction: false });
+      }
+    } catch {}
+  };
 
   const startRestTimer = (seconds = 45) => {
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
     timerEndRef.current = Date.now() + seconds * 1000;
     timerFiredRef.current = false;
     setRestTimer(seconds);
-    // Unlock iOS audio during this user gesture so the beep plays later
+
+    // Unlock iOS audio + request notification permission during user gesture
     unlockAudio();
+    requestNotifPermission();
+
+    // Schedule a setTimeout as backup — fires even if setInterval is throttled
+    notifTimeoutRef.current = setTimeout(() => {
+      if (!timerFiredRef.current) {
+        timerFiredRef.current = true;
+        fireTimerAlert();
+        setRestTimer(0);
+      }
+    }, seconds * 1000);
+
+    // setInterval for countdown display
     restIntervalRef.current = setInterval(() => {
       const remaining = Math.max(0, Math.ceil((timerEndRef.current - Date.now()) / 1000));
       setRestTimer(remaining);
       if (remaining <= 0 && !timerFiredRef.current) {
         timerFiredRef.current = true;
         if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-        playTimerBeep();
-        hapticSuccess();
+        fireTimerAlert();
       }
-    }, 500); // check every 500ms for accuracy
+    }, 500);
   };
 
   // When app returns from background, immediately update timer and fire if expired
@@ -297,8 +330,7 @@ export default function TrainingPlanPage() {
         if (remaining <= 0 && !timerFiredRef.current) {
           timerFiredRef.current = true;
           if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-          playTimerBeep();
-          hapticSuccess();
+          fireTimerAlert();
         }
       }
     };
