@@ -437,35 +437,22 @@ body {
   filter: drop-shadow(0 0 6px currentColor);
 }
 
-/* Page transitions — horizontal slide like Oura */
+/* Page transitions — subtle fade */
 .page-transition {
-  will-change: transform, opacity;
+  will-change: opacity;
 }
-.slide-out-left {
-  animation: slideOutLeft 0.12s ease-in forwards;
+.page-fade-out {
+  animation: pageFadeOut 0.1s ease-out forwards;
 }
-.slide-out-right {
-  animation: slideOutRight 0.12s ease-in forwards;
+.page-fade-in {
+  animation: pageFadeIn 0.2s ease-in forwards;
 }
-.slide-in-left {
-  animation: slideInLeft 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+@keyframes pageFadeOut {
+  to { opacity: 0; }
 }
-.slide-in-right {
-  animation: slideInRight 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-}
-@keyframes slideOutLeft {
-  to { opacity: 0; transform: translateX(-30%); }
-}
-@keyframes slideOutRight {
-  to { opacity: 0; transform: translateX(30%); }
-}
-@keyframes slideInLeft {
-  from { opacity: 0; transform: translateX(-30%); }
-  to { opacity: 1; transform: translateX(0); }
-}
-@keyframes slideInRight {
-  from { opacity: 0; transform: translateX(30%); }
-  to { opacity: 1; transform: translateX(0); }
+@keyframes pageFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* Elevation levels */

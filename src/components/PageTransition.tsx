@@ -3,8 +3,6 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
-const navOrder = ['/', '/training-plan', '/body-metrix', '/nutrition-plan', '/vitals'];
-
 export default function PageTransition({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const prevPath = useRef(pathname);
@@ -12,18 +10,11 @@ export default function PageTransition({ children }: { children: React.ReactNode
 
   useEffect(() => {
     if (prevPath.current === pathname) return;
-    const prevIdx = navOrder.indexOf(prevPath.current);
-    const currIdx = navOrder.indexOf(pathname);
-    const goingRight = currIdx > prevIdx;
-
-    // Slide out, then slide in from the opposite side
-    setAnimClass(goingRight ? 'slide-out-left' : 'slide-out-right');
-
+    setAnimClass('page-fade-out');
     const timer = setTimeout(() => {
-      setAnimClass(goingRight ? 'slide-in-right' : 'slide-in-left');
-      setTimeout(() => setAnimClass(''), 250);
-    }, 120);
-
+      setAnimClass('page-fade-in');
+      setTimeout(() => setAnimClass(''), 200);
+    }, 100);
     prevPath.current = pathname;
     return () => clearTimeout(timer);
   }, [pathname]);
