@@ -188,17 +188,19 @@ export default function Dashboard() {
           {latestMeasurement && (() => {
             const sparkData = (field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs') =>
               measurements.map(m => m[field]).filter((v): v is number => v != null).slice(-8);
-            const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean; hero?: boolean }, idx: number) => {
+            const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean | 'phase'; hero?: boolean }, idx: number) => {
               const curVal = latestMeasurement[stat.field];
               const prevVal = previousMeasurement?.[stat.field];
               const change = (curVal != null && prevVal != null)
                 ? Math.round((curVal - prevVal) * 10) / 10
                 : undefined;
-              const isGood = change !== undefined && change !== 0 && (stat.lowerIsBetter ? change < 0 : change > 0);
+              // Phase-aware: weight goes up in bulking (good), down in cutting (good)
+              const effectiveLower = stat.lowerIsBetter === 'phase' ? phase === 'cutting' : !!stat.lowerIsBetter;
+              const isGood = change !== undefined && change !== 0 && (effectiveLower ? change < 0 : change > 0);
               const isBad = change !== undefined && change !== 0 && !isGood;
               const tint = isGood ? 'from-green-500/8 to-transparent' : isBad ? 'from-red-500/8 to-transparent' : '';
               const spark = sparkData(stat.field);
-              const sparkColor = stat.lowerIsBetter ? '#ef4444' : '#22c55e';
+              const sparkColor = stat.lowerIsBetter === true ? '#ef4444' : '#22c55e';
               return (
                 <div key={stat.label} className={`glass-card p-4 stat-accent card-animate bg-gradient-to-br ${tint}`} style={{ animationDelay: `${idx * 60}ms` }}>
                   <div className="flex items-start justify-between">
@@ -206,7 +208,7 @@ export default function Dashboard() {
                       <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
                       <p className={`font-bold mt-1 data-value gradient-text ${stat.hero ? 'text-4xl' : 'text-2xl'}`}>{stat.value}</p>
                       {change !== undefined && change !== 0 && (
-                        <p className="text-sm mt-1">{formatChange(change, stat.lowerIsBetter)}</p>
+                        <p className="text-sm mt-1">{formatChange(change, effectiveLower)}</p>
                       )}
                     </div>
                     {spark.length >= 2 && <Sparkline data={spark} color={sparkColor} width={56} height={28} />}
@@ -217,7 +219,7 @@ export default function Dashboard() {
             let idx = 0;
             return (
               <div className="flex flex-col gap-4 mb-8">
-                {statCard({ label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight', hero: true }, idx++)}
+                {statCard({ label: 'Weight', value: `${latestMeasurement.weight}kg`, field: 'weight', hero: true, lowerIsBetter: 'phase' }, idx++)}
                 <div className="grid grid-cols-2 gap-4">
                   {statCard({ label: 'Muscle Mass', value: latestMeasurement.muscleMass != null ? `${latestMeasurement.muscleMass}kg` : '—', field: 'muscleMass' }, idx++)}
                   {statCard({ label: 'Body Fat', value: latestMeasurement.bodyFat != null ? `${latestMeasurement.bodyFat}%` : '—', field: 'bodyFat', lowerIsBetter: true }, idx++)}
