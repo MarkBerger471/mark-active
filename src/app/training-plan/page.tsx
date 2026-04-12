@@ -431,7 +431,6 @@ export default function TrainingPlanPage() {
 
   const finishWorkout = async () => {
     await flushSave();
-    setRestTimer(0);
     setView('select');
     setActiveWorkout(null);
     setExercises([]);
