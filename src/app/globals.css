@@ -449,7 +449,7 @@ body {
   border-radius: inherit;
   z-index: 0;
 }
-.mesh-gradient > *:not(img) { position: relative; z-index: 1; }
+.mesh-gradient > * { position: relative; z-index: 1; }
 
 /* SVG chart line draw-in */
 @keyframes line-draw {

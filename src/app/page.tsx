@@ -189,7 +189,7 @@ export default function Dashboard() {
             const sparkData = (field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs') =>
               measurements.map(m => m[field]).filter((v): v is number => v != null).slice(-8);
             const fieldIcon: Record<string, string> = { weight: 'weight', bodyFat: 'body-fat', muscleMass: 'muscle-mass', arms: 'arms', chest: 'chest', waist: 'waist', legs: 'legs' };
-            const iconOffset: Record<string, string> = { muscleMass: '-top-1', weight: 'top-0' };
+            const iconOffset: Record<string, string> = { muscleMass: 'sm:-top-1 top-[15%]', weight: 'sm:top-0 top-[15%]' };
             const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean | 'phase'; hero?: boolean }, idx: number) => {
               const curVal = latestMeasurement[stat.field];
               const prevVal = previousMeasurement?.[stat.field];
@@ -205,14 +205,9 @@ export default function Dashboard() {
               const sparkColor = isGood ? '#22c55e' : isBad ? '#ef4444' : '#22c55e';
 
               const glowShadow = isGood ? '0 0 10px rgba(34,197,94,0.25), 0 0 25px rgba(34,197,94,0.1)' : isBad ? '0 0 10px rgba(239,68,68,0.25), 0 0 25px rgba(239,68,68,0.1)' : 'none';
-              const meshColors = isGood
-                ? { '--mesh-c1': 'rgba(34,197,94,0.08)', '--mesh-c2': 'rgba(34,197,94,0.05)', '--mesh-c3': 'rgba(34,197,94,0.06)' }
-                : isBad
-                ? { '--mesh-c1': 'rgba(239,68,68,0.08)', '--mesh-c2': 'rgba(239,68,68,0.05)', '--mesh-c3': 'rgba(239,68,68,0.06)' }
-                : { '--mesh-c1': 'rgba(255,255,255,0.04)', '--mesh-c2': 'rgba(255,255,255,0.03)', '--mesh-c3': 'rgba(255,255,255,0.03)' };
               return (
-                <div key={stat.label} className={`glass-card mesh-gradient p-4 stat-accent card-animate bg-gradient-to-br ${tint} relative overflow-hidden`} style={{ animationDelay: `${idx * 60}ms`, boxShadow: glowShadow, ...meshColors } as React.CSSProperties}>
-                  <img src={`/icons/${fieldIcon[stat.field]}.png`} alt="" className={`absolute ${stat.hero ? 'right-12 w-20 h-20 sm:right-20 sm:w-40 sm:h-40' : stat.field === 'muscleMass' ? 'right-6 w-20 h-20 sm:right-12 sm:w-40 sm:h-40' : 'right-8 w-16 h-16 sm:right-16 sm:w-32 sm:h-32'} ${iconOffset[stat.field] || 'top-1/2 -translate-y-1/2'} object-contain opacity-[0.30] pointer-events-none`} />
+                <div key={stat.label} className={`glass-card p-4 stat-accent card-animate bg-gradient-to-br ${tint} relative overflow-hidden`} style={{ animationDelay: `${idx * 60}ms`, boxShadow: glowShadow }}>
+                  <img src={`/icons/${fieldIcon[stat.field]}.png`} alt="" className={`!absolute ${stat.hero ? 'right-10 w-28 h-28 sm:right-20 sm:w-40 sm:h-40' : stat.field === 'muscleMass' ? 'right-4 w-28 h-28 sm:right-12 sm:w-40 sm:h-40' : 'right-6 w-24 h-24 sm:right-16 sm:w-32 sm:h-32'} ${iconOffset[stat.field] || 'top-1/2 -translate-y-1/2'} object-contain opacity-[0.30] pointer-events-none`} />
                   <div className="flex items-start justify-between relative z-10">
                     <div>
                       <p className="text-xs text-white/40 uppercase tracking-wider">{stat.label}</p>
