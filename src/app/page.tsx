@@ -4,11 +4,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import Navigation from '@/components/Navigation';
-import Link from 'next/link';
+
 import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
 import { calcSessionCalories, calcRollingTDEE } from '@/utils/calories';
-import { DumbbellIcon, ScaleIcon, ForkKnifeIcon } from '@/components/BackgroundEffects';
+import { DumbbellIcon } from '@/components/BackgroundEffects';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import Sparkline from '@/components/Sparkline';
 import BeforeAfterSlider from '@/components/BeforeAfterSlider';
@@ -41,41 +41,6 @@ function formatDuration(seconds?: number): string {
   return `${h}h ${m}m`;
 }
 
-function SleepMultiRing({ score, deepPct, remPct }: { score: number; deepPct: number; remPct: number }) {
-  const rings = [
-    { r: 40, val: score / 100, color: score >= 85 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#ef4444', w: 6 },
-    { r: 32, val: Math.min(remPct / 25, 1), color: '#06b6d4', w: 5 },
-    { r: 25, val: Math.min(deepPct / 20, 1), color: '#818cf8', w: 5 },
-  ];
-  return (
-    <div className="relative w-28 h-28">
-      <svg className="w-28 h-28 -rotate-90" viewBox="0 0 100 100">
-        <defs>
-          <filter id="ringGlow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="2" result="blur" />
-            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-        </defs>
-        {rings.map((ring, i) => {
-          const c = 2 * Math.PI * ring.r;
-          const off = c - ring.val * c;
-          return (
-            <g key={i}>
-              <circle cx="50" cy="50" r={ring.r} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth={ring.w} />
-              <circle cx="50" cy="50" r={ring.r} fill="none" stroke={ring.color} strokeWidth={ring.w} strokeLinecap="round"
-                strokeDasharray={c} strokeDashoffset={off} filter="url(#ringGlow)"
-                className="gauge-sweep" style={{ '--gauge-arc': c, animationDelay: `${i * 150}ms` } as React.CSSProperties} />
-            </g>
-          );
-        })}
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold gradient-text data-value">{score}</span>
-        <span className="text-[8px] text-white/30 uppercase tracking-wider">Score</span>
-      </div>
-    </div>
-  );
-}
 
 export default function Dashboard() {
   const { isAuthenticated, isLoading, logout } = useAuth();
@@ -90,7 +55,7 @@ export default function Dashboard() {
   const [targetInput, setTargetInput] = useState('');
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
   const [sleepIdx, setSleepIdx] = useState(0);
-  const sleepTouchRef = useRef<{ x: number; t: number } | null>(null);
+
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number }>>({});
@@ -345,6 +310,24 @@ export default function Dashboard() {
               const pTargetBarH = (proteinTarget / pMax) * barH;
               const pIntakeBarH = (trainingDayProtein / pMax) * barH;
 
+              // Fuel gauge position: map surplus% from range to 0-100%
+              // Range: -20% (deficit) to +30% (surplus), so 0% = maintenance at 40%
+              const fuelMin = -20, fuelMax = 30;
+              const fuelPos = Math.max(0, Math.min(100, ((surplusPct - fuelMin) / (fuelMax - fuelMin)) * 100));
+              // Target zone position
+              const fuelTargetPos = ((targetMid - fuelMin) / (fuelMax - fuelMin)) * 100;
+              const fuelTargetWidth = 8; // ±4% zone
+
+              // Calorie bar widths
+              const calBarMax = Math.max(intake, targetIntake) * 1.05;
+              const calIntakePct = (intake / calBarMax) * 100;
+              const calTargetMarkerPct = (targetIntake / calBarMax) * 100;
+
+              // Protein bar widths
+              const protBarMax = Math.max(trainingDayProtein, proteinTarget) * 1.1;
+              const protIntakePct = (trainingDayProtein / protBarMax) * 100;
+              const protTargetMarkerPct = (proteinTarget / protBarMax) * 100;
+
               return (
                 <div className="glass-card p-5 mb-6 fade-up">
                   <div className="flex items-center justify-between mb-4">
@@ -352,132 +335,91 @@ export default function Dashboard() {
                     <span className={`text-[10px] font-bold uppercase ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>{phase}</span>
                   </div>
 
-                  {/* Gauges row */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    {/* Calorie gauge */}
-                    <div className="flex flex-col items-center">
-                      <div className="relative w-28 h-28 sm:w-32 sm:h-32">
-                        <svg className="w-full h-full" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
-                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="7"
-                            strokeDasharray={`${gaugeArc} ${gaugeCirc}`} strokeLinecap="round" />
-                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke="#22c55e" strokeOpacity="0.25" strokeWidth="7"
-                            strokeDasharray={`${greenArcLen} ${gaugeCirc - greenArcLen}`}
-                            strokeDashoffset={-((greenStartAngle / 360) * gaugeCirc)} />
-                          <circle cx="50" cy="50" r={gaugeRadius} fill="none" stroke={zoneColor} strokeWidth="7"
-                            strokeDasharray={`${gaugeArc} ${gaugeCirc}`} strokeDashoffset={gaugeOffset}
-                            strokeLinecap="round" className="gauge-sweep gauge-glow" style={{ '--gauge-arc': gaugeArc } as React.CSSProperties} />
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <span className="text-xl font-bold" style={{ color: zoneColor }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
-                          <span className="text-[8px] text-white/30">target {targetMid > 0 ? '+' : ''}{targetMid}%</span>
-                          <span className="text-[9px] font-semibold uppercase" style={{ color: zoneColor }}>{zoneLabel}</span>
-                        </div>
-                      </div>
-                      <span className="text-[10px] text-white/40 mt-1">Calories</span>
+                  {/* Fuel gauge */}
+                  <div className="mb-5">
+                    <div className="flex justify-between text-[10px] text-white/30 mb-1.5">
+                      <span>Deficit</span><span>Maintenance</span><span>Surplus</span>
                     </div>
-                    {/* Protein gauge */}
-                    <div className="flex flex-col items-center">
-                      <div className="relative w-28 h-28 sm:w-32 sm:h-32">
-                        <svg className="w-full h-full" viewBox="0 0 100 100" style={{ transform: 'rotate(135deg)' }}>
-                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="7"
-                            strokeDasharray={`${pGaugeArc} ${pGaugeCirc}`} strokeLinecap="round" />
-                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke="#22c55e" strokeOpacity="0.25" strokeWidth="7"
-                            strokeDasharray={`${pGreenArcLen} ${pGaugeCirc - pGreenArcLen}`}
-                            strokeDashoffset={-((pGreenStartAngle / 360) * pGaugeCirc)} />
-                          <circle cx="50" cy="50" r={pGaugeRadius} fill="none" stroke={proteinZoneColor} strokeWidth="7"
-                            strokeDasharray={`${pGaugeArc} ${pGaugeCirc}`} strokeDashoffset={pGaugeOffset}
-                            strokeLinecap="round" className="gauge-sweep gauge-glow" style={{ '--gauge-arc': pGaugeArc } as React.CSSProperties} />
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <span className="text-xl font-bold" style={{ color: proteinZoneColor }}>{trainingDayProtein}g</span>
-                          <span className="text-[8px] text-white/30">target {proteinTarget}g</span>
-                          <span className="text-[9px] font-semibold uppercase" style={{ color: proteinZoneColor }}>{proteinZoneLabel}</span>
-                        </div>
+                    <div className="relative h-8 bg-white/[0.04] rounded-2xl overflow-hidden">
+                      {/* Background gradient */}
+                      <div className="absolute inset-0 rounded-2xl opacity-15" style={{ background: 'linear-gradient(90deg, #ef4444 0%, #f59e0b 35%, #22c55e 50%, #22c55e 65%, #3b82f6 100%)' }} />
+                      {/* Fill to current */}
+                      <div className="absolute left-0 top-0 bottom-0 rounded-2xl opacity-25" style={{ width: `${fuelPos}%`, background: `linear-gradient(90deg, transparent 60%, ${zoneColor})` }} />
+                      {/* Target zone */}
+                      <div className="absolute top-0 bottom-0 rounded" style={{ left: `${fuelTargetPos - fuelTargetWidth / 2}%`, width: `${fuelTargetWidth}%`, background: 'rgba(34,197,94,0.2)', border: '1px dashed rgba(34,197,94,0.3)' }} />
+                      {/* Needle */}
+                      <div className="absolute -top-1 -bottom-1 w-[3px] rounded-sm" style={{ left: `${fuelPos}%`, transform: 'translateX(-50%)', background: zoneColor, boxShadow: `0 0 10px ${zoneColor}80` }} />
+                      {/* Center label */}
+                      <div className="absolute inset-0 flex items-center justify-center gap-3">
+                        <span className="text-lg font-extrabold text-white" style={{ textShadow: '0 0 10px rgba(0,0,0,0.5)' }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
+                        <span className="text-[10px] text-white/50">target {targetMid > 0 ? '+' : ''}{targetMid}%</span>
                       </div>
-                      <span className="text-[10px] text-white/40 mt-1">Protein</span>
                     </div>
                   </div>
 
-                  {/* Bar charts row */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Calorie bars */}
-                    <div>
-                      <svg viewBox="0 0 140 120" className="w-full">
-                        <defs>
-                          <linearGradient id="burnGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.9" />
-                            <stop offset="100%" stopColor="#f97316" stopOpacity="0.8" />
-                          </linearGradient>
-                          <linearGradient id="intakeGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={zoneColor} stopOpacity="0.9" />
-                            <stop offset="100%" stopColor={zoneColor} stopOpacity="0.5" />
-                          </linearGradient>
-                        </defs>
-                        {/* Bars first (behind labels) */}
-                        <rect x="22" y={18 + barH - burnH} width="38" height={burnH} rx="6" fill="url(#burnGrad)" />
-                        <rect x="68" y={18 + barH - intakeH} width="38" height={intakeH} rx="6" fill="url(#intakeGrad)" />
-                        {/* Target line */}
-                        {(() => { const tColor = phase === 'bulking' ? '#22c55e' : '#3b82f6'; const tY = 18 + barH - targetH; return (<>
-                        <line x1="15" y1={tY} x2="130" y2={tY} stroke={tColor} strokeWidth="1" strokeDasharray="3 2" opacity="0.4" />
-                        <text x="130" y={tY - 3} textAnchor="end" fill={tColor} fontSize="6" fontWeight="bold">{targetIntake}</text>
-                        </>); })()}
-                        {/* Bar value labels (inside bars) */}
-                        <text x="41" y={18 + barH - burnH / 2} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{dailyBurn}</text>
-                        <text x="41" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Burn</text>
-                        <text x="87" y={18 + barH - intakeH / 2} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{intake}</text>
-                        <text x="87" y={18 + barH - intakeH / 2 + 10} textAnchor="middle" fill={zoneColor} fontSize="7" fontWeight="bold">{intake - targetIntake > 0 ? '+' : ''}{intake - targetIntake}</text>
-                        <text x="87" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Intake</text>
-                      </svg>
+                  {/* Calorie progress bar */}
+                  <div className="mb-3">
+                    <div className="flex justify-between text-[10px] mb-1">
+                      <span className="text-white/40">Calories</span>
+                      <span><strong className="text-white">{intake}</strong> <span className="text-white/30">/ {targetIntake} target</span></span>
                     </div>
-                    {/* Protein bar */}
-                    <div>
-                      <svg viewBox="0 0 140 120" className="w-full">
-                        <defs>
-                          <linearGradient id="proteinGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={proteinZoneColor} stopOpacity="0.9" />
-                            <stop offset="100%" stopColor={proteinZoneColor} stopOpacity="0.5" />
-                          </linearGradient>
-                        </defs>
-                        {/* Bar first */}
-                        <rect x="48" y={18 + barH - pIntakeBarH} width="44" height={pIntakeBarH} rx="6" fill="url(#proteinGrad)" />
-                        {/* Target line */}
-                        {(() => { const tY = 18 + barH - pTargetBarH; return (<>
-                        <line x1="25" y1={tY} x2="130" y2={tY} stroke="#3b82f6" strokeWidth="1" strokeDasharray="3 2" opacity="0.4" />
-                        <text x="130" y={tY - 3} textAnchor="end" fill="#3b82f6" fontSize="6" fontWeight="bold">{proteinTarget}g</text>
-                        </>); })()}
-                        {/* Bar value label (inside bar) */}
-                        <text x="70" y={18 + barH - pIntakeBarH / 2} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">{trainingDayProtein}g</text>
-                        <text x="70" y={18 + barH - pIntakeBarH / 2 + 10} textAnchor="middle" fill={proteinZoneColor} fontSize="7" fontWeight="bold">{proteinDiff > 0 ? '+' : ''}{proteinDiff}g</text>
-                        <text x="70" y={18 + barH + 12} textAnchor="middle" fill="white" fillOpacity="0.4" fontSize="7">Protein</text>
-                      </svg>
+                    <div className="relative h-2 bg-white/[0.04] rounded overflow-hidden">
+                      <div className="h-full rounded" style={{ width: `${Math.min(calIntakePct, 100)}%`, background: `linear-gradient(90deg, ${zoneColor}, ${zoneColor}cc)` }} />
+                      {/* Target marker */}
+                      <div className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-white/40" style={{ left: `${calTargetMarkerPct}%` }} />
+                    </div>
+                    <div className="flex justify-between text-[9px] text-white/20 mt-1">
+                      <span>Burn: {dailyBurn}</span>
+                      <span>{surplusDeficit > 0 ? '+' : ''}{surplusDeficit} surplus</span>
+                    </div>
+                  </div>
+
+                  {/* Protein progress bar */}
+                  <div className="mb-3">
+                    <div className="flex justify-between text-[10px] mb-1">
+                      <span className="text-white/40">Protein</span>
+                      <span><strong style={{ color: proteinZoneColor }}>{trainingDayProtein}g</strong> <span className="text-white/30">/ {proteinTarget}g target</span></span>
+                    </div>
+                    <div className="relative h-2 bg-white/[0.04] rounded overflow-hidden">
+                      <div className="h-full rounded" style={{ width: `${Math.min(protIntakePct, 100)}%`, background: `linear-gradient(90deg, ${proteinZoneColor}, ${proteinZoneColor}cc)` }} />
+                      <div className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-white/40" style={{ left: `${protTargetMarkerPct}%` }} />
+                    </div>
+                    <div className="flex justify-between text-[9px] text-white/20 mt-1">
+                      <span>Target: {(bodyWeight * 2.25).toFixed(1)}g/kg</span>
+                      <span>{proteinDiff > 0 ? '+' : ''}{proteinDiff}g {proteinDiff > 0 ? 'over' : 'under'}</span>
                     </div>
                   </div>
 
                   {/* Details */}
-                  <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5 text-xs text-white/30">
-                    <div>BMR {bmr}</div>
-                    <div>Training +{dailyTrainingAvg}</div>
-                    {dailyNeat > 0 && <div>NEAT +{dailyNeat}</div>}
-                    <div>{weekSessions.length} sessions</div>
+                  <div className="flex gap-4 pt-2 border-t border-white/5 text-[10px] text-white/20">
+                    <span>BMR {bmr}</span>
+                    <span>Training +{dailyTrainingAvg}</span>
+                    {dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}
+                    <span>{weekSessions.length} sessions</span>
                   </div>
                 </div>
               );
             })()}
 
-          {/* Glucose Monitor */}
+          {/* Glucose Monitor — Concept 4: Gradient Fill Chart */}
           {glucose?.current && (() => {
             const { current, history, stats } = glucose;
             const gv = current.value;
             const color = gv < 80 ? '#ef4444' : gv <= 110 ? '#22c55e' : gv <= 160 ? '#f59e0b' : '#ef4444';
             const glabel = gv < 80 ? 'LOW' : gv <= 110 ? 'IN RANGE' : gv <= 160 ? 'ELEVATED' : 'HIGH';
-            const gChartW = 500, gChartH = 160;
-            const gPad = { top: 5, right: 10, bottom: 20, left: 30 };
+            const tirColor = stats.timeInRange >= 70 ? '#22c55e' : stats.timeInRange >= 40 ? '#f59e0b' : '#ef4444';
+
+            // Chart dimensions — larger chart
+            const gChartW = 600, gChartH = 240;
+            const gPad = { top: 10, right: 12, bottom: 30, left: 32 };
             const gIW = gChartW - gPad.left - gPad.right;
             const gIH = gChartH - gPad.top - gPad.bottom;
-            const gMn = 50, gMx = 300, gRng = gMx - gMn;
+            const gMn = 50, gMx = 250, gRng = gMx - gMn;
             const toGY = (val: number) => gPad.top + gIH - ((Math.max(gMn, Math.min(gMx, val)) - gMn) / gRng) * gIH;
             const toGX = (i: number) => gPad.left + (i / Math.max(1, history.length - 1)) * gIW;
             const gPts = history.map((h, i) => ({ x: toGX(i), y: toGY(h.value), val: h.value }));
+
+            // Build smooth curve path
             let gLinePath = '';
             if (gPts.length >= 2) {
               gLinePath = `M ${gPts[0].x} ${gPts[0].y}`;
@@ -486,123 +428,256 @@ export default function Dashboard() {
                 gLinePath += ` C ${p1.x + (p2.x - p0.x) / 6} ${p1.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p1.x) / 6} ${p2.y - (p3.y - p1.y) / 6}, ${p2.x} ${p2.y}`;
               }
             }
-            const gZones = [
-              { top: toGY(200), bottom: toGY(160), color: '#ef4444', opacity: 0.06 },
-              { top: toGY(160), bottom: toGY(110), color: '#f59e0b', opacity: 0.05 },
-              { top: toGY(110), bottom: toGY(80), color: '#22c55e', opacity: 0.08 },
-              { top: toGY(80), bottom: toGY(50), color: '#ef4444', opacity: 0.06 },
-            ];
+
+            // Timestamps for x-axis
             const gTimestamps = history.map(h => new Date(h.timestamp));
             const gFmtTime = (d: Date) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+            // Find peak value
+            const peakIdx = gPts.reduce((best, p, i) => p.val > (gPts[best]?.val || 0) ? i : best, 0);
+            const peak = gPts[peakIdx];
+
+            // Time label positions (evenly spaced, ~5 labels)
+            const timeLabels: { x: number; label: string }[] = [];
+            if (gTimestamps.length >= 2) {
+              const step = Math.max(1, Math.floor(gTimestamps.length / 5));
+              for (let i = 0; i < gTimestamps.length; i += step) {
+                timeLabels.push({ x: toGX(i), label: gFmtTime(gTimestamps[i]) });
+              }
+              // Always include last
+              const lastIdx = gTimestamps.length - 1;
+              if (timeLabels[timeLabels.length - 1]?.x !== toGX(lastIdx)) {
+                timeLabels.push({ x: toGX(lastIdx), label: gFmtTime(gTimestamps[lastIdx]) });
+              }
+            }
+
             return (
-              <div className="glass-card p-5 mb-6 fade-up">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-white flex items-center gap-2"><span className="text-lg">🩸</span> Glucose</h2>
-                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: `${color}20`, color }}>{glabel}</span>
-                </div>
-                <div className="flex items-center gap-3 mb-2">
-                  <div>
-                    <span className="text-5xl font-bold data-value" style={{ color }}>{current.value}</span>
-                    <span className="text-sm text-white/30 ml-1">mg/dL</span>
-                    <div className="text-4xl font-bold mt-1" style={{ color }}>{current.trend}</div>
+              <div className="glass-card p-4 mb-6 fade-up">
+                {/* Header: value + trend + label + stats */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-lg">🩸</span>
+                    <span className="text-3xl font-black data-value" style={{ color }}>{current.value}</span>
+                    <span className="text-[11px] text-white/30">mg/dL</span>
+                    <span className="text-3xl font-bold" style={{ color }}>{current.trend}</span>
                   </div>
-                  <div className="flex-1" />
-                  <div className="flex flex-col gap-1 text-right">
-                    <span className="text-xs text-white/30">TIR <span className="text-white/60 font-bold">{stats.timeInRange}%</span></span>
-                    <span className="text-xs text-white/30">Avg <span className="text-white/60 font-bold">{stats.avgGlucose}</span></span>
-                    <span className="text-xs text-white/30">eA1c <span className="text-white/60 font-bold">{stats.estimatedA1c}%</span></span>
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-[10px] text-white/30">TIR <strong style={{ color: tirColor }}>{stats.timeInRange}%</strong></span>
+                      <span className="text-[10px] text-white/30">Avg <strong className="text-white/60">{stats.avgGlucose}</strong></span>
+                      <span className="text-[10px] text-white/30">eA1c <strong className="text-white/60">{stats.estimatedA1c}%</strong></span>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: `${color}20`, color }}>{glabel}</span>
                   </div>
                 </div>
+
+                {/* Chart */}
                 {gPts.length > 2 && (
-                  <svg viewBox={`0 0 ${gChartW} ${gChartH}`} className="w-full" style={{ height: '140px' }}>
+                  <svg viewBox={`0 0 ${gChartW} ${gChartH}`} className="w-full" style={{ minHeight: '180px' }}>
                     <defs>
-                      <linearGradient id="glucoseGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.25" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient>
-                      <filter id="glucoseGlow"><feGaussianBlur stdDeviation="1.5" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+                      {/* Zone-colored vertical gradient for area fill */}
+                      <linearGradient id="gZoneArea" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#ef4444" stopOpacity="0.15" />
+                        <stop offset={`${((gMx - 160) / gRng) * 100}%`} stopColor="#f59e0b" stopOpacity="0.12" />
+                        <stop offset={`${((gMx - 110) / gRng) * 100}%`} stopColor="#22c55e" stopOpacity="0.08" />
+                        <stop offset="100%" stopColor="transparent" />
+                      </linearGradient>
+                      {/* Zone-colored vertical gradient for stroke */}
+                      <linearGradient id="gZoneStroke" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#ef4444" />
+                        <stop offset={`${((gMx - 160) / gRng) * 100}%`} stopColor="#ef4444" />
+                        <stop offset={`${((gMx - 160) / gRng) * 100 + 1}%`} stopColor="#f59e0b" />
+                        <stop offset={`${((gMx - 110) / gRng) * 100}%`} stopColor="#f59e0b" />
+                        <stop offset={`${((gMx - 110) / gRng) * 100 + 1}%`} stopColor="#22c55e" />
+                        <stop offset={`${((gMx - 80) / gRng) * 100}%`} stopColor="#22c55e" />
+                        <stop offset="100%" stopColor="#ef4444" />
+                      </linearGradient>
+                      <filter id="gGlow"><feGaussianBlur stdDeviation="1.5" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
                     </defs>
-                    {gZones.map((z, i) => <rect key={i} x={gPad.left} y={z.top} width={gIW} height={z.bottom - z.top} fill={z.color} opacity={z.opacity} />)}
+
+                    {/* Zone boundary lines */}
                     {[80, 110, 160].map(val => (
-                      <g key={val}><line x1={gPad.left} y1={toGY(val)} x2={gPad.left + gIW} y2={toGY(val)} stroke={val === 110 ? '#22c55e' : val === 80 ? '#ef4444' : '#f59e0b'} strokeOpacity="0.2" strokeDasharray="3 3" /><text x={gPad.left - 3} y={toGY(val) + 3} textAnchor="end" fill="white" fillOpacity="0.25" fontSize="7">{val}</text></g>
+                      <g key={val}>
+                        <line x1={gPad.left} y1={toGY(val)} x2={gPad.left + gIW} y2={toGY(val)}
+                          stroke={val === 110 ? '#22c55e' : val === 80 ? '#22c55e' : '#ef4444'} strokeOpacity="0.12" strokeDasharray="4 4" />
+                        <text x={gPad.left - 4} y={toGY(val) + 3} textAnchor="end" fill="white" fillOpacity="0.2" fontSize="8">{val}</text>
+                      </g>
                     ))}
-                    {gLinePath && <path d={`${gLinePath} L ${gPts[gPts.length - 1].x} ${gPad.top + gIH} L ${gPts[0].x} ${gPad.top + gIH} Z`} fill="url(#glucoseGrad)" opacity="0.5" className="chart-area-fade" />}
-                    {gPts.length >= 2 && gPts.slice(0, -1).map((p, i) => {
-                      const p2 = gPts[i + 1], p3 = gPts[Math.min(gPts.length - 1, i + 2)], p0 = gPts[Math.max(0, i - 1)];
-                      const segColor = (p.val + p2.val) / 2 < 80 ? '#ef4444' : (p.val + p2.val) / 2 <= 110 ? '#22c55e' : (p.val + p2.val) / 2 <= 160 ? '#f59e0b' : '#ef4444';
-                      return <path key={i} d={`M ${p.x} ${p.y} C ${p.x + (p2.x - p0.x) / 6} ${p.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p.x) / 6} ${p2.y - (p3.y - p.y) / 6}, ${p2.x} ${p2.y}`} fill="none" stroke={segColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />;
-                    })}
-                    {gPts.length > 0 && <circle cx={gPts[gPts.length - 1].x} cy={gPts[gPts.length - 1].y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />}
-                    {gTimestamps[0] && <text x={gPad.left} y={gChartH - 2} fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{gFmtTime(gTimestamps[0])}</text>}
-                    {gTimestamps[gTimestamps.length - 1] && <text x={gPad.left + gIW} y={gChartH - 2} textAnchor="end" fill="white" fillOpacity="0.5" fontSize="10" fontWeight="500">{gFmtTime(gTimestamps[gTimestamps.length - 1])}</text>}
-                    {gTimestamps.length > 2 && (() => { const mi = Math.floor(gTimestamps.length / 2); return <text x={gPad.left + (mi / (gTimestamps.length - 1)) * gIW} y={gChartH - 2} textAnchor="middle" fill="white" fillOpacity="0.3" fontSize="9">{gFmtTime(gTimestamps[mi])}</text>; })()}
+
+                    {/* Green zone band */}
+                    <rect x={gPad.left} y={toGY(110)} width={gIW} height={toGY(80) - toGY(110)} fill="#22c55e" opacity="0.04" rx="2" />
+
+                    {/* Area fill with zone gradient */}
+                    {gLinePath && <path d={`${gLinePath} L ${gPts[gPts.length - 1].x} ${gPad.top + gIH} L ${gPts[0].x} ${gPad.top + gIH} Z`} fill="url(#gZoneArea)" className="chart-area-fade" />}
+
+                    {/* Main curve with zone-colored stroke */}
+                    {gLinePath && <path d={gLinePath} fill="none" stroke="url(#gZoneStroke)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#gGlow)" />}
+
+                    {/* Peak annotation */}
+                    {peak && peak.val > 140 && (
+                      <g>
+                        <circle cx={peak.x} cy={peak.y} r="3.5" fill="#ef4444" stroke="white" strokeWidth="1" />
+                        <text x={peak.x} y={peak.y - 8} textAnchor="middle" fill="#ef4444" fontSize="10" fontWeight="700">{peak.val}</text>
+                      </g>
+                    )}
+
+                    {/* Current dot with pulse */}
+                    {gPts.length > 0 && (() => {
+                      const last = gPts[gPts.length - 1];
+                      return (
+                        <g>
+                          <circle cx={last.x} cy={last.y} r="8" fill={`${color}20`}>
+                            <animate attributeName="r" values="6;10;6" dur="2s" repeatCount="indefinite" />
+                          </circle>
+                          <circle cx={last.x} cy={last.y} r="4" fill={color} stroke="white" strokeWidth="1.5" />
+                        </g>
+                      );
+                    })()}
+
+                    {/* Time labels along bottom */}
+                    {timeLabels.map((t, i) => (
+                      <text key={i} x={t.x} y={gChartH - 4} textAnchor={i === 0 ? 'start' : i === timeLabels.length - 1 ? 'end' : 'middle'}
+                        fill="white" fillOpacity="0.35" fontSize="10" fontWeight="500">{t.label}</text>
+                    ))}
+
+                    {/* Vertical grid lines at time labels */}
+                    {timeLabels.map((t, i) => i > 0 && i < timeLabels.length - 1 && (
+                      <line key={i} x1={t.x} y1={gPad.top} x2={t.x} y2={gPad.top + gIH} stroke="white" strokeOpacity="0.03" />
+                    ))}
                   </svg>
                 )}
               </div>
             );
           })()}
 
-          {/* Sleep */}
+          {/* Sleep — Concept 1B: Timeline + Day Strip */}
             {sleepData.length > 0 && (() => {
               const d = sleepData[sleepIdx] || sleepData[0];
-              const onTouchStart = (e: React.TouchEvent) => { sleepTouchRef.current = { x: e.touches[0].clientX, t: Date.now() }; };
-              const onTouchEnd = (e: React.TouchEvent) => {
-                if (!sleepTouchRef.current) return;
-                const dx = e.changedTouches[0].clientX - sleepTouchRef.current.x;
-                const dt = Date.now() - sleepTouchRef.current.t;
-                if (Math.abs(dx) > 40 && dt < 400) {
-                  if (dx < 0 && sleepIdx < sleepData.length - 1) setSleepIdx(sleepIdx + 1);
-                  if (dx > 0 && sleepIdx > 0) setSleepIdx(sleepIdx - 1);
+              const scoreColor = d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444';
+
+              // Build timeline segments from phase durations
+              const total = d.totalSleep || 1;
+              const deepPct = Math.round(((d.deepSleep || 0) / total) * 100);
+              const remPct = Math.round(((d.remSleep || 0) / total) * 100);
+              const awakePct = Math.round(((d.awakeTime || 0) / total) * 100);
+              const lightPct = Math.max(0, 100 - deepPct - remPct - awakePct);
+
+              // Generate realistic-looking segments by splitting phases
+              const segments: { type: string; pct: number }[] = [];
+              const splitPhase = (type: string, totalPct: number, chunks: number) => {
+                if (totalPct <= 0) return;
+                const base = Math.floor(totalPct / chunks);
+                for (let i = 0; i < chunks; i++) {
+                  const extra = i === 0 ? totalPct - base * chunks : 0;
+                  segments.push({ type, pct: base + extra });
                 }
-                sleepTouchRef.current = null;
               };
-              const dayLabel = new Date(d.day + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+              // Interleave: light-deep-light-rem-light-deep-awake-rem-light
+              const deepChunks = deepPct > 15 ? 2 : 1;
+              const remChunks = remPct > 20 ? 2 : 1;
+              const lightChunks = 3 + deepChunks + remChunks - 2;
+              const lightBase = lightPct > 0 ? Math.floor(lightPct / lightChunks) : 0;
+              let lightRemaining = lightPct;
+              const addLight = (forceMin?: number) => {
+                const amt = Math.min(lightRemaining, Math.max(forceMin || lightBase, 3));
+                if (amt > 0) { segments.push({ type: 'light', pct: amt }); lightRemaining -= amt; }
+              };
+              addLight(8);
+              splitPhase('deep', Math.floor(deepPct / deepChunks) + (deepPct % deepChunks), 1);
+              addLight();
+              splitPhase('rem', Math.floor(remPct / remChunks) + (remPct % remChunks), 1);
+              addLight();
+              if (deepChunks > 1) splitPhase('deep', Math.floor(deepPct / deepChunks), 1);
+              if (awakePct > 0) segments.push({ type: 'awake', pct: awakePct });
+              if (remChunks > 1) splitPhase('rem', Math.floor(remPct / remChunks), 1);
+              if (lightRemaining > 0) segments.push({ type: 'light', pct: lightRemaining });
+
+              const segColors: Record<string, string> = {
+                deep: 'bg-gradient-to-b from-indigo-500 to-indigo-700',
+                rem: 'bg-gradient-to-b from-cyan-500 to-cyan-600',
+                light: 'bg-gradient-to-b from-slate-600 to-slate-800',
+                awake: 'bg-gradient-to-b from-amber-500 to-amber-600',
+              };
+
+              // Bedtime formatting
+              const fmtTime = (iso?: string) => {
+                if (!iso) return '—';
+                try { return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); } catch { return '—'; }
+              };
+
               return (
-                <div className="glass-card p-5 mb-6 fade-up overflow-hidden touch-pan-y relative"
-                  onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-                  <div className="flex items-center justify-between mb-1">
+                <div className="glass-card p-5 mb-6 fade-up overflow-hidden">
+                  <div className="flex items-center justify-between mb-3">
                     <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                       <span className="text-lg">&#9790;</span> Sleep
                     </h2>
-                    <span className="text-xs text-white/30">{dayLabel}</span>
                   </div>
 
-                  {/* Dot indicators */}
-                  <div className="flex justify-center gap-1.5 mb-3">
-                    {sleepData.map((_, i) => (
-                      <button key={i} onClick={() => setSleepIdx(i)}
-                        className={`rounded-full transition-all ${i === sleepIdx ? 'w-4 h-1.5 bg-white/60' : 'w-1.5 h-1.5 bg-white/15'}`} />
+                  {/* Day strip */}
+                  <div className="flex gap-1 mb-3">
+                    {[...sleepData].reverse().map((sd, ri) => {
+                      const i = sleepData.length - 1 - ri;
+                      const isActive = i === sleepIdx;
+                      const sc = sd.score >= 85 ? '#22c55e' : sd.score >= 70 ? '#f59e0b' : '#ef4444';
+                      const dateObj = new Date(sd.day + 'T00:00:00');
+                      const dayName = dateObj.toLocaleDateString('en-GB', { weekday: 'short' });
+                      const dayNum = dateObj.getDate();
+                      return (
+                        <button key={i} onClick={() => setSleepIdx(i)}
+                          className="flex-1 py-1.5 rounded-lg text-center transition-all"
+                          style={{
+                            border: isActive ? `1px solid ${sc}50` : '1px solid rgba(255,255,255,0.06)',
+                            background: isActive ? `${sc}18` : 'rgba(255,255,255,0.03)',
+                          }}>
+                          <div className="text-[9px] uppercase" style={{ color: isActive ? `${sc}bb` : 'rgba(255,255,255,0.3)', fontWeight: isActive ? 600 : 400 }}>{dayName}</div>
+                          <div className="text-[13px] mt-0.5" style={{ color: isActive ? sc : 'rgba(255,255,255,0.4)', fontWeight: isActive ? 800 : 700 }}>{dayNum}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Time range */}
+                  <div className="flex justify-between items-center text-[11px] text-white/40 mb-1">
+                    <span>{fmtTime(d.bedtimeStart)}</span>
+                    <span className="text-xl font-extrabold text-white">{formatDuration(d.totalSleep)}</span>
+                    <span>{fmtTime(d.bedtimeEnd)}</span>
+                  </div>
+
+                  {/* Timeline bar */}
+                  <div className="flex h-12 rounded-xl overflow-hidden mb-3">
+                    {segments.filter(s => s.pct > 0).map((seg, i) => (
+                      <div key={i} className={`${segColors[seg.type]} flex items-center justify-center text-[9px] font-semibold text-white/80`}
+                        style={{ width: `${seg.pct}%` }}>
+                        {seg.pct >= 12 && seg.type === 'deep' ? 'Deep' : seg.pct >= 12 && seg.type === 'rem' ? 'REM' : ''}
+                      </div>
                     ))}
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    <SleepMultiRing score={d.score}
-                      deepPct={d.totalSleep && d.deepSleep ? Math.round((d.deepSleep / d.totalSleep) * 100) : 0}
-                      remPct={d.totalSleep && d.remSleep ? Math.round((d.remSleep / d.totalSleep) * 100) : 0}
-                    />
-                    <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2">
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Total</span>
-                        <p className="text-sm font-bold gradient-text data-value">{formatDuration(d.totalSleep)}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Deep</span>
-                        <p className="text-sm font-bold text-indigo-400 data-value" style={{ textShadow: '0 0 8px rgba(129,140,248,0.5)' }}>{formatDuration(d.deepSleep)}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">REM</span>
-                        <p className="text-sm font-bold text-cyan-400 data-value">{formatDuration(d.remSleep)}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Avg HR</span>
-                        <p className="text-sm font-bold text-red-400 data-value">{d.avgHr ? `${Math.round(d.avgHr)} bpm` : '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">HRV</span>
-                        <p className="text-sm font-bold text-green-400 data-value" style={{ textShadow: '0 0 8px rgba(34,197,94,0.4)' }}>{d.avgHrv ? `${d.avgHrv} ms` : '—'}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</span>
-                        <p className="text-sm font-bold gradient-text data-value">{d.efficiency ? `${d.efficiency}%` : '—'}</p>
-                      </div>
+                  {/* Metrics row */}
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
+                      <div className="text-[9px] text-white/30 uppercase tracking-wider">Score</div>
+                      <div className="text-base font-bold mt-0.5" style={{ color: scoreColor }}>{d.score}</div>
                     </div>
+                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
+                      <div className="text-[9px] text-white/30 uppercase tracking-wider">Deep</div>
+                      <div className="text-base font-bold text-indigo-400 mt-0.5">{formatDuration(d.deepSleep)}</div>
+                    </div>
+                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
+                      <div className="text-[9px] text-white/30 uppercase tracking-wider">REM</div>
+                      <div className="text-base font-bold text-cyan-400 mt-0.5">{formatDuration(d.remSleep)}</div>
+                    </div>
+                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
+                      <div className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</div>
+                      <div className="text-base font-bold gradient-text mt-0.5">{d.efficiency ? `${d.efficiency}%` : '—'}</div>
+                    </div>
+                  </div>
+
+                  {/* Vitals strip */}
+                  <div className="flex justify-center gap-6 mt-3 pt-3 border-t border-white/5">
+                    <span className="text-xs text-white/30">❤ <strong className="text-red-400">{d.avgHr ? Math.round(d.avgHr) : '—'}</strong> bpm</span>
+                    <span className="text-xs text-white/30">⚡ <strong className="text-green-400">{d.avgHrv || '—'}</strong> ms</span>
+                    {d.lowestHr && <span className="text-xs text-white/30">↓ <strong className="text-red-300">{Math.round(d.lowestHr)}</strong> bpm</span>}
                   </div>
                 </div>
               );
@@ -741,43 +816,41 @@ export default function Dashboard() {
               <div className="glass-strong p-6 mb-8 fade-up relative overflow-hidden">
                 {/* Animated gradient mesh background */}
                 <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ background: 'radial-gradient(ellipse 60% 50% at 20% 30%, rgba(139,92,246,0.15) 0%, transparent 70%), radial-gradient(ellipse 50% 60% at 80% 70%, rgba(6,182,212,0.1) 0%, transparent 70%)', animation: 'mesh-drift 8s ease-in-out infinite alternate' }} />
-                {/* Header with phase toggle */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                {/* Header with minimal pills */}
+                <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className="text-lg font-bold text-white">Weight Progress</h2>
-                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      <p className="text-sm text-white/40">
-                        {startWeight}kg → {endWeight}kg
-                        <span className={`ml-2 font-semibold ${isPositiveProgress ? 'text-green-400' : totalChange === 0 ? 'text-white/40' : 'text-yellow-400'}`}>
+                    <h2 className="text-[15px] font-bold text-white">Weight Progress</h2>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <p className="text-[11px] text-white/40">
+                        {startWeight}kg → <strong className="text-white">{endWeight}kg</strong>
+                        <span className={`ml-1 font-semibold ${isPositiveProgress ? 'text-green-400' : totalChange === 0 ? 'text-white/40' : 'text-yellow-400'}`}>
                           ({totalChange > 0 ? '+' : ''}{totalChange}kg)
                         </span>
                       </p>
-                      {/* Weekly rate pill */}
                       {(() => {
                         const rateColor = phase === 'bulking'
                           ? (slope >= 0.3 && slope <= 0.7 ? '#22c55e' : slope > 0 ? '#f59e0b' : '#ef4444')
                           : (slope <= -0.3 && slope >= -0.7 ? '#22c55e' : slope < 0 ? '#f59e0b' : '#ef4444');
                         const arrow = slope > 0.05 ? '↗' : slope < -0.05 ? '↘' : '→';
                         return (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: `${rateColor}20`, color: rateColor, border: `1px solid ${rateColor}30` }}>
+                          <span className="text-[10px] font-semibold" style={{ color: rateColor }}>
                             {arrow} {slope > 0 ? '+' : ''}{slope.toFixed(2)} kg/wk
                           </span>
                         );
                       })()}
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-3 self-start">
-                    {/* Target weight */}
+                  <div className="flex items-center gap-1.5">
+                    {/* Target pill */}
                     {showTargetInput ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <input
                           type="text"
                           inputMode="decimal"
                           value={targetInput}
                           onChange={(e) => setTargetInput(e.target.value)}
                           placeholder="kg"
-                          className="glass-input w-20 px-3 py-1.5 rounded-lg text-sm text-white text-center"
+                          className="glass-input w-16 px-2 py-1 rounded-lg text-[10px] text-white text-center"
                           autoFocus
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
@@ -787,41 +860,27 @@ export default function Dashboard() {
                             }
                           }}
                         />
-                        <button
-                          onClick={() => {
-                            const v = parseFloat(targetInput);
-                            if (v > 0) { setTargetWeight(v); saveSetting('targetWeight', String(v)); }
-                            setShowTargetInput(false);
-                          }}
-                          className="text-xs text-green-400 hover:text-green-300 px-2 py-1"
-                        >Set</button>
+                        <button onClick={() => { const v = parseFloat(targetInput); if (v > 0) { setTargetWeight(v); saveSetting('targetWeight', String(v)); } setShowTargetInput(false); }}
+                          className="text-[10px] text-green-400 px-1">✓</button>
                         {targetWeight !== null && (
-                          <button
-                            onClick={() => { setTargetWeight(null); saveSetting('targetWeight', null); setShowTargetInput(false); }}
-                            className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
-                          >Clear</button>
+                          <button onClick={() => { setTargetWeight(null); saveSetting('targetWeight', null); setShowTargetInput(false); }}
+                            className="text-[10px] text-red-400 px-1">✕</button>
                         )}
                       </div>
                     ) : (
                       <button
                         onClick={() => { setTargetInput(targetWeight ? String(targetWeight) : ''); setShowTargetInput(true); }}
-                        className="glass-input px-3 py-1.5 rounded-full text-xs text-white/40 hover:text-white/70 hover:border-white/20 transition-all"
+                        className="text-[10px] text-white/35 px-2.5 py-1 rounded-lg border border-white/[0.08] hover:border-white/15 transition-all"
                       >
-                        {targetWeight ? `Target ${targetWeight}kg` : 'Set Target'}
+                        → <strong className="text-white/60">{targetWeight ? `${targetWeight}kg` : 'Set'}</strong>
                       </button>
                     )}
-
-                    {/* Phase toggle */}
+                    {/* Phase pill */}
                     <button
                       onClick={togglePhase}
-                      className="flex items-center gap-2 glass-input px-4 py-2 rounded-full cursor-pointer hover:border-white/20 transition-all"
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all ${phase === 'bulking' ? 'text-green-400 border-green-500/15 bg-green-500/[0.06]' : 'text-blue-400 border-blue-500/15 bg-blue-500/[0.06]'}`}
                     >
-                      <div className={`w-10 h-5 rounded-full relative transition-colors duration-300 ${phase === 'bulking' ? 'bg-green-500/40' : 'bg-blue-500/40'}`}>
-                        <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all duration-300 ${phase === 'bulking' ? 'left-0.5 bg-green-400' : 'left-[22px] bg-blue-400'}`} />
-                      </div>
-                      <span className={`text-sm font-semibold uppercase tracking-wider ${phase === 'bulking' ? 'text-green-400' : 'text-blue-400'}`}>
-                        {phase}
-                      </span>
+                      ● {phase === 'bulking' ? 'BULK' : 'CUT'}
                     </button>
                   </div>
                 </div>
@@ -929,6 +988,32 @@ export default function Dashboard() {
                   </svg>
                 </div>
 
+                {/* Stat chips */}
+                <div className="flex gap-2 mb-4">
+                  {(() => {
+                    const rateColor = phase === 'bulking'
+                      ? (slope >= 0.3 && slope <= 0.7 ? '#22c55e' : slope > 0 ? '#f59e0b' : '#ef4444')
+                      : (slope <= -0.3 && slope >= -0.7 ? '#22c55e' : slope < 0 ? '#f59e0b' : '#ef4444');
+                    const arrow = slope > 0.05 ? '↗' : slope < -0.05 ? '↘' : '→';
+                    return (
+                      <div className="flex-1 text-center py-2 rounded-lg" style={{ background: `${rateColor}10`, border: `1px solid ${rateColor}18` }}>
+                        <div className="text-[9px] text-white/30 uppercase tracking-wider">Rate</div>
+                        <div className="text-sm font-extrabold mt-0.5" style={{ color: rateColor }}>{arrow} {slope > 0 ? '+' : ''}{slope.toFixed(2)} kg/wk</div>
+                      </div>
+                    );
+                  })()}
+                  <div className="flex-1 text-center py-2 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+                    <div className="text-[9px] text-white/30 uppercase tracking-wider">Gained</div>
+                    <div className="text-sm font-extrabold text-white mt-0.5">{totalChange > 0 ? '+' : ''}{totalChange} kg</div>
+                  </div>
+                  {targetWeight !== null && (
+                    <div className="flex-1 text-center py-2 rounded-lg" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.1)' }}>
+                      <div className="text-[9px] text-white/30 uppercase tracking-wider">To Target</div>
+                      <div className="text-sm font-extrabold text-amber-400 mt-0.5">{Math.abs(Math.round((targetWeight - endWeight) * 10) / 10)} kg</div>
+                    </div>
+                  )}
+                </div>
+
               {/* Body Composition Charts — same style as weight chart */}
               {(() => {
                 const cW = chartWidth, cH = 160;
@@ -944,7 +1029,7 @@ export default function Dashboard() {
                 const allChartDates = measurements.map(m => ({ week: weeks[measurements.indexOf(m)], date: new Date(m.date) }));
                 const cLabelStep = Math.max(1, Math.floor(allChartDates.length / 6));
 
-                const renderCompositionChart = (
+                const renderCompositionPill = (
                   data: { week: number; val: number; date: string }[],
                   color: string,
                   label: string,
@@ -952,89 +1037,44 @@ export default function Dashboard() {
                 ) => {
                   if (data.length < 2) return null;
                   const vals = data.map(d => d.val);
-                  const mn = Math.min(...vals) - 1;
-                  const mx = Math.max(...vals) + 1;
+                  const mn = Math.min(...vals) - 0.5;
+                  const mx = Math.max(...vals) + 0.5;
                   const rng = mx - mn || 1;
-                  const toCY = (v: number) => cPad.top + cIH - ((v - mn) / rng) * cIH;
-                  const pts = data.map(d => ({ x: toCX(d.week), y: toCY(d.val), val: d.val }));
+                  const sparkW = 120, sparkH = 32, sparkPad = 4;
+                  const wkMin = data[0].week;
+                  const wkMax = data[data.length - 1].week;
+                  const wkRng = wkMax - wkMin || 1;
+                  const pts = data.map((d) => ({
+                    x: sparkPad + ((d.week - wkMin) / wkRng) * (sparkW - sparkPad * 2),
+                    y: sparkPad + (1 - (d.val - mn) / rng) * (sparkH - sparkPad * 2),
+                    val: d.val,
+                  }));
                   const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-                  const compLineLen = pts.reduce((acc, p, i) => i === 0 ? 0 : acc + Math.hypot(p.x - pts[i-1].x, p.y - pts[i-1].y), 0) * 1.1;
-                  const area = `${line} L ${pts[pts.length - 1].x} ${cPad.top + cIH} L ${pts[0].x} ${cPad.top + cIH} Z`;
-                  const gradId = `compGrad-${label.replace(/\s/g, '')}`;
-                  const glowId = `compGlow-${label.replace(/\s/g, '')}`;
+                  const area = `${line} L ${sparkW} ${sparkH} L 0 ${sparkH} Z`;
+                  const gradId = `compPill-${label.replace(/\s/g, '')}`;
 
-                  // Y-axis labels
-                  const yTicks = 5;
-                  const yLabelsArr = Array.from({ length: yTicks }, (_, i) => {
-                    const val = mn + (rng * i) / (yTicks - 1);
-                    return { val: Math.round(val * 10) / 10, y: toCY(val) };
-                  });
+                  const totalChange = Math.round((pts[pts.length - 1].val - pts[0].val) * 10) / 10;
+                  const changeColor = label === 'Body Fat' ? (totalChange < 0 ? '#22c55e' : '#ef4444') : (totalChange > 0 ? '#22c55e' : '#ef4444');
+                  const changeArrow = totalChange > 0 ? '↗' : totalChange < 0 ? '↘' : '→';
+                  const last = pts[pts.length - 1];
 
                   return (
-                    <div className="glass-card p-4 card-animate overflow-hidden">
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider">{label}</h3>
+                    <div className="flex items-center gap-3 bg-white/[0.04] border border-white/[0.06] rounded-xl px-3.5 py-3 card-animate">
+                      <div className="flex-shrink-0">
+                        <div className="text-[9px] text-white/30 uppercase tracking-wider">{label}</div>
+                        <div className="text-[22px] font-extrabold leading-none mt-0.5" style={{ color }}>{last.val}{unit}</div>
+                        {totalChange !== 0 && <div className="text-[9px] font-semibold mt-1" style={{ color: changeColor }}>{changeArrow} {totalChange > 0 ? '+' : ''}{totalChange}{unit}</div>}
                       </div>
-                      <svg viewBox={`0 0 ${cW} ${cH}`} className="w-full">
+                      <svg viewBox={`0 0 ${sparkW} ${sparkH}`} className="flex-1 h-8" preserveAspectRatio="none">
                         <defs>
                           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
-                            <stop offset="60%" stopColor={color} stopOpacity="0.08" />
+                            <stop offset="0%" stopColor={color} stopOpacity="0.15" />
                             <stop offset="100%" stopColor={color} stopOpacity="0" />
                           </linearGradient>
-                          <linearGradient id={`${gradId}Line`} x1="0" y1="0" x2="1" y2="0">
-                            <stop offset="0%" stopColor={color} stopOpacity="0.5" />
-                            <stop offset="100%" stopColor={color} stopOpacity="1" />
-                          </linearGradient>
-                          <filter id={glowId} x="-20%" y="-20%" width="140%" height="140%">
-                            <feGaussianBlur stdDeviation="2" result="blur" />
-                            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-                          </filter>
                         </defs>
-
-                        {/* Y-axis grid + labels */}
-                        {yLabelsArr.map((tick, i) => (
-                          <g key={i}>
-                            <line x1={cPad.left} y1={tick.y} x2={cW - cPad.right} y2={tick.y} stroke="rgba(255,255,255,0.04)" />
-                            <text x={cPad.left - 8} y={tick.y + 3} textAnchor="end" fill="rgba(255,255,255,0.2)" fontSize="9">{tick.val}</text>
-                          </g>
-                        ))}
-
-                        {/* Area + line */}
-                        <path d={area} fill={`url(#${gradId})`} className="chart-area-fade" />
-                        <path d={line} fill="none" stroke={`url(#${gradId}Line)`} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" filter={`url(#${glowId})`}
-                          strokeDasharray={compLineLen} strokeDashoffset={compLineLen} className="chart-line-draw" style={{ '--line-len': compLineLen } as React.CSSProperties} />
-
-                        {/* Data points with labels */}
-                        {pts.map((p, i) => {
-                          const isLast = i === pts.length - 1;
-                          const isFirst = i === 0;
-                          const compDotDelay = 0.2 + (i / pts.length) * 1.2;
-                          return (
-                            <g key={i} className="chart-dot-pop" style={{ animationDelay: `${compDotDelay}s` }}>
-                              {isLast && <circle cx={p.x} cy={p.y} r="8" fill={color} opacity="0.12" />}
-                              <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={color} stroke="#fff" strokeWidth={isLast ? 2 : 1.5} />
-                              {isLast && <text x={p.x} y={p.y - 14} textAnchor="end" fill="white" fontSize="16" fontWeight="bold">{p.val}{unit}</text>}
-                              {isFirst && <text x={p.x} y={p.y - 14} textAnchor="start" fill="white" fontSize="14" fontWeight="bold" opacity="0.5">{p.val}{unit}</text>}
-                            </g>
-                          );
-                        })}
-
-                        {/* X-axis date labels */}
-                        {data.map((d, i) => {
-                          if (i > 0 && i < data.length - 1 && data.length > 3) return null;
-                          const x = toCX(d.week);
-                          const dateObj = new Date(d.date);
-                          return (
-                            <text key={i} x={x} y={cH - 5} textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="9"
-                              transform={`rotate(-30 ${x} ${cH - 5})`}>
-                              {dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                            </text>
-                          );
-                        })}
-
-                        {/* Unit label */}
-                        <text x={cPad.left - 10} y={cPad.top - 8} textAnchor="end" fill="rgba(255,255,255,0.2)" fontSize="9">{unit}</text>
+                        <path d={area} fill={`url(#${gradId})`} />
+                        <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+                        <circle cx={last.x} cy={last.y} r="2.5" fill={color} />
                       </svg>
                     </div>
                   );
@@ -1046,8 +1086,8 @@ export default function Dashboard() {
                 if (bfData.length < 2 && mmData.length < 2) return null;
                 return (
                   <div className="grid grid-cols-2 gap-3 mt-3">
-                    {renderCompositionChart(bfData, '#ef4444', 'Body Fat', '%')}
-                    {renderCompositionChart(mmData, '#3b82f6', 'Muscle Mass', 'kg')}
+                    {renderCompositionPill(bfData, '#ef4444', 'Body Fat', '%')}
+                    {renderCompositionPill(mmData, '#3b82f6', 'Muscle Mass', 'kg')}
                   </div>
                 );
               })()}
@@ -1130,39 +1170,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Quick Links */}
-          <div className="grid md:grid-cols-3 gap-4">
-            <Link href="/training-plan" className="glass-card p-6 block relative">
-              <DumbbellIcon className="absolute top-4 right-4 w-16 h-16 text-va-red" />
-              <div className="relative z-10">
-                <div className="w-10 h-10 rounded-xl bg-va-red/15 flex items-center justify-center mb-3">
-                  <span className="text-va-red text-lg">&#9670;</span>
-                </div>
-                <h3 className="text-lg font-semibold text-white">Training Plan</h3>
-                <p className="text-sm text-white/40 mt-1">View & edit your workout split</p>
-              </div>
-            </Link>
-            <Link href="/body-metrix" className="glass-card p-6 block relative">
-              <ScaleIcon className="absolute top-4 right-4 w-16 h-16 text-blue-400" />
-              <div className="relative z-10">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center mb-3">
-                  <span className="text-blue-400 text-lg">&#9678;</span>
-                </div>
-                <h3 className="text-lg font-semibold text-white">Body Metrix</h3>
-                <p className="text-sm text-white/40 mt-1">Track measurements & photos</p>
-              </div>
-            </Link>
-            <Link href="/nutrition-plan" className="glass-card p-6 block relative">
-              <ForkKnifeIcon className="absolute top-4 right-4 w-16 h-16 text-green-400" />
-              <div className="relative z-10">
-                <div className="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center mb-3">
-                  <span className="text-green-400 text-lg">&#9671;</span>
-                </div>
-                <h3 className="text-lg font-semibold text-white">Nutrition Plan</h3>
-                <p className="text-sm text-white/40 mt-1">Manage your meal plan</p>
-              </div>
-            </Link>
-          </div>
         </div>
       </main>
     </div>
