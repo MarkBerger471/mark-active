@@ -557,7 +557,7 @@ export default function Dashboard() {
               return (
                 <div className="glass-card p-5 mb-6 fade-up overflow-hidden touch-pan-y relative"
                   onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-                  <img src="/icons/sleep.png" alt="" className="!absolute right-2 top-1/2 -translate-y-1/2 w-16 h-16 sm:w-24 sm:h-24 object-contain opacity-[0.25] pointer-events-none" />
+                  <img src="/icons/sleep.png" alt="" className="!absolute right-2 top-1/2 -translate-y-1/2 w-16 h-16 sm:w-24 sm:h-24 object-contain opacity-[0.35] mix-blend-screen pointer-events-none" />
                   <div className="flex items-center justify-between mb-1">
                     <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                       <span className="text-lg">&#9790;</span> Sleep
