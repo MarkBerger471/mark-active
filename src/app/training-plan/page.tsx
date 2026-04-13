@@ -146,7 +146,7 @@ function getWeekLabel(weekKey: string): string {
   const monday = new Date(weekKey + 'T00:00:00');
   const sunday = new Date(monday);
   sunday.setDate(sunday.getDate() + 6);
-  const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   return `${fmt(monday)} – ${fmt(sunday)}`;
 }
 
@@ -529,7 +529,7 @@ export default function TrainingPlanPage() {
                       <p className="text-sm text-white/40">{w.exercises.length} exercises</p>
                       {lastSession && (
                         <p className="text-xs text-white/25 mt-2">
-                          Last: {new Date(lastSession.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          Last: {new Date(lastSession.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                         </p>
                       )}
                     </div>
@@ -551,7 +551,7 @@ export default function TrainingPlanPage() {
 
               const rollingStart = new Date(now);
               rollingStart.setDate(rollingStart.getDate() - 6);
-              const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+              const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
               const rollingLabel = `${fmt(rollingStart)} – ${fmt(now)}`;
 
               // Previous week: last completed Monday–Sunday
@@ -624,7 +624,7 @@ export default function TrainingPlanPage() {
                       <div key={`divider-${md}`} className="flex items-center gap-3 py-1">
                         <div className="flex-1 h-px bg-va-red/30" />
                         <span className="text-[10px] text-va-red/50 uppercase tracking-widest shrink-0">
-                          Measurement {new Date(md + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          Measurement {new Date(md + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                         </span>
                         <div className="flex-1 h-px bg-va-red/30" />
                       </div>
@@ -646,7 +646,7 @@ export default function TrainingPlanPage() {
                             <div className="flex items-baseline gap-2 whitespace-nowrap overflow-hidden">
                               <span className={`font-medium text-sm ${s.workoutName === 'Cardio' ? 'text-rose-400' : 'text-white'}`}>{s.workoutName}</span>
                               <span className="text-white/30 text-xs">
-                                {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {new Date(s.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                                 {s.savedAt && (
                                   <span className="ml-1">{new Date(s.savedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
                                 )}
