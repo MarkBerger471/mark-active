@@ -544,6 +544,7 @@ export const ALL_OPTIMIZER_FOODS: OptimizerFood[] = [
   { food: 'egg whites', maxG: 200, step: 50, category: 'Eggs' },
   // Dairy
   { food: 'greek yogurt', maxG: 250, step: 50, category: 'Dairy' },
+  { food: 'yogurt', maxG: 250, step: 50, category: 'Dairy' },
   { food: 'cottage cheese', maxG: 200, step: 50, category: 'Dairy' },
   { food: 'quark', maxG: 200, step: 50, category: 'Dairy' },
   { food: 'skyr', maxG: 200, step: 50, category: 'Dairy' },
@@ -636,6 +637,7 @@ export const ALL_OPTIMIZER_FOODS: OptimizerFood[] = [
   { food: 'amaranth', maxG: 100, step: 50, category: 'Grains' },
   { food: 'spelt', maxG: 100, step: 50, category: 'Grains' },
   { food: 'millet', maxG: 100, step: 50, category: 'Grains' },
+  { food: 'oats', maxG: 100, step: 25, category: 'Grains' },
   { food: 'barley', maxG: 100, step: 50, category: 'Grains' },
   // Vegetables
   { food: 'peas', maxG: 100, step: 50, category: 'Vegetables' },
@@ -652,9 +654,10 @@ export const ALL_OPTIMIZER_FOODS: OptimizerFood[] = [
 
 // Default selection: practical bodybuilding foods
 export const DEFAULT_OPTIMIZER_FOODS = [
-  'eggs', 'egg whites', 'cottage cheese', 'quark', 'whey', 'greek yogurt',
+  'eggs', 'egg whites', 'cottage cheese', 'quark', 'whey', 'greek yogurt', 'yogurt',
   'chicken breast', 'tuna', 'shrimp', 'salmon', 'cod',
   'pumpkin seeds', 'hemp seeds', 'almonds',
+  'oats',
   'lentils', 'tofu', 'edamame',
   'spirulina',
 ];
