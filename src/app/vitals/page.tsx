@@ -590,6 +590,7 @@ export default function VitalsPage() {
   // Medicine state
   const [medicines, setMedicines] = useState<{ name: string; dosage: string; frequency: string }[]>([]);
   const [showAddMed, setShowAddMed] = useState(false);
+  const [editingMedIdx, setEditingMedIdx] = useState<number | null>(null);
   const [medName, setMedName] = useState('');
   const [medDosage, setMedDosage] = useState('');
   const [medFrequency, setMedFrequency] = useState('Daily');
@@ -1071,9 +1072,36 @@ export default function VitalsPage() {
             )}
             {medicines.length > 0 && (
               <div className="flex flex-col gap-1.5">
-                {medicines.map((med, i) => (
+                {medicines.map((med, i) => editingMedIdx === i ? (
+                  <div key={i} className="flex gap-2">
+                    <input type="text" value={medName} onChange={e => setMedName(e.target.value)}
+                      className="glass-input flex-1 px-3 py-2 text-sm rounded-lg" />
+                    <input type="text" value={medDosage} onChange={e => setMedDosage(e.target.value)}
+                      className="glass-input w-24 px-3 py-2 text-sm rounded-lg" />
+                    <select value={medFrequency} onChange={e => setMedFrequency(e.target.value)}
+                      className="bg-white/10 text-white text-sm rounded-lg px-2 py-2 outline-none border border-white/10">
+                      <option value="Daily" className="bg-[#1a1d27]">Daily</option>
+                      <option value="2x/day" className="bg-[#1a1d27]">2x/day</option>
+                      <option value="3x/day" className="bg-[#1a1d27]">3x/day</option>
+                      <option value="Weekly" className="bg-[#1a1d27]">Weekly</option>
+                      <option value="As needed" className="bg-[#1a1d27]">As needed</option>
+                    </select>
+                    <button onClick={() => {
+                      if (!medName.trim()) return;
+                      const next = [...medicines];
+                      next[i] = { name: medName.trim(), dosage: medDosage.trim(), frequency: medFrequency };
+                      setMedicines(next);
+                      saveSetting('medicines', JSON.stringify(next));
+                      setEditingMedIdx(null);
+                    }} className="btn-primary text-sm px-3 py-2">Save</button>
+                    <button onClick={() => setEditingMedIdx(null)} className="text-xs text-white/30 px-2">Cancel</button>
+                  </div>
+                ) : (
                   <div key={i} className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => {
+                      setMedName(med.name); setMedDosage(med.dosage); setMedFrequency(med.frequency);
+                      setEditingMedIdx(i); setShowAddMed(false);
+                    }}>
                       <span className="text-sm font-medium text-white">{med.name}</span>
                       {med.dosage && <span className="text-xs text-white/40">{med.dosage}</span>}
                       <span className="text-[10px] text-white/25 px-1.5 py-0.5 rounded bg-white/[0.04]">{med.frequency}</span>
