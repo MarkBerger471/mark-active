@@ -94,16 +94,30 @@ export default function Dashboard() {
       setTimeout(() => fetch('/api/oura?days=7').then(r => r.json()).then(d => {
         if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
       }).catch(() => {}), 300);
-      setTimeout(() => fetch('/api/oura?days=60').then(r => r.json()).then(d => {
+      // Activity: merge Oura + Apple Health (Apple Watch takes priority)
+      setTimeout(async () => {
         const act: Record<string, { activeCalories: number }> = {};
-        const addDay = (day: string, steps?: number, activeCal?: number) => {
-          if (steps || activeCal) act[day] = { activeCalories: activeCal || 0 };
-        };
-        if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
-        if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
+        // 1. Fetch Oura activity as baseline
+        try {
+          const d = await fetch('/api/oura?days=60').then(r => r.json());
+          const addDay = (day: string, steps?: number, activeCal?: number) => {
+            if (steps || activeCal) act[day] = { activeCalories: activeCal || 0 };
+          };
+          if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
+          if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
+        } catch {}
+        // 2. Overlay Apple Health data (overrides Oura for days where it exists)
+        try {
+          const h = await fetch('/api/health-sync?days=60').then(r => r.json());
+          if (h.activity) {
+            for (const [day, data] of Object.entries(h.activity) as [string, { activeCalories: number }][]) {
+              if (data.activeCalories > 0) act[day] = { activeCalories: data.activeCalories };
+            }
+          }
+        } catch {}
         setDailyActivity(act);
         try { localStorage.setItem('activity_cache', JSON.stringify(act)); } catch {}
-      }).catch(() => {}), 800);
+      }, 800);
       // Glucose data — restore from cache, then refresh via API (original 2s delay)
       try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
       setTimeout(() => fetch('/api/glucose').then(r => r.json()).then(d => {
