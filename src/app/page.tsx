@@ -71,33 +71,36 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, isLoading, router]);
 
+  // Restore caches immediately (before auth completes) for instant display
+  useEffect(() => {
+    try { const sc = localStorage.getItem('sleep_cache'); if (sc) { const sd = JSON.parse(sc); if (sd.length) setSleepData(sd); } } catch {}
+    try { const ac = localStorage.getItem('activity_cache'); if (ac) { const ad = JSON.parse(ac); if (Object.keys(ad).length) setDailyActivity(ad); } } catch {}
+    try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
+  }, []);
+
   useEffect(() => {
     if (isAuthenticated) {
+      // IDB reads — all in parallel, no delays
       getMeasurements().then(all => {
         setMeasurements(all);
         if (all.length > 0) {
           setLatestMeasurement(all[all.length - 1]);
-          if (all.length > 1) {
-            setPreviousMeasurement(all[all.length - 2]);
-          }
+          if (all.length > 1) setPreviousMeasurement(all[all.length - 2]);
         }
       });
-      // Priority 1: settings (instant from IDB)
       getSetting('phase').then(v => { if (v) setPhase(v as Phase); });
       getSetting('targetWeight').then(v => { if (v) setTargetWeight(parseFloat(v)); });
-      // Priority 2: training + nutrition (instant from IDB, deferred Firestore sync)
       getTrainingSessions().then(setTrainingSessions);
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
-      // Priority 3: API calls — restore from cache first, then refresh
-      try { const sc = localStorage.getItem('sleep_cache'); if (sc) { const sd = JSON.parse(sc); if (sd.length) setSleepData(sd); } } catch {}
-      try { const ac = localStorage.getItem('activity_cache'); if (ac) { const ad = JSON.parse(ac); if (Object.keys(ad).length) setDailyActivity(ad); } } catch {}
-      setTimeout(() => fetch('/api/oura?days=7').then(r => r.json()).then(d => {
+
+      // API calls — no artificial delays, all in parallel
+      fetch('/api/oura?days=7').then(r => r.json()).then(d => {
         if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
-      }).catch(() => {}), 300);
+      }).catch(() => {});
+
       // Activity: merge Oura + Apple Health (Apple Watch takes priority)
-      setTimeout(async () => {
+      (async () => {
         const act: Record<string, { activeCalories: number; source?: string }> = {};
-        // 1. Fetch Oura activity as baseline
         try {
           const d = await fetch('/api/oura?days=60').then(r => r.json());
           const addDay = (day: string, steps?: number, activeCal?: number) => {
@@ -106,7 +109,6 @@ export default function Dashboard() {
           if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
           if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
         } catch {}
-        // 2. Overlay Apple Health data (overrides Oura for days where it exists)
         try {
           const h = await fetch('/api/health-sync?days=60').then(r => r.json());
           if (h.activity) {
@@ -117,16 +119,23 @@ export default function Dashboard() {
         } catch {}
         setDailyActivity(act);
         try { localStorage.setItem('activity_cache', JSON.stringify(act)); } catch {}
-      }, 800);
-      // Glucose data — restore from cache, then refresh via API, then every 5 min
+      })();
+
+      // Glucose: fetch immediately + every 5 min + on focus
       const fetchGlucose = () => fetch('/api/glucose').then(r => r.json()).then(d => {
         if (d.current) { setGlucose(d); try { localStorage.setItem('glucose_cache', JSON.stringify(d)); } catch {} }
       }).catch(() => {});
-      try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
-      setTimeout(fetchGlucose, 2000);
+      fetchGlucose();
       const glucoseInterval = setInterval(fetchGlucose, 5 * 60 * 1000);
-      // Refresh on app focus (PWA returning from background)
-      const onFocus = () => fetchGlucose();
+
+      // Refresh all data on app focus (PWA returning from background)
+      const onFocus = () => {
+        fetchGlucose();
+        fetch('/api/oura?days=7').then(r => r.json()).then(d => {
+          if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
+        }).catch(() => {});
+      };
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onFocus(); });
       window.addEventListener('focus', onFocus);
       return () => { clearInterval(glucoseInterval); window.removeEventListener('focus', onFocus); };
     }
