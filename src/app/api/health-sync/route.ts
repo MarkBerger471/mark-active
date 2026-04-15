@@ -2,16 +2,15 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
-const SYNC_SECRET = process.env.HEALTH_SYNC_SECRET;
-
 // POST: iOS Shortcut sends Apple Health data
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { secret, date, activeCalories, steps } = body;
 
-    // Validate secret
-    if (!SYNC_SECRET || secret !== SYNC_SECRET) {
+    // Validate secret (read at request time for serverless compatibility)
+    const syncSecret = process.env.HEALTH_SYNC_SECRET;
+    if (!syncSecret || secret !== syncSecret) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
