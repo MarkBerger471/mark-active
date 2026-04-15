@@ -58,7 +58,7 @@ export default function Dashboard() {
 
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
-  const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number }>>({});
+  const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number; source?: string }>>({});
   const [glucose, setGlucose] = useState<{
     current: { value: number; valueMmol: number; trend: string; timestamp: string; isHigh: boolean; isLow: boolean } | null;
     history: { value: number; valueMmol: number; timestamp: string }[];
@@ -96,12 +96,12 @@ export default function Dashboard() {
       }).catch(() => {}), 300);
       // Activity: merge Oura + Apple Health (Apple Watch takes priority)
       setTimeout(async () => {
-        const act: Record<string, { activeCalories: number }> = {};
+        const act: Record<string, { activeCalories: number; source?: string }> = {};
         // 1. Fetch Oura activity as baseline
         try {
           const d = await fetch('/api/oura?days=60').then(r => r.json());
           const addDay = (day: string, steps?: number, activeCal?: number) => {
-            if (steps || activeCal) act[day] = { activeCalories: activeCal || 0 };
+            if (steps || activeCal) act[day] = { activeCalories: activeCal || 0, source: 'oura' };
           };
           if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
           if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
@@ -111,7 +111,7 @@ export default function Dashboard() {
           const h = await fetch('/api/health-sync?days=60').then(r => r.json());
           if (h.activity) {
             for (const [day, data] of Object.entries(h.activity) as [string, { activeCalories: number }][]) {
-              if (data.activeCalories > 0) act[day] = { activeCalories: data.activeCalories };
+              if (data.activeCalories > 0) act[day] = { activeCalories: data.activeCalories, source: 'apple-watch' };
             }
           }
         } catch {}
@@ -237,17 +237,19 @@ export default function Dashboard() {
               const nbCacheKey = `nb_${new Date().toISOString().split('T')[0]}_${dailyKcal}_${trainingSessions.length}_${Object.keys(dailyActivity).length}`;
               const nbCacheRaw = typeof window !== 'undefined' ? localStorage.getItem('nb_cache') : null;
               const nbCache = nbCacheRaw ? JSON.parse(nbCacheRaw) : null;
-              let dailyBurn: number, dailyTrainingAvg: number, dailyNeat: number;
+              let dailyBurn: number, dailyTrainingAvg: number, dailyNeat: number, activitySource: string;
               if (nbCache?.key === nbCacheKey) {
                 dailyBurn = nbCache.burn;
                 dailyTrainingAvg = nbCache.training;
                 dailyNeat = nbCache.neat;
+                activitySource = nbCache.source || 'oura';
               } else {
                 const tdee = calcRollingTDEE(trainingSessions, bodyWeight, bmr, dailyActivity);
                 dailyBurn = tdee.total;
                 dailyTrainingAvg = tdee.training;
                 dailyNeat = tdee.neat;
-                try { localStorage.setItem('nb_cache', JSON.stringify({ key: nbCacheKey, burn: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat })); } catch {}
+                activitySource = tdee.source;
+                try { localStorage.setItem('nb_cache', JSON.stringify({ key: nbCacheKey, burn: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat, source: activitySource })); } catch {}
               }
               const weekSessions = trainingSessions.filter(s => {
                 const d = new Date(); d.setDate(d.getDate() - 6);
@@ -407,8 +409,13 @@ export default function Dashboard() {
                   {/* Details */}
                   <div className="flex gap-4 pt-2 border-t border-white/5 text-[10px] text-white/20">
                     <span>BMR {bmr}</span>
-                    <span>Training +{dailyTrainingAvg}</span>
-                    {dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}
+                    {activitySource === 'apple-watch' ? (
+                      <span>⌚ Activity +{dailyNeat + dailyTrainingAvg}</span>
+                    ) : activitySource === 'mixed' ? (
+                      <><span>⌚+Training +{dailyTrainingAvg}</span>{dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}</>
+                    ) : (
+                      <><span>Training +{dailyTrainingAvg}</span>{dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}</>
+                    )}
                     <span>{weekSessions.length} sessions</span>
                   </div>
                 </div>

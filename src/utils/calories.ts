@@ -102,8 +102,8 @@ export function calcRollingTDEE(
   sessions: TrainingSession[],
   bodyWeight: number,
   bmr: number,
-  dailyActivity: Record<string, { activeCalories: number }>,
-): { total: number; training: number; neat: number; sessions: TrainingSession[] } {
+  dailyActivity: Record<string, { activeCalories: number; source?: string }>,
+): { total: number; training: number; neat: number; sessions: TrainingSession[]; source: string } {
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
   const rollingStart = new Date(now);
@@ -111,20 +111,48 @@ export function calcRollingTDEE(
   const rollingStartStr = rollingStart.toISOString().split('T')[0];
 
   const rollingSessions = sessions.filter(s => s.date >= rollingStartStr && s.date <= todayStr);
-  const trainingCals = rollingSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
-  const dailyTraining = Math.round(trainingCals / 7);
 
-  let totalActiveCals = 0, actDays = 0;
+  // Separate watch days vs non-watch days
+  let watchTotalCals = 0, watchDays = 0;
+  let ouraTotalCals = 0, ouraDays = 0;
+  const nonWatchDates: string[] = [];
+
   for (let i = 0; i < 7; i++) {
     const d = new Date(rollingStart);
     d.setDate(d.getDate() + i);
     const dayStr = d.toISOString().split('T')[0];
     const act = dailyActivity[dayStr];
-    if (act && act.activeCalories > 0) { totalActiveCals += act.activeCalories; actDays++; }
+    if (act && act.activeCalories > 0) {
+      if (act.source === 'apple-watch') {
+        // Watch day: activeCalories includes gym + NEAT (single source)
+        watchTotalCals += act.activeCalories;
+        watchDays++;
+      } else {
+        // Oura/fallback day: NEAT only, add training separately
+        ouraTotalCals += act.activeCalories;
+        ouraDays++;
+        nonWatchDates.push(dayStr);
+      }
+    } else {
+      nonWatchDates.push(dayStr);
+    }
   }
-  const neat = actDays > 0 ? Math.round(totalActiveCals / actDays) : 0;
 
-  return { total: bmr + dailyTraining + neat, training: dailyTraining, neat, sessions: rollingSessions };
+  // Training calories only for non-watch days (watch already includes gym)
+  const nonWatchSessions = rollingSessions.filter(s => nonWatchDates.includes(s.date));
+  const nonWatchTrainingCals = nonWatchSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
+
+  // Weighted average across all 7 days
+  const totalActivity = watchTotalCals + ouraTotalCals + nonWatchTrainingCals;
+  const totalDaysWithData = watchDays + ouraDays;
+  const dailyActivityAvg = totalDaysWithData > 0 ? Math.round(totalActivity / 7) : 0;
+
+  // For display: split into training + neat
+  const dailyTraining = Math.round(nonWatchTrainingCals / 7);
+  const neat = dailyActivityAvg - dailyTraining;
+  const source = watchDays > ouraDays ? 'apple-watch' : watchDays > 0 ? 'mixed' : 'oura';
+
+  return { total: bmr + dailyActivityAvg, training: dailyTraining, neat: Math.max(0, neat), sessions: rollingSessions, source };
 }
 
 const CHEAT_MEAL_KCAL = 1300;
