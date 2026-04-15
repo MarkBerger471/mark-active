@@ -587,6 +587,13 @@ export default function VitalsPage() {
   const [lsCoffee, setLsCoffee] = useState('2-5 cups/day');
   const [lsStress, setLsStress] = useState('Moderate');
 
+  // Medicine state
+  const [medicines, setMedicines] = useState<{ name: string; dosage: string; frequency: string }[]>([]);
+  const [showAddMed, setShowAddMed] = useState(false);
+  const [medName, setMedName] = useState('');
+  const [medDosage, setMedDosage] = useState('');
+  const [medFrequency, setMedFrequency] = useState('Daily');
+
   // Analysis state
   const [analysing, setAnalysing] = useState<string | null>(null);
   const [viewingAnalysis, setViewingAnalysis] = useState<string | null>(null);
@@ -620,6 +627,7 @@ export default function VitalsPage() {
       getSetting('ls_water').then(v => { if (v) setLsWater(v); });
       getSetting('ls_coffee').then(v => { if (v) setLsCoffee(v); });
       getSetting('ls_stress').then(v => { if (v) setLsStress(v); });
+      getSetting('medicines').then(v => { if (v) try { setMedicines(JSON.parse(v)); } catch {} });
     }
   }, [isAuthenticated]);
 
@@ -1025,6 +1033,60 @@ export default function VitalsPage() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Medicine Box */}
+          <div className="glass-card p-5 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-white">Medicine & Supplements</h2>
+              <button onClick={() => setShowAddMed(!showAddMed)} className="text-[10px] px-3 py-1 rounded-lg border border-white/10 text-white/40 hover:text-white/70 transition-all">
+                {showAddMed ? 'Cancel' : '+ Add'}
+              </button>
+            </div>
+            {showAddMed && (
+              <div className="flex gap-2 mb-3">
+                <input type="text" placeholder="Name" value={medName} onChange={e => setMedName(e.target.value)}
+                  className="glass-input flex-1 px-3 py-2 text-sm rounded-lg" />
+                <input type="text" placeholder="Dosage" value={medDosage} onChange={e => setMedDosage(e.target.value)}
+                  className="glass-input w-24 px-3 py-2 text-sm rounded-lg" />
+                <select value={medFrequency} onChange={e => setMedFrequency(e.target.value)}
+                  className="bg-white/10 text-white text-sm rounded-lg px-2 py-2 outline-none border border-white/10">
+                  <option value="Daily" className="bg-[#1a1d27]">Daily</option>
+                  <option value="2x/day" className="bg-[#1a1d27]">2x/day</option>
+                  <option value="3x/day" className="bg-[#1a1d27]">3x/day</option>
+                  <option value="Weekly" className="bg-[#1a1d27]">Weekly</option>
+                  <option value="As needed" className="bg-[#1a1d27]">As needed</option>
+                </select>
+                <button onClick={() => {
+                  if (!medName.trim()) return;
+                  const next = [...medicines, { name: medName.trim(), dosage: medDosage.trim(), frequency: medFrequency }];
+                  setMedicines(next);
+                  saveSetting('medicines', JSON.stringify(next));
+                  setMedName(''); setMedDosage(''); setMedFrequency('Daily'); setShowAddMed(false);
+                }} className="btn-primary text-sm px-3 py-2">Add</button>
+              </div>
+            )}
+            {medicines.length === 0 && !showAddMed && (
+              <p className="text-xs text-white/20">No medicines added. Tap + Add to track medications that may affect blood markers.</p>
+            )}
+            {medicines.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                {medicines.map((med, i) => (
+                  <div key={i} className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-white">{med.name}</span>
+                      {med.dosage && <span className="text-xs text-white/40">{med.dosage}</span>}
+                      <span className="text-[10px] text-white/25 px-1.5 py-0.5 rounded bg-white/[0.04]">{med.frequency}</span>
+                    </div>
+                    <button onClick={() => {
+                      const next = medicines.filter((_, j) => j !== i);
+                      setMedicines(next);
+                      saveSetting('medicines', JSON.stringify(next));
+                    }} className="text-xs text-red-400/50 hover:text-red-400 transition-all px-2">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Add form */}
