@@ -118,11 +118,17 @@ export default function Dashboard() {
         setDailyActivity(act);
         try { localStorage.setItem('activity_cache', JSON.stringify(act)); } catch {}
       }, 800);
-      // Glucose data — restore from cache, then refresh via API (original 2s delay)
-      try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
-      setTimeout(() => fetch('/api/glucose').then(r => r.json()).then(d => {
+      // Glucose data — restore from cache, then refresh via API, then every 5 min
+      const fetchGlucose = () => fetch('/api/glucose').then(r => r.json()).then(d => {
         if (d.current) { setGlucose(d); try { localStorage.setItem('glucose_cache', JSON.stringify(d)); } catch {} }
-      }).catch(() => {}), 2000);
+      }).catch(() => {});
+      try { const gc = localStorage.getItem('glucose_cache'); if (gc) { const gd = JSON.parse(gc); if (gd.current) setGlucose(gd); } } catch {}
+      setTimeout(fetchGlucose, 2000);
+      const glucoseInterval = setInterval(fetchGlucose, 5 * 60 * 1000);
+      // Refresh on app focus (PWA returning from background)
+      const onFocus = () => fetchGlucose();
+      window.addEventListener('focus', onFocus);
+      return () => { clearInterval(glucoseInterval); window.removeEventListener('focus', onFocus); };
     }
   }, [isAuthenticated]);
 
