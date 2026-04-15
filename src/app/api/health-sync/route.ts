@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     // Validate secret (read at request time for serverless compatibility)
     const syncSecret = process.env.HEALTH_SYNC_SECRET;
     if (!syncSecret || secret !== syncSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized', hasEnv: !!syncSecret, envLen: syncSecret?.length || 0 }, { status: 401 });
     }
 
     // Validate required fields
