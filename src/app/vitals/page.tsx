@@ -940,8 +940,13 @@ export default function VitalsPage() {
 
   if (isLoading || !isAuthenticated || !loaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-white/40 text-lg">Loading...</div>
+      <div className="min-h-screen">
+        <Navigation />
+        <main className="main-content p-6 pt-32 md:pt-6 pwa-main">
+          <div className="max-w-3xl mx-auto flex items-center justify-center min-h-[60vh]">
+            <div className="text-white/40 text-lg">Loading...</div>
+          </div>
+        </main>
       </div>
     );
   }
