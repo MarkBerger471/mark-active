@@ -446,8 +446,9 @@ export default function Dashboard() {
           {glucose?.current && (() => {
             const { current, history, stats } = glucose;
             const gv = current.value;
-            const color = gv < 80 ? '#ef4444' : gv <= 110 ? '#22c55e' : gv <= 160 ? '#f59e0b' : '#ef4444';
-            const glabel = gv < 80 ? 'LOW' : gv <= 110 ? 'IN RANGE' : gv <= 160 ? 'ELEVATED' : 'HIGH';
+            const gValColor = (v: number) => v < 80 ? '#ef4444' : v <= 120 ? '#22c55e' : v <= 160 ? '#f59e0b' : '#ef4444';
+            const color = gValColor(gv);
+            const glabel = gv < 80 ? 'LOW' : gv <= 120 ? 'IN RANGE' : gv <= 160 ? 'ELEVATED' : 'HIGH';
             const tirColor = stats.timeInRange >= 70 ? '#22c55e' : stats.timeInRange >= 40 ? '#f59e0b' : '#ef4444';
 
             // Chart dimensions — larger chart
@@ -516,43 +517,44 @@ export default function Dashboard() {
                 {gPts.length > 2 && (
                   <svg viewBox={`0 0 ${gChartW} ${gChartH}`} className="w-full" style={{ minHeight: '180px' }}>
                     <defs>
-                      {/* Zone-colored vertical gradient for area fill */}
-                      <linearGradient id="gZoneArea" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ef4444" stopOpacity="0.15" />
-                        <stop offset={`${((gMx - 160) / gRng) * 100}%`} stopColor="#f59e0b" stopOpacity="0.12" />
-                        <stop offset={`${((gMx - 110) / gRng) * 100}%`} stopColor="#22c55e" stopOpacity="0.08" />
-                        <stop offset="100%" stopColor="transparent" />
-                      </linearGradient>
-                      {/* Zone-colored vertical gradient for stroke */}
-                      <linearGradient id="gZoneStroke" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ef4444" />
-                        <stop offset={`${((gMx - 160) / gRng) * 100}%`} stopColor="#ef4444" />
-                        <stop offset={`${((gMx - 160) / gRng) * 100 + 1}%`} stopColor="#f59e0b" />
-                        <stop offset={`${((gMx - 110) / gRng) * 100}%`} stopColor="#f59e0b" />
-                        <stop offset={`${((gMx - 110) / gRng) * 100 + 1}%`} stopColor="#22c55e" />
-                        <stop offset={`${((gMx - 80) / gRng) * 100}%`} stopColor="#22c55e" />
-                        <stop offset="100%" stopColor="#ef4444" />
+                      <linearGradient id="gAreaFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={color} stopOpacity="0.15" />
+                        <stop offset="100%" stopColor={color} stopOpacity="0" />
                       </linearGradient>
                       <filter id="gGlow"><feGaussianBlur stdDeviation="1.5" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+                      {/* Per-segment gradients for smooth color transitions */}
+                      {gPts.slice(0, -1).map((p, i) => {
+                        const p2 = gPts[i + 1];
+                        const c1 = gValColor(p.val), c2 = gValColor(p2.val);
+                        return <linearGradient key={`gSeg${i}`} id={`gSeg${i}`} x1={p.x} y1="0" x2={p2.x} y2="0" gradientUnits="userSpaceOnUse">
+                          <stop offset="0%" stopColor={c1} /><stop offset="100%" stopColor={c2} />
+                        </linearGradient>;
+                      })}
                     </defs>
 
                     {/* Zone boundary lines */}
-                    {[80, 110, 160].map(val => (
+                    {[80, 120, 160].map(val => (
                       <g key={val}>
                         <line x1={gPad.left} y1={toGY(val)} x2={gPad.left + gIW} y2={toGY(val)}
-                          stroke={val === 110 ? '#22c55e' : val === 80 ? '#22c55e' : '#ef4444'} strokeOpacity="0.12" strokeDasharray="4 4" />
+                          stroke={val === 120 ? '#22c55e' : val === 80 ? '#22c55e' : '#ef4444'} strokeOpacity="0.12" strokeDasharray="4 4" />
                         <text x={gPad.left - 4} y={toGY(val) + 3} textAnchor="end" fill="white" fillOpacity="0.2" fontSize="8">{val}</text>
                       </g>
                     ))}
 
-                    {/* Green zone band */}
-                    <rect x={gPad.left} y={toGY(110)} width={gIW} height={toGY(80) - toGY(110)} fill="#22c55e" opacity="0.04" rx="2" />
+                    {/* Green zone band (80-120) */}
+                    <rect x={gPad.left} y={toGY(120)} width={gIW} height={toGY(80) - toGY(120)} fill="#22c55e" opacity="0.04" rx="2" />
 
-                    {/* Area fill with zone gradient */}
-                    {gLinePath && <path d={`${gLinePath} L ${gPts[gPts.length - 1].x} ${gPad.top + gIH} L ${gPts[0].x} ${gPad.top + gIH} Z`} fill="url(#gZoneArea)" className="chart-area-fade" />}
+                    {/* Area fill */}
+                    {gLinePath && <path d={`${gLinePath} L ${gPts[gPts.length - 1].x} ${gPad.top + gIH} L ${gPts[0].x} ${gPad.top + gIH} Z`} fill="url(#gAreaFill)" className="chart-area-fade" />}
 
-                    {/* Main curve with zone-colored stroke */}
-                    {gLinePath && <path d={gLinePath} fill="none" stroke="url(#gZoneStroke)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#gGlow)" />}
+                    {/* Per-segment curve with smooth color transitions — glow applied to group */}
+                    <g filter="url(#gGlow)">
+                      {gPts.length >= 2 && gPts.slice(0, -1).map((p, i) => {
+                        const p2 = gPts[i + 1], p3 = gPts[Math.min(gPts.length - 1, i + 2)], p0 = gPts[Math.max(0, i - 1)];
+                        return <path key={i} d={`M ${p.x} ${p.y} C ${p.x + (p2.x - p0.x) / 6} ${p.y + (p2.y - p0.y) / 6}, ${p2.x - (p3.x - p.x) / 6} ${p2.y - (p3.y - p.y) / 6}, ${p2.x} ${p2.y}`}
+                          fill="none" stroke={`url(#gSeg${i})`} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />;
+                      })}
+                    </g>
 
                     {/* Peak annotation */}
                     {peak && peak.val > 140 && (
