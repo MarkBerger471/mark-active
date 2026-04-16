@@ -976,9 +976,9 @@ export default function TrainingPlanPage() {
               const isExpanded = expandedExercise === exIdx;
               const warmupSets = ex.sets.filter(s => s.isWarmup);
               const workingSets = ex.sets.filter(s => !s.isWarmup);
-              const doneSets = ex.sets.filter(s => s.done).length;
+              const doneWorkingSets = workingSets.filter(s => s.done).length;
 
-              const completionPct = ex.sets.length > 0 ? doneSets / ex.sets.length : 0;
+              const completionPct = workingSets.length > 0 ? doneWorkingSets / workingSets.length : 0;
               const statusTint = ex.skipped ? '' : completionPct >= 1 ? 'from-green-500/8 to-transparent' : completionPct > 0 ? 'from-amber-500/6 to-transparent' : '';
               const cardGlow = ex.skipped ? {} : completionPct >= 1 ? { boxShadow: '0 0 10px rgba(34,197,94,0.2), inset 0 0 1px rgba(34,197,94,0.3)' } : completionPct > 0 ? { boxShadow: '0 0 8px rgba(245,158,11,0.15), inset 0 0 1px rgba(245,158,11,0.2)' } : {};
 
@@ -1011,7 +1011,7 @@ export default function TrainingPlanPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-3 ml-2">
-                      <span className="text-xs text-white/30">{doneSets}/{ex.sets.length}</span>
+                      <span className="text-xs text-white/30">{doneWorkingSets}/{workingSets.length}{warmupSets.length > 0 ? ` +${warmupSets.length}WU` : ''}</span>
                       <span className={`text-white/20 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
                     </div>
                   </button>

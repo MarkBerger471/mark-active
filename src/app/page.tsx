@@ -56,6 +56,7 @@ export default function Dashboard() {
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
   const [sleepIdx, setSleepIdx] = useState(0);
 
+  const [igPosts, setIgPosts] = useState<{ url: string; caption: string; postId: string; createdAt: string }[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number; source?: string }>>({});
@@ -94,6 +95,9 @@ export default function Dashboard() {
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
 
       // API calls — no artificial delays, all in parallel
+      fetch('/api/instagram-sync?count=5').then(r => r.json()).then(d => {
+        if (d.posts?.length) setIgPosts(d.posts);
+      }).catch(() => {});
       fetch('/api/oura?days=7').then(r => r.json()).then(d => {
         if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
       }).catch(() => {});
@@ -725,6 +729,39 @@ export default function Dashboard() {
                 </div>
               );
             })()}
+
+          {/* Instagram Feed */}
+          {igPosts.length > 0 && (
+            <div className="glass-card p-4 mb-6 fade-up">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <span className="text-base">📸</span> Daily Inspiration
+                </h2>
+                <a href="https://instagram.com/gmbadass" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white/30 hover:text-white/50 transition-all">@gmbadass</a>
+              </div>
+              <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollSnapType: 'x mandatory' }}>
+                {igPosts.map((post, i) => (
+                  <a key={post.postId || i} href={post.url} target="_blank" rel="noopener noreferrer"
+                    className="flex-shrink-0 w-[280px] rounded-xl overflow-hidden border border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06] transition-all"
+                    style={{ scrollSnapAlign: 'start' }}>
+                    <div className="relative w-full" style={{ paddingBottom: '100%' }}>
+                      <iframe
+                        src={`https://www.instagram.com/p/${post.postId}/embed/`}
+                        className="absolute inset-0 w-full h-full border-0"
+                        loading="lazy"
+                        allowTransparency
+                      />
+                    </div>
+                    {post.caption && (
+                      <div className="p-3">
+                        <p className="text-[11px] text-white/40 line-clamp-2">{post.caption}</p>
+                      </div>
+                    )}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {
