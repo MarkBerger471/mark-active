@@ -588,12 +588,31 @@ export default function VitalsPage() {
   const [lsStress, setLsStress] = useState('Moderate');
 
   // Medicine state
-  const [medicines, setMedicines] = useState<{ name: string; dosage: string; frequency: string }[]>([]);
+  interface MedInfo { genericName?: string; brandNames?: string[]; category?: string; usedFor?: string; typicalDosage?: string; bloodMarkerEffects?: { marker: string; effect: string; note: string }[]; commonSideEffects?: string[]; notes?: string }
+  const [medicines, setMedicines] = useState<{ name: string; dosage: string; frequency: string; info?: MedInfo }[]>([]);
   const [showAddMed, setShowAddMed] = useState(false);
   const [editingMedIdx, setEditingMedIdx] = useState<number | null>(null);
+  const [expandedMedIdx, setExpandedMedIdx] = useState<number | null>(null);
+  const [lookingUpMed, setLookingUpMed] = useState<number | null>(null);
   const [medName, setMedName] = useState('');
   const [medDosage, setMedDosage] = useState('');
   const [medFrequency, setMedFrequency] = useState('Daily');
+
+  const lookupMed = async (idx: number) => {
+    setLookingUpMed(idx);
+    try {
+      const res = await fetch('/api/med-lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: medicines[idx].name }) });
+      if (res.ok) {
+        const info = await res.json();
+        const next = [...medicines];
+        next[idx] = { ...next[idx], info };
+        setMedicines(next);
+        saveSetting('medicines', JSON.stringify(next));
+        setExpandedMedIdx(idx);
+      }
+    } catch {}
+    setLookingUpMed(null);
+  };
 
   // Analysis state
   const [analysing, setAnalysing] = useState<string | null>(null);
@@ -1039,7 +1058,7 @@ export default function VitalsPage() {
           {/* Medicine Box */}
           <div className="glass-card p-5 mb-6">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-white">Medicine & Supplements</h2>
+              <h2 className="text-sm font-semibold text-white">Medication</h2>
               <button onClick={() => setShowAddMed(!showAddMed)} className="text-[10px] px-3 py-1 rounded-lg border border-white/10 text-white/40 hover:text-white/70 transition-all">
                 {showAddMed ? 'Cancel' : '+ Add'}
               </button>
@@ -1068,7 +1087,7 @@ export default function VitalsPage() {
               </div>
             )}
             {medicines.length === 0 && !showAddMed && (
-              <p className="text-xs text-white/20">No medicines added. Tap + Add to track medications that may affect blood markers.</p>
+              <p className="text-xs text-white/20">No medications added. Tap + Add to track meds that may affect blood markers.</p>
             )}
             {medicines.length > 0 && (
               <div className="flex flex-col gap-1.5">
@@ -1097,20 +1116,69 @@ export default function VitalsPage() {
                     <button onClick={() => setEditingMedIdx(null)} className="text-xs text-white/30 px-2">Cancel</button>
                   </div>
                 ) : (
-                  <div key={i} className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => {
-                      setMedName(med.name); setMedDosage(med.dosage); setMedFrequency(med.frequency);
-                      setEditingMedIdx(i); setShowAddMed(false);
-                    }}>
-                      <span className="text-sm font-medium text-white">{med.name}</span>
-                      {med.dosage && <span className="text-xs text-white/40">{med.dosage}</span>}
-                      <span className="text-[10px] text-white/25 px-1.5 py-0.5 rounded bg-white/[0.04]">{med.frequency}</span>
+                  <div key={i} className="bg-white/[0.03] rounded-lg overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2">
+                      <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => {
+                        setMedName(med.name); setMedDosage(med.dosage); setMedFrequency(med.frequency);
+                        setEditingMedIdx(i); setShowAddMed(false);
+                      }}>
+                        <span className="text-sm font-medium text-white">{med.name}</span>
+                        {med.dosage && <span className="text-xs text-white/40">{med.dosage}</span>}
+                        <span className="text-[10px] text-white/25 px-1.5 py-0.5 rounded bg-white/[0.04]">{med.frequency}</span>
+                        {med.info?.category && <span className="text-[9px] text-white/20">{med.info.category}</span>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {lookingUpMed === i ? (
+                          <span className="text-[10px] text-white/30 px-2">Looking up...</span>
+                        ) : (
+                          <button onClick={() => med.info ? setExpandedMedIdx(expandedMedIdx === i ? null : i) : lookupMed(i)}
+                            className="text-[10px] px-2 py-0.5 rounded text-white/30 hover:text-white/60 transition-all">
+                            {med.info ? (expandedMedIdx === i ? '▴' : '▾') : 'ℹ Lookup'}
+                          </button>
+                        )}
+                        <button onClick={() => {
+                          const next = medicines.filter((_, j) => j !== i);
+                          setMedicines(next);
+                          saveSetting('medicines', JSON.stringify(next));
+                          if (expandedMedIdx === i) setExpandedMedIdx(null);
+                        }} className="text-xs text-red-400/50 hover:text-red-400 transition-all px-2">✕</button>
+                      </div>
                     </div>
-                    <button onClick={() => {
-                      const next = medicines.filter((_, j) => j !== i);
-                      setMedicines(next);
-                      saveSetting('medicines', JSON.stringify(next));
-                    }} className="text-xs text-red-400/50 hover:text-red-400 transition-all px-2">✕</button>
+                    {/* Expanded info panel */}
+                    {expandedMedIdx === i && med.info && (
+                      <div className="px-3 pb-3 pt-1 border-t border-white/5">
+                        <div className="grid grid-cols-2 gap-2 text-[11px] mb-2">
+                          {med.info.genericName && <div><span className="text-white/25">Generic:</span> <span className="text-white/60">{med.info.genericName}</span></div>}
+                          {med.info.usedFor && <div><span className="text-white/25">Used for:</span> <span className="text-white/60">{med.info.usedFor}</span></div>}
+                          {med.info.typicalDosage && <div><span className="text-white/25">Typical dose:</span> <span className="text-white/60">{med.info.typicalDosage}</span></div>}
+                        </div>
+                        {med.info.bloodMarkerEffects && med.info.bloodMarkerEffects.length > 0 && (
+                          <div className="mb-2">
+                            <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Blood Marker Effects</div>
+                            <div className="flex flex-col gap-1">
+                              {med.info.bloodMarkerEffects.map((bm, j) => (
+                                <div key={j} className="flex items-start gap-2 text-[11px]">
+                                  <span className={`font-semibold ${bm.effect === 'increase' ? 'text-red-400' : bm.effect === 'decrease' ? 'text-green-400' : 'text-amber-400'}`}>
+                                    {bm.effect === 'increase' ? '↑' : bm.effect === 'decrease' ? '↓' : '~'} {bm.marker}
+                                  </span>
+                                  <span className="text-white/35">{bm.note}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {med.info.commonSideEffects && med.info.commonSideEffects.length > 0 && (
+                          <div className="mb-2">
+                            <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Common Side Effects</div>
+                            <div className="text-[11px] text-white/35">{med.info.commonSideEffects.join(' · ')}</div>
+                          </div>
+                        )}
+                        {med.info.notes && (
+                          <div className="text-[10px] text-amber-400/60 mt-1">{med.info.notes}</div>
+                        )}
+                        <button onClick={() => lookupMed(i)} className="text-[10px] text-white/20 hover:text-white/40 mt-2 transition-all">↻ Refresh lookup</button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
