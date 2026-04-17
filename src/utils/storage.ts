@@ -682,15 +682,41 @@ export async function seedInitialData() {
   const existing = await idbGetMeasurements();
   if (existing.length > 0) return;
 
-  // Also check Firestore if online
+  // Also check Firestore if online — pull ALL data
   if (navigator.onLine) {
     try {
       const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
       const snap = await getDocs(q);
       if (!snap.empty) {
-        // Firestore has data, pull into IDB
         const items = snap.docs.map(d => d.data() as Measurement);
         await bulkPutMeasurements(items);
+
+        // Also pull training sessions
+        try {
+          const sessSnap = await getDocs(collection(db, 'trainingSessions'));
+          if (!sessSnap.empty) {
+            const sessions = sessSnap.docs.map(d => d.data() as TrainingSession);
+            await bulkPutTrainingSessions(sessions);
+          }
+        } catch {}
+
+        // Also pull nutrition plan
+        try {
+          const nutSnap = await getDoc(doc(db, 'nutrition', 'plan'));
+          if (nutSnap.exists() && nutSnap.data().current) {
+            await idbPutNutrition(nutSnap.data() as NutritionPlan);
+          }
+        } catch {}
+
+        // Also pull settings
+        try {
+          const settSnap = await getDocs(collection(db, 'settings'));
+          for (const d of settSnap.docs) {
+            const data = d.data();
+            if (data.value !== undefined) await idbPutSetting(d.id, data.value);
+          }
+        } catch {}
+
         return;
       }
     } catch (e) {

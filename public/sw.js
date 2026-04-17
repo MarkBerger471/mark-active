@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bb-shell-v31';
+const CACHE_NAME = 'bb-shell-v32';
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan'];
 

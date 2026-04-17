@@ -26,7 +26,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isSessionValid()) {
       setIsAuthenticated(true);
-      seedInitialData();
+      seedInitialData().catch(() => {});
     }
     setIsLoading(false);
   }, []);
