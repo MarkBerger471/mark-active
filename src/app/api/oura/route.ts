@@ -9,9 +9,12 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const days = parseInt(searchParams.get('days') || '7');
-  const startParam = searchParams.get('start_date');
-  const endParam = searchParams.get('end_date');
+  const days = Math.min(Math.max(parseInt(searchParams.get('days') || '7') || 7, 1), 365);
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const startRaw = searchParams.get('start_date');
+  const endRaw = searchParams.get('end_date');
+  const startParam = startRaw && dateRe.test(startRaw) ? startRaw : null;
+  const endParam = endRaw && dateRe.test(endRaw) ? endRaw : null;
 
   const endDate = endParam || new Date().toISOString().split('T')[0];
   const startDate = startParam || new Date(Date.now() - days * 86400000).toISOString().split('T')[0];

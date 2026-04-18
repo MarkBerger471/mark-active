@@ -135,9 +135,14 @@ export default function Dashboard() {
           if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
         }).catch(() => {});
       };
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onFocus(); });
+      const onVisibility = () => { if (document.visibilityState === 'visible') onFocus(); };
+      document.addEventListener('visibilitychange', onVisibility);
       window.addEventListener('focus', onFocus);
-      return () => { clearInterval(glucoseInterval); window.removeEventListener('focus', onFocus); };
+      return () => {
+        clearInterval(glucoseInterval);
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVisibility);
+      };
     }
   }, [isAuthenticated]);
 
@@ -201,7 +206,7 @@ export default function Dashboard() {
               const isBad = change !== undefined && change !== 0 && !isGood;
               const tint = isGood ? 'from-green-500/8 to-transparent' : isBad ? 'from-red-500/8 to-transparent' : '';
               const spark = sparkData(stat.field);
-              const sparkColor = isGood ? '#22c55e' : isBad ? '#ef4444' : '#22c55e';
+              const sparkColor = isGood ? '#22c55e' : isBad ? '#ef4444' : '#9ca3af';
 
               const glowShadow = isGood ? '0 0 10px rgba(34,197,94,0.25), 0 0 25px rgba(34,197,94,0.1)' : isBad ? '0 0 10px rgba(239,68,68,0.25), 0 0 25px rgba(239,68,68,0.1)' : 'none';
               return (
@@ -254,7 +259,10 @@ export default function Dashboard() {
               const intake = dailyKcal;
 
               // Cache TDEE once per day — only recompute if date or plan changes
-              const nbCacheKey = `nb_${new Date().toISOString().split('T')[0]}_${dailyKcal}_${trainingSessions.length}_${Object.keys(dailyActivity).length}`;
+              // Include sum of activeCalories + bodyWeight + bmr in cache key to avoid stale TDEE
+              // when activity source flips (oura ↔ apple-watch) or when weight/BMR changes
+              const activitySum = Object.values(dailyActivity).reduce((s, a) => s + (a.activeCalories || 0), 0);
+              const nbCacheKey = `nb_${new Date().toISOString().split('T')[0]}_${dailyKcal}_${trainingSessions.length}_${Object.keys(dailyActivity).length}_${activitySum}_${bmr}_${bodyWeight}`;
               const nbCacheRaw = typeof window !== 'undefined' ? localStorage.getItem('nb_cache') : null;
               const nbCache = nbCacheRaw ? JSON.parse(nbCacheRaw) : null;
               let dailyBurn: number, dailyTrainingAvg: number, dailyNeat: number, activitySource: string;
@@ -748,18 +756,22 @@ export default function Dashboard() {
             const rsumXY = recentWeeks.reduce((a, x, i) => a + x * recentWeights[i], 0);
             const rsumX2 = recentWeeks.reduce((a, x) => a + x * x, 0);
             const slope = rn > 1 ? (rn * rsumXY - rsumX * rsumY) / (rn * rsumX2 - rsumX * rsumX) : 0;
-            // Full history regression for trend line reference
+            // Full history regression for trend line reference — use its own slope+intercept
             const n = weeks.length;
             const sumX = weeks.reduce((a, b) => a + b, 0);
             const sumY = weights.reduce((a, b) => a + b, 0);
-            const intercept = (sumY - slope * sumX) / n;
+            const sumXY = weeks.reduce((a, x, i) => a + x * weights[i], 0);
+            const sumX2 = weeks.reduce((a, x) => a + x * x, 0);
+            const fullSlope = n > 1 ? (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX) : 0;
+            const intercept = (sumY - fullSlope * sumX) / n;
 
             // Projection: extend from last point using trend
             const lastDate = new Date(measurements[measurements.length - 1].date);
             const lastWeek = weeks[weeks.length - 1];
             let projectionWeeks = 0;
             let projectionLabel = '';
-            if (targetWeight !== null && slope !== 0) {
+            // Guard against tiny slopes producing Invalid Date / huge projections
+            if (targetWeight !== null && Math.abs(slope) >= 0.05) {
               const weeksToTarget = (targetWeight - endWeight) / slope;
               if (weeksToTarget > 0) {
                 projectionWeeks = Math.ceil(weeksToTarget);
@@ -826,9 +838,9 @@ export default function Dashboard() {
             const lineLen = points.reduce((acc, p, i) => i === 0 ? 0 : acc + Math.hypot(p.x - points[i-1].x, p.y - points[i-1].y), 0) * 1.3;
             const areaPath = `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`;
 
-            // Trend line across full data range
+            // Trend line across full data range — uses full-history slope/intercept for coherence
             const trendY1 = toY(intercept);
-            const trendY2 = toY(intercept + slope * lastWeek);
+            const trendY2 = toY(intercept + fullSlope * lastWeek);
 
             // Projection path (dotted, from last point forward)
             const projPathPoints = [

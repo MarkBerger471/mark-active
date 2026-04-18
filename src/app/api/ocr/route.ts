@@ -13,12 +13,18 @@ export async function POST(request: Request) {
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
+    // Validate file size (Google Vision inline limit is 20MB)
+    if (file.size > 20 * 1024 * 1024) {
+      return NextResponse.json({ error: 'File too large (max 20MB)' }, { status: 400 });
+    }
+    // Validate MIME type — only images and PDFs
+    const mimeType = file.type || 'application/pdf';
+    if (!mimeType.startsWith('image/') && mimeType !== 'application/pdf') {
+      return NextResponse.json({ error: 'Invalid file type (images or PDF only)' }, { status: 400 });
+    }
 
     const buffer = await file.arrayBuffer();
     const base64 = Buffer.from(buffer).toString('base64');
-
-    // Determine MIME type
-    const mimeType = file.type || 'application/pdf';
 
     // For PDFs, use DOCUMENT_TEXT_DETECTION which handles multi-page
     // For images, use TEXT_DETECTION

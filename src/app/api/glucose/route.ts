@@ -113,7 +113,7 @@ export async function GET() {
     return formatResponse(await graphRes.json());
   } catch (e) {
     console.error('Glucose API error:', e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: 'Glucose fetch failed' }, { status: 500 });
   }
 }
 
@@ -143,7 +143,7 @@ function formatResponse(graphData: any) {
 
   // Stats
   const values = history.map((h: { value: number }) => h.value).filter((v: number) => v > 0);
-  const inRange = values.filter((v: number) => v >= 80 && v <= 110).length;
+  const inRange = values.filter((v: number) => v >= 80 && v <= 120).length;
   const timeInRange = values.length > 0 ? Math.round((inRange / values.length) * 100) : 0;
   const avgGlucose = values.length > 0 ? Math.round(values.reduce((a: number, b: number) => a + b, 0) / values.length) : 0;
   const avgMmol = Math.round(avgGlucose * 0.0555 * 10) / 10;
@@ -155,6 +155,6 @@ function formatResponse(graphData: any) {
     history,
     stats: { timeInRange, avgGlucose, avgMmol, estimatedA1c, readings: values.length },
   }, {
-    headers: { 'Cache-Control': 'public, max-age=300' },
+    headers: { 'Cache-Control': 'private, max-age=60' },
   });
 }

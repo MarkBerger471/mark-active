@@ -6,9 +6,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
   }
 
-  const { name } = await request.json();
-  if (!name || typeof name !== 'string') {
+  const { name: rawName } = await request.json();
+  if (!rawName || typeof rawName !== 'string') {
     return NextResponse.json({ error: 'Missing medication name' }, { status: 400 });
+  }
+  // Sanitize: limit length, strip control chars and quotes that could enable prompt injection
+  const name = rawName.slice(0, 100).replace(/[\x00-\x1F"'`\\]/g, '').trim();
+  if (!name) {
+    return NextResponse.json({ error: 'Invalid medication name' }, { status: 400 });
   }
 
   try {
@@ -56,6 +61,7 @@ Use established medical/pharmaceutical references. Focus especially on which blo
 
     return NextResponse.json(JSON.parse(jsonMatch[0]));
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    console.error('med-lookup error:', e);
+    return NextResponse.json({ error: 'Lookup failed' }, { status: 500 });
   }
 }

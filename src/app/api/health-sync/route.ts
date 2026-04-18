@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 // GET: Dashboard fetches Apple Health activity data
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const days = parseInt(searchParams.get('days') || '7');
+  const days = Math.min(Math.max(parseInt(searchParams.get('days') || '7') || 7, 1), 90);
 
   const result: Record<string, { activeCalories: number; steps: number; source: string }> = {};
   const now = new Date();

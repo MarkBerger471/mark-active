@@ -8,7 +8,16 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { marker, value, unit, refMin, refMax, flag, mode } = body;
+  const { marker: rawMarker, value, unit: rawUnit, refMin, refMax, flag, mode } = body;
+  // Sanitize string inputs to prevent prompt injection
+  if (!rawMarker || typeof rawMarker !== 'string') {
+    return NextResponse.json({ error: 'Missing marker' }, { status: 400 });
+  }
+  const marker = rawMarker.slice(0, 80).replace(/[\x00-\x1F"'`\\]/g, '').trim();
+  const unit = (typeof rawUnit === 'string' ? rawUnit : '').slice(0, 20).replace(/[\x00-\x1F"'`\\]/g, '').trim();
+  if (!marker) {
+    return NextResponse.json({ error: 'Invalid marker' }, { status: 400 });
+  }
   // mode: 'explain' (what is this marker) or 'diagnose' (why is it out of range)
 
   let prompt = '';

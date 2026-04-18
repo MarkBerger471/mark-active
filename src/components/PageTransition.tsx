@@ -11,12 +11,13 @@ export default function PageTransition({ children }: { children: React.ReactNode
   useEffect(() => {
     if (prevPath.current === pathname) return;
     setAnimClass('page-fade-out');
+    let inner: ReturnType<typeof setTimeout> | null = null;
     const timer = setTimeout(() => {
       setAnimClass('page-fade-in');
-      setTimeout(() => setAnimClass(''), 200);
+      inner = setTimeout(() => setAnimClass(''), 200);
     }, 100);
     prevPath.current = pathname;
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); if (inner) clearTimeout(inner); };
   }, [pathname]);
 
   return (

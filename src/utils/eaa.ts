@@ -950,8 +950,11 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
         }
         // Tolerance scales with aggressiveness: L1=5%, L2=10%, L3=15%, L4=20%, L5=25%
         const tol = 0.05 + (level - 1) * 0.05;
-        const check = (orig: number, delta: number) => orig === 0 || Math.abs(delta / orig) <= tol;
-        if (!check(origMacros.kcal, newKcal) || !check(origMacros.protein, newProt) ||
+        // When orig=0, allow only small absolute additions (5g of P/C/F, 50 kcal)
+        // — prevents the optimizer from freely loading nuts into a fat-free meal etc.
+        const check = (orig: number, delta: number, absFloor = 5) =>
+          orig === 0 ? Math.abs(delta) <= absFloor : Math.abs(delta / orig) <= tol;
+        if (!check(origMacros.kcal, newKcal, 50) || !check(origMacros.protein, newProt) ||
             !check(origMacros.carbs, newCarbs) || !check(origMacros.fat, newFat)) continue;
       }
 

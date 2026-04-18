@@ -1,6 +1,6 @@
 'use client';
 
-let sparkId = 0;
+import { useId } from 'react';
 
 export default function Sparkline({ data, color = '#22c55e', width = 60, height = 20 }: {
   data: number[];
@@ -8,7 +8,8 @@ export default function Sparkline({ data, color = '#22c55e', width = 60, height 
   width?: number;
   height?: number;
 }) {
-  const id = `spark-${++sparkId}`;
+  // useId is stable across SSR/CSR and across re-renders — no more hydration mismatch
+  const id = `spark-${useId()}`;
   if (data.length < 2) return null;
   const min = Math.min(...data);
   const max = Math.max(...data);

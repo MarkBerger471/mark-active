@@ -42,14 +42,15 @@ function getCardioMET(name: string): number {
 }
 
 export function parseDurationMinutes(targetReps: string): number {
-  const hMatch = targetReps.match(/(\d+)\s*h/i);
-  const mMatch = targetReps.match(/(\d+)\s*min/i);
+  // Support fractional hours/minutes (e.g. "1.5h", "0.5h 10min")
+  const hMatch = targetReps.match(/([\d.]+)\s*h/i);
+  const mMatch = targetReps.match(/([\d.]+)\s*min/i);
   let mins = 0;
-  if (hMatch) mins += parseInt(hMatch[1]) * 60;
-  if (mMatch) mins += parseInt(mMatch[1]);
-  if (mins > 0) return mins;
-  const bare = targetReps.match(/(\d+)/);
-  if (bare) return parseInt(bare[1]);
+  if (hMatch) { const v = parseFloat(hMatch[1]); if (isFinite(v)) mins += v * 60; }
+  if (mMatch) { const v = parseFloat(mMatch[1]); if (isFinite(v)) mins += v; }
+  if (mins > 0) return Math.round(mins);
+  const bare = targetReps.match(/([\d.]+)/);
+  if (bare) { const v = parseFloat(bare[1]); if (isFinite(v) && v > 0) return Math.round(v); }
   return 30;
 }
 

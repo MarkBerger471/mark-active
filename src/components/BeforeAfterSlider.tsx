@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 
 export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, afterLabel }: {
   beforeSrc: string;
@@ -25,25 +25,31 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
     updatePos(clientX);
   }, [updatePos]);
 
-  const onMove = useCallback((clientX: number) => {
+  // Window-level listeners so drag continues when pointer leaves the slider
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => { if (dragging.current) updatePos(e.clientX); };
+    const onMouseUp = () => { dragging.current = false; };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [updatePos]);
+
+  const onTouchMove = useCallback((clientX: number) => {
     if (dragging.current) updatePos(clientX);
   }, [updatePos]);
 
   const onEnd = useCallback(() => { dragging.current = false; }, []);
 
-  // Both images: fill container width, natural height, top-anchored.
-  // clip-path ensures identical element dimensions for pixel-perfect alignment.
-  // min-h-full prevents gaps if an image is shorter than the container.
   return (
     <div
       ref={containerRef}
       className="relative aspect-[3/4] rounded-xl overflow-hidden cursor-col-resize select-none touch-none"
       onMouseDown={e => onStart(e.clientX)}
-      onMouseMove={e => onMove(e.clientX)}
-      onMouseUp={onEnd}
-      onMouseLeave={onEnd}
       onTouchStart={e => onStart(e.touches[0].clientX)}
-      onTouchMove={e => onMove(e.touches[0].clientX)}
+      onTouchMove={e => onTouchMove(e.touches[0].clientX)}
       onTouchEnd={onEnd}
     >
       {/* After (full) */}

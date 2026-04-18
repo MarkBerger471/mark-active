@@ -135,6 +135,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ values, ocrText });
   } catch (e) {
     console.error('Parse blood test error:', e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: 'Parse failed' }, { status: 500 });
   }
 }

@@ -467,6 +467,10 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
   const [optimization, setOptimization] = useState<ReturnType<typeof optimizeMeal>>(null);
   const [lookingUp, setLookingUp] = useState<string | null>(null);
 
+  // Clear stale optimization when meal items change
+  const mealItemsKey = JSON.stringify(meal.items);
+  useEffect(() => { setOptimization(null); }, [mealItemsKey]);
+
   const lookupUnknownFood = async (foodName: string) => {
     setLookingUp(foodName);
     try {
@@ -750,14 +754,24 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
   const [roundProgress, setRoundProgress] = useState(0);
   const [totalRounds, setTotalRounds] = useState(5);
 
+  // Track mount state so async setTimeouts don't update unmounted component
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const safeSet = <T,>(setter: (v: T) => void) => (v: T) => { if (mountedRef.current) setter(v); };
+  const setRunningSafe = safeSet(setRunning);
+  const setResultSafe = safeSet(setResult);
+  const setProgressSafe = safeSet(setProgress);
+  const setRoundProgressSafe = safeSet(setRoundProgress);
+
   const run = () => {
-    setRunning(true);
-    setResult(null);
-    setRoundProgress(0);
-    setProgress('Preparing...');
+    setRunningSafe(true);
+    setResultSafe(null);
+    setRoundProgressSafe(0);
+    setProgressSafe('Preparing...');
 
     // Run 1 round per setTimeout so UI can update between rounds
     setTimeout(() => {
+      if (!mountedRef.current) return;
       const isExcluded = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra') || l.includes('after workout'); };
       const mainMeals = plan.current.trainingDay.meals.filter(m => !isExcluded(m.name));
       const mealFoods: { name: string; amount?: string }[][] = mainMeals.map(m =>
@@ -766,31 +780,29 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
           .map(f => ({ name: f.name, amount: f.amount }))
       );
 
-      // Run round by round with yielding
       const maxR = 5;
       let round = 0;
       const runRound = () => {
-        setRoundProgress(round + 1);
-        setProgress(`Round ${round + 1}/${maxR}...`);
+        if (!mountedRef.current) return;
+        setRoundProgressSafe(round + 1);
+        setProgressSafe(`Round ${round + 1}/${maxR}...`);
         setTimeout(() => {
-          // Run single-round optimization (maxRounds=1 from current state)
+          if (!mountedRef.current) return;
           const res = autoOptimize(mealFoods, allowedFoods, level, round + 1);
-          // Update mealFoods with optimized result for next round
           if (res.finalMeals.length > 0) {
             for (let i = 0; i < mealFoods.length; i++) {
               if (res.finalMeals[i]) mealFoods[i] = res.finalMeals[i];
             }
           }
           round++;
-          // Check convergence or max rounds
           if (round >= maxR || (round > 1 && res.rounds.length > 0 && res.rounds[res.rounds.length - 1].withEAANNU === res.rounds[Math.max(0, res.rounds.length - 2)]?.withEAANNU)) {
-            setResult(res);
-            setRunning(false);
-            setProgress('');
+            setResultSafe(res);
+            setRunningSafe(false);
+            setProgressSafe('');
           } else {
             runRound();
           }
-        }, 50); // yield to browser
+        }, 50);
       };
       runRound();
     }, 50);
@@ -824,6 +836,20 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
 
     const newMacros = sumMacros(newMeals.map(m => ({ ...m, items: m.items.map(it => parseFoodItem(it)) })));
 
+    // Write EAA data BEFORE persist so persist's macro recompute picks up the new EAA values
+    if (result.finalSupplement) {
+      try {
+        const eaaGStr = String(result.finalSupplement.totalPerDay / 1000);
+        const perMealStr = JSON.stringify(result.finalSupplement.perMeal);
+        localStorage.setItem('eaa_daily_result', JSON.stringify(result.finalSupplement));
+        localStorage.setItem('eaa_g_per_day', eaaGStr);
+        localStorage.setItem('eaa_per_meal', perMealStr);
+        // Sync to Firestore for cross-device consistency
+        saveSetting('eaa_g_per_day', eaaGStr);
+        saveSetting('eaa_per_meal', perMealStr);
+      } catch {}
+    }
+
     await persist({
       current: {
         ...plan.current,
@@ -833,15 +859,6 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
       },
       history: newHistory,
     });
-
-    // Write supplement to localStorage
-    if (result.finalSupplement) {
-      try {
-        localStorage.setItem('eaa_daily_result', JSON.stringify(result.finalSupplement));
-        localStorage.setItem('eaa_g_per_day', String(result.finalSupplement.totalPerDay / 1000));
-        localStorage.setItem('eaa_per_meal', JSON.stringify(result.finalSupplement.perMeal));
-      } catch {}
-    }
 
     setResult(null);
   };
@@ -1053,10 +1070,20 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
   });
   const lastKeyRef = useRef('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const doCompute = () => {
+    if (!mountedRef.current) return;
     setComputing(true);
-    setTimeout(() => {
+    timerRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
       const mainMeals = plan.current.trainingDay.meals
         .filter(meal => !meal.name.toLowerCase().includes('during workout') && !meal.name.toLowerCase().includes('intra')
           && !meal.name.toLowerCase().includes('after workout'))
@@ -1065,6 +1092,7 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
           return items.map(f => ({ name: f.name, amount: f.amount }));
         }).filter(m => m.length > 0);
       const result = mainMeals.length > 0 ? calcDailyEAA(mainMeals, allowedFoods, 2) : null;
+      if (!mountedRef.current) return;
       setDaily(result);
 
       const woMeal = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
@@ -1073,6 +1101,7 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
         const woFoods = woMeal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount }));
         if (woFoods.length > 0) woResult = calcIndividualSupplement(woFoods, 96);
       }
+      if (!mountedRef.current) return;
       setWoSupplement(woResult);
       setComputing(false);
       try {
@@ -1084,19 +1113,23 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
         // Sync critical EAA data to Firestore for cross-device consistency
         saveSetting('eaa_g_per_day', eaaGStr);
         saveSetting('eaa_per_meal', JSON.stringify(result ? result.perMeal : []));
+        saveSetting('eaa_wo_supplement', JSON.stringify(woResult));
       } catch {}
     }, 100);
   };
 
-  // Auto-recompute when plan content changes (ref-based, no render loops)
+  // Auto-recompute when plan content changes — proper effect, not in render
   const planKey = JSON.stringify(plan.current.trainingDay.meals.map(m =>
     m.items.map(it => typeof it === 'string' ? it : `${it.name}|${it.amount}`)
   ));
-  if (planKey !== lastKeyRef.current) {
+  useEffect(() => {
+    if (planKey === lastKeyRef.current) return;
     lastKeyRef.current = planKey;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(doCompute, 300);
-  }
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planKey]);
 
   return (
     <div className="mb-6 glass-card p-5">
@@ -1209,10 +1242,11 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     }
     return { kcal: dayPlan.macros.kcal, protein: dayPlan.macros.protein, carbs: dayPlan.macros.carbs, fat: dayPlan.macros.fat };
   });
-  // Load targets from synced settings (Firestore) if localStorage is empty
+  // Load targets from synced settings (Firestore) on mount — but don't overwrite user edits in flight
+  const editedRef = useRef(false);
   useEffect(() => {
     getSetting('macro_targets').then(v => {
-      if (v) {
+      if (v && !editedRef.current) {
         try {
           const parsed = JSON.parse(v);
           setTargets(parsed);
@@ -1222,6 +1256,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     });
   }, []);
   const updateTarget = (key: string, value: number) => {
+    editedRef.current = true;
     const next = { ...targets, [key]: value };
     setTargets(next);
     localStorage.setItem('macro_targets', JSON.stringify(next));
@@ -1303,6 +1338,12 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
   const removeSupplement = (mealIdx: number, supIdx: number) => {
     if (!editPlan) return;
+    // Clear supState for this meal because supplement indices shift after removal
+    setSupState(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(k => { if (k.startsWith(`${mealIdx}-`)) delete next[k]; });
+      return next;
+    });
     const meals = editPlan.meals.map((m, mi) => mi === mealIdx ? { ...m, supplements: (m.supplements || []).filter((_, si) => si !== supIdx) } : m);
     setEditPlan({ ...editPlan, meals });
   };
@@ -1326,6 +1367,8 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
   const removeMeal = (mealIdx: number) => {
     if (!editPlan) return;
+    // Clear supState because meal indices shift after removal
+    setSupState({});
     setEditPlan({ ...editPlan, meals: editPlan.meals.filter((_, i) => i !== mealIdx) });
   };
 
@@ -1596,6 +1639,7 @@ export default function NutritionPlanPage() {
       if (typeof window !== 'undefined' && !localStorage.getItem('eaa_g_per_day')) {
         getSetting('eaa_g_per_day').then(v => { if (v) localStorage.setItem('eaa_g_per_day', v); });
         getSetting('eaa_per_meal').then(v => { if (v) localStorage.setItem('eaa_per_meal', v); });
+        getSetting('eaa_wo_supplement').then(v => { if (v) localStorage.setItem('eaa_wo_supplement', v); });
       }
 
       getNutritionPlan().then(async stored => {
@@ -1634,7 +1678,14 @@ export default function NutritionPlanPage() {
       carbs: foodMacros.carbs,
       fat: foodMacros.fat,
     };
-    updated.current.restDay.macros = updated.current.trainingDay.macros;
+    // Compute rest day macros from its own meals (don't copy from training day)
+    const restFoodMacros = sumMacros(updated.current.restDay.meals);
+    updated.current.restDay.macros = {
+      kcal: restFoodMacros.kcal + Math.round(eaaG * 4),
+      protein: restFoodMacros.protein + Math.round(eaaG),
+      carbs: restFoodMacros.carbs,
+      fat: restFoodMacros.fat,
+    };
     setPlan(updated);
     await saveNutritionPlan(updated);
   }, []);

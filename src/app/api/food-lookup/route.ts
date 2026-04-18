@@ -7,9 +7,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
   }
 
-  const { food } = await request.json();
-  if (!food || typeof food !== 'string') {
+  const { food: rawFood } = await request.json();
+  if (!rawFood || typeof rawFood !== 'string') {
     return NextResponse.json({ error: 'Missing food name' }, { status: 400 });
+  }
+  const food = rawFood.slice(0, 100).replace(/[\x00-\x1F"'`\\]/g, '').trim();
+  if (!food) {
+    return NextResponse.json({ error: 'Invalid food name' }, { status: 400 });
   }
 
   try {
@@ -78,6 +82,6 @@ Use USDA FoodData Central values. If exact data unavailable, use best scientific
     return NextResponse.json(result);
   } catch (e) {
     console.error('Food lookup error:', e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: 'Lookup failed' }, { status: 500 });
   }
 }

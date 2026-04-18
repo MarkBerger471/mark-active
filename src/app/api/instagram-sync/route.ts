@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const count = parseInt(searchParams.get('count') || '5');
+    const count = Math.min(Math.max(parseInt(searchParams.get('count') || '5') || 5, 1), 50);
 
     const q = query(collection(db, 'instagram-feed'), orderBy('createdAt', 'desc'), limit(count));
     const snap = await getDocs(q);

@@ -252,6 +252,9 @@ export default function TrainingPlanPage() {
     if (!sessionId || !activeWorkout) { setElapsedStr(''); return; }
     const startMs = parseInt(sessionId);
     if (isNaN(startMs)) return;
+    // Don't run elapsed timer for historical sessions (started more than 12h ago)
+    const ageMs = Date.now() - startMs;
+    if (ageMs > 12 * 60 * 60 * 1000) { setElapsedStr(''); return; }
     const tick = () => {
       const sec = Math.floor((Date.now() - startMs) / 1000);
       const m = Math.floor(sec / 60);
@@ -296,7 +299,9 @@ export default function TrainingPlanPage() {
         setLastSessions(map);
       });
     }
-  }, [isAuthenticated, view, workouts]);
+    // workouts is stable (set once from getPresetWorkouts), view doesn't need refetch
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   if (isLoading || !isAuthenticated) {
     return (
@@ -1144,17 +1149,18 @@ function SetRow({
       {/* Weight: - input + */}
       <button
         type="button"
-        onClick={() => onWeightChange(exIdx, setIdx, String(Math.round((weightNum - step) * 10) / 10))}
+        onClick={() => onWeightChange(exIdx, setIdx, String(Math.max(0, Math.round((weightNum - step) * 10) / 10)))}
         className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-red-500/20 bg-red-500/8 text-red-400 active:bg-red-500/30 transition-all"
       >−</button>
       <div className="flex-1">
         <input
           type="text"
           inputMode="decimal"
-          value={formatWeight(set.weight)}
+          // Show raw value in input — never show "BW" as text the user has to delete
+          value={set.weight === 0 || set.weight === '0' || set.weight === '' ? '' : `${set.weight}`}
           onChange={(e) => onWeightChange(exIdx, setIdx, e.target.value)}
           className={`glass-input w-full px-2 py-2 text-sm text-center font-semibold data-value focus:shadow-[0_0_12px_rgba(185,10,10,0.2)] ${set.prevDone && !set.done ? 'border-green-500/20 bg-green-500/8' : ''}`}
-          placeholder="kg"
+          placeholder="BW"
         />
       </div>
       <button

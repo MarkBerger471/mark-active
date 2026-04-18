@@ -11,7 +11,7 @@ import {
   orderBy,
   writeBatch,
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import {
   getAllMeasurements as idbGetMeasurements,
   putMeasurement as idbPutMeasurement,
@@ -54,16 +54,37 @@ function stripUndefined(obj: any): any {
 // Background refresh: pull from Firestore into IndexedDB when online
 function backgroundRefreshMeasurements() {
   if (typeof window === 'undefined' || !navigator.onLine) return;
-  // Defer to avoid blocking initial render
   setTimeout(() => (async () => {
     try {
       const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
       const snap = await getDocs(q);
-      const items = snap.docs.map(d => d.data() as Measurement);
-      // Only overwrite docs without pending sync
-      for (const m of items) {
+      const remoteItems = snap.docs.map(d => d.data() as Measurement);
+      const localItems = await idbGetMeasurements();
+      const localMap = new Map(localItems.map(m => [m.date, m]));
+
+      // Pull remote items that are newer or missing locally
+      for (const m of remoteItems) {
         const pending = await hasPendingSyncFor('measurements', m.date);
-        if (!pending) await idbPutMeasurement(m);
+        if (pending) continue;
+        const local = localMap.get(m.date);
+        const remoteTs = m.lastModified || 0;
+        const localTs = local?.lastModified || 0;
+        if (!local || remoteTs >= localTs) {
+          await idbPutMeasurement(m);
+        }
+      }
+
+      // Push local items not in remote (or newer than remote)
+      const remoteMap = new Map(remoteItems.map(m => [m.date, m]));
+      for (const m of localItems) {
+        const pending = await hasPendingSyncFor('measurements', m.date);
+        if (pending) continue;
+        const remote = remoteMap.get(m.date);
+        const localTs = m.lastModified || 0;
+        const remoteTs = remote?.lastModified || 0;
+        if (!remote || localTs > remoteTs) {
+          try { await setDoc(doc(db, 'measurements', m.date), stripUndefined(m)); } catch {}
+        }
       }
     } catch (e) {
       console.warn('Background refresh measurements failed:', e);
@@ -237,7 +258,7 @@ export async function getMeasurements(): Promise<Measurement[]> {
 }
 
 export async function saveMeasurement(measurement: Measurement) {
-  const toSave = { ...measurement, savedAt: measurement.savedAt || new Date().toISOString() };
+  const toSave = { ...measurement, savedAt: measurement.savedAt || new Date().toISOString(), lastModified: Date.now() };
 
   // Cancel any pending photo uploads for this date whose angle is no longer in the new photos.
   // Prevents the "deleted photo gets re-added on flush" bug.
@@ -301,6 +322,27 @@ export async function saveMeasurement(measurement: Measurement) {
 }
 
 export async function deleteMeasurement(date: string) {
+  // Cancel any pending photo uploads for this measurement
+  try {
+    const pending = await getAllPendingPhotos();
+    for (const pp of pending) {
+      if (pp.measurementDate === date && pp.id != null) {
+        await deletePendingPhoto(pp.id);
+      }
+    }
+  } catch {}
+  // Delete photos from Firebase Storage (best effort — don't block deletion if it fails)
+  try {
+    const all = await idbGetMeasurements();
+    const m = all.find(x => x.date === date);
+    if (m?.photos) {
+      for (const angle of Object.keys(m.photos) as Array<keyof typeof m.photos>) {
+        try {
+          await deleteObject(ref(storage, `photos/${date}/${String(angle)}.jpg`));
+        } catch {}
+      }
+    }
+  } catch {}
   await idbDeleteMeasurement(date);
   await addPendingSync({
     collection: 'measurements',
@@ -380,14 +422,14 @@ export async function updateSessionDuration(id: string, minutes: number) {
   const allLocal = await idbGetSessions();
   const session = allLocal.find(s => s.id === id);
   if (!session) return;
-  session.durationMinutes = minutes;
-  session.manualDuration = true;
-  await idbPutSession(session);
+  const updated = { ...session, durationMinutes: minutes, manualDuration: true };
+  (updated as TrainingSession & { lastModified?: number }).lastModified = Date.now();
+  await idbPutSession(updated);
   await addPendingSync({
     collection: 'trainingSessions',
-    docId: session.id,
+    docId: updated.id,
     operation: 'set',
-    data: stripUndefined(session),
+    data: stripUndefined(updated),
     timestamp: Date.now(),
   });
   flushSyncQueue();

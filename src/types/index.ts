@@ -24,6 +24,7 @@ export interface Measurement {
     sideRight?: string;
     back?: string;
   };
+  lastModified?: number;
 }
 
 export interface TrainingDay {

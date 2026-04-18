@@ -10,3 +10,19 @@
   [headers.values]
     Cache-Control = "no-cache, no-store, must-revalidate"
     Content-Type = "application/javascript; charset=utf-8"
+
+# Longer timeout for Claude API routes that can exceed the default 10s
+[functions."analyse-bloodtest"]
+  timeout = 60
+
+[functions."food-lookup"]
+  timeout = 30
+
+[functions."med-lookup"]
+  timeout = 30
+
+[functions."explain-marker"]
+  timeout = 30
+
+[functions."parse-bloodtest"]
+  timeout = 60

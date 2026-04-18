@@ -27,6 +27,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (isSessionValid()) {
       setIsAuthenticated(true);
       seedInitialData().catch(() => {});
+      // Load custom foods from Firestore (was never called before)
+      import('@/utils/eaa').then(({ loadCustomFoodsFromFirestore }) => loadCustomFoodsFromFirestore()).catch(() => {});
     }
     setIsLoading(false);
   }, []);
