@@ -816,20 +816,9 @@ export async function seedInitialData() {
     { date: '2026-03-15', weight: 111.2, arms: 40, chest: 117, waist: 106, legs: 68, energy: 'Good', hunger: 'Good', tiredness: 'Good', digestion: 'No problem', sleepHours: 7, cardio: 4, trainings: 1, foodChanges: 100, photos: {} },
   ];
 
-  // Seed to IDB
+  // Seed to IDB only — do NOT queue for Firestore sync.
+  // Historical data is a fallback; pushing it would overwrite real user data.
   await bulkPutMeasurements(historicalData);
-
-  // Queue for Firestore sync
-  for (const m of historicalData) {
-    await addPendingSync({
-      collection: 'measurements',
-      docId: m.date,
-      operation: 'set',
-      data: stripUndefined(m),
-      timestamp: Date.now(),
-    });
-  }
-  flushSyncQueue();
 }
 
 // Legacy (unused but kept for type compatibility)

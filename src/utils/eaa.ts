@@ -361,10 +361,22 @@ export function getCustomFoods(): Record<string, CustomFood> {
   try { return JSON.parse(localStorage.getItem('custom_foods') || '{}'); } catch { return {}; }
 }
 
+export async function loadCustomFoodsFromFirestore(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const { getSetting } = await import('@/utils/storage');
+    const v = await getSetting('custom_foods');
+    if (v) localStorage.setItem('custom_foods', v);
+  } catch {}
+}
+
 export function saveCustomFood(food: CustomFood) {
-  const db = getCustomFoods();
-  db[food.name.toLowerCase().trim()] = food;
-  localStorage.setItem('custom_foods', JSON.stringify(db));
+  const all = getCustomFoods();
+  all[food.name.toLowerCase().trim()] = food;
+  const json = JSON.stringify(all);
+  localStorage.setItem('custom_foods', json);
+  // Sync to Firestore
+  import('@/utils/storage').then(({ saveSetting }) => saveSetting('custom_foods', json)).catch(() => {});
 }
 
 export function isKnownFood(name: string): boolean {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bb-shell-v34';
+const CACHE_NAME = 'bb-shell-v35';
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan'];
 
@@ -20,7 +20,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
-        keys.filter((k) => k !== CACHE_NAME || IS_LOCALHOST).map((k) => caches.delete(k))
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
       )
     )
   );

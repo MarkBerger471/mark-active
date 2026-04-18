@@ -1075,10 +1075,14 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
       setWoSupplement(woResult);
       setComputing(false);
       try {
+        const eaaGStr = String(result ? result.totalPerDay / 1000 : 0);
         localStorage.setItem('eaa_daily_result', JSON.stringify(result));
-        localStorage.setItem('eaa_g_per_day', String(result ? result.totalPerDay / 1000 : 0));
+        localStorage.setItem('eaa_g_per_day', eaaGStr);
         localStorage.setItem('eaa_per_meal', JSON.stringify(result ? result.perMeal : []));
         localStorage.setItem('eaa_wo_supplement', JSON.stringify(woResult));
+        // Sync critical EAA data to Firestore for cross-device consistency
+        saveSetting('eaa_g_per_day', eaaGStr);
+        saveSetting('eaa_per_meal', JSON.stringify(result ? result.perMeal : []));
       } catch {}
     }, 100);
   };
@@ -1562,11 +1566,21 @@ export default function NutritionPlanPage() {
     }
     return DEFAULT_OPTIMIZER_FOODS;
   });
+  // Load from Firestore if localStorage is empty
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !localStorage.getItem('nnu_allowed_foods')) {
+      getSetting('nnu_allowed_foods').then(v => {
+        if (v) { try { setAllowedFoods(JSON.parse(v)); localStorage.setItem('nnu_allowed_foods', v); } catch {} }
+      });
+    }
+  }, []);
 
   const toggleFood = (food: string) => {
     const next = allowedFoods.includes(food) ? allowedFoods.filter(f => f !== food) : [...allowedFoods, food];
     setAllowedFoods(next);
-    localStorage.setItem('nnu_allowed_foods', JSON.stringify(next));
+    const json = JSON.stringify(next);
+    localStorage.setItem('nnu_allowed_foods', json);
+    saveSetting('nnu_allowed_foods', json);
   };
 
   useEffect(() => {
@@ -1577,26 +1591,17 @@ export default function NutritionPlanPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
+      // Load EAA data from Firestore if not in localStorage
+      if (typeof window !== 'undefined' && !localStorage.getItem('eaa_g_per_day')) {
+        getSetting('eaa_g_per_day').then(v => { if (v) localStorage.setItem('eaa_g_per_day', v); });
+        getSetting('eaa_per_meal').then(v => { if (v) localStorage.setItem('eaa_per_meal', v); });
+      }
+
       getNutritionPlan().then(stored => {
         if (stored && 'current' in stored) {
           const p = stored as NutritionPlan;
-
-          // One-time macro sync: recompute from food + EAA and save if different
-          const liveFoodMacros = sumMacros(p.current.trainingDay.meals);
-          const eaaG = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('eaa_g_per_day') || '0') : 0;
-          const live = {
-            kcal: liveFoodMacros.kcal + Math.round(eaaG * 4),
-            protein: liveFoodMacros.protein + Math.round(eaaG),
-            carbs: liveFoodMacros.carbs,
-            fat: liveFoodMacros.fat,
-          };
-          const s = p.current.trainingDay.macros;
-          if (Math.abs(live.kcal - s.kcal) > 10 || Math.abs(live.protein - s.protein) > 3) {
-            p.current.trainingDay.macros = live;
-            p.current.restDay.macros = live;
-            saveNutritionPlan(p);
-          }
-
+          // Don't recompute macros on load — trust the stored values.
+          // Macros are recomputed only in persist() when user explicitly saves.
           setPlan(p);
         } else {
           const defaultVersion = getDefaultNutritionPlan();
@@ -1612,7 +1617,11 @@ export default function NutritionPlanPage() {
   const persist = useCallback(async (updated: NutritionPlan) => {
     // Recompute macros (food + EAA) so dashboard always matches
     const foodMacros = sumMacros(updated.current.trainingDay.meals);
-    const eaaG = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('eaa_g_per_day') || '0') : 0;
+    let eaaG = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('eaa_g_per_day') || '0') : 0;
+    // If EAA not in localStorage, try Firestore
+    if (eaaG === 0) {
+      try { const v = await getSetting('eaa_g_per_day'); if (v) { eaaG = parseFloat(v); localStorage.setItem('eaa_g_per_day', v); } } catch {}
+    }
     updated.current.trainingDay.macros = {
       kcal: foodMacros.kcal + Math.round(eaaG * 4),
       protein: foodMacros.protein + Math.round(eaaG),
