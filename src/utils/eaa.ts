@@ -400,61 +400,65 @@ export function isKnownFood(name: string): boolean {
 
 function parseGrams(amount: string | undefined, name: string): number {
   if (!amount) return 0;
+  const safe = (s: string, fb = 0) => { const v = parseFloat(s); return isFinite(v) ? v : fb; };
   const gMatch = amount.match(/([\d.]+)\s*(?:gr?|grams?)$/i);
-  if (gMatch) return parseFloat(gMatch[1]);
+  if (gMatch) return safe(gMatch[1]);
   const mlMatch = amount.match(/([\d.]+)\s*ml$/i);
-  if (mlMatch) return parseFloat(mlMatch[1]);
+  if (mlMatch) return safe(mlMatch[1]);
   // Cups (1 cup ≈ 240ml)
   const cupMatch = amount.match(/([\d.]*)\s*cups?$/i);
-  if (cupMatch) return parseFloat(cupMatch[1] || '1') * 240;
+  if (cupMatch) return safe(cupMatch[1] || '1', 1) * 240;
   // Tablespoon / teaspoon
   const tbspMatch = amount.match(/([\d.]+)\s*(?:tbsp|tablespoons?)$/i);
-  if (tbspMatch) return parseFloat(tbspMatch[1]) * 15;
+  if (tbspMatch) return safe(tbspMatch[1]) * 15;
   const tspMatch = amount.match(/([\d.]+)\s*(?:tsp|teaspoons?)$/i);
-  if (tspMatch) return parseFloat(tspMatch[1]) * 5;
+  if (tspMatch) return safe(tspMatch[1]) * 5;
   // Scoop (~30g)
   const scoopMatch = amount.match(/([\d.]*)\s*scoops?$/i);
-  if (scoopMatch) return parseFloat(scoopMatch[1] || '1') * 30;
+  if (scoopMatch) return safe(scoopMatch[1] || '1', 1) * 30;
   // Bare number — check piece weights
   const bare = amount.match(/^([\d.]+)$/);
   if (bare) {
     const lower = name.toLowerCase().trim();
+    const n = safe(bare[1]);
     for (const [k, w] of Object.entries(PIECE_G)) {
-      if (lower.includes(k) || k.includes(lower)) return parseFloat(bare[1]) * w;
+      if (lower.includes(k) || k.includes(lower)) return n * w;
     }
-    return parseFloat(bare[1]);
+    return n;
   }
   return 0;
+}
+
+// Longest-match fuzzy lookup: exact key wins; otherwise the most-specific substring match wins
+function fuzzyLookup<T>(db: Record<string, T>, name: string): T | null {
+  const lower = name.toLowerCase().trim();
+  if (db[lower] !== undefined) return db[lower];
+  let best: T | null = null;
+  let bestLen = 0;
+  for (const [key, val] of Object.entries(db)) {
+    if ((lower.includes(key) || key.includes(lower)) && key.length > bestLen) {
+      best = val;
+      bestLen = key.length;
+    }
+  }
+  return best;
 }
 
 export function getEAAProfile(name: string): EAAProfile | null {
-  const lower = name.toLowerCase().trim();
-  // Check custom DB first
+  // Check custom DB first (longest-match)
   const custom = getCustomFoods();
-  if (custom[lower]) return custom[lower].eaa;
-  for (const [key, food] of Object.entries(custom)) {
-    if (lower.includes(key) || key.includes(lower)) return food.eaa;
-  }
+  const customMatch = fuzzyLookup(custom, name);
+  if (customMatch) return customMatch.eaa;
   // Built-in DB
-  if (EAA_DB[lower]) return EAA_DB[lower];
-  for (const [key, profile] of Object.entries(EAA_DB)) {
-    if (lower.includes(key) || key.includes(lower)) return profile;
-  }
-  return null;
+  return fuzzyLookup(EAA_DB, name);
 }
 
 function getProteinPer100g(name: string): number {
-  const lower = name.toLowerCase().trim();
   const custom = getCustomFoods();
-  if (custom[lower]) return custom[lower].protein;
-  for (const [key, food] of Object.entries(custom)) {
-    if (lower.includes(key) || key.includes(lower)) return food.protein;
-  }
-  if (PROTEIN_PER_100G[lower]) return PROTEIN_PER_100G[lower];
-  for (const [key, val] of Object.entries(PROTEIN_PER_100G)) {
-    if (lower.includes(key) || key.includes(lower)) return val;
-  }
-  return 0;
+  const customMatch = fuzzyLookup(custom, name);
+  if (customMatch) return customMatch.protein;
+  const v = fuzzyLookup(PROTEIN_PER_100G, name);
+  return v ?? 0;
 }
 
 export interface FoodInput { name: string; amount?: string; }
@@ -674,13 +678,18 @@ export const DEFAULT_OPTIMIZER_FOODS = [
   'spirulina',
 ];
 
-// Shared fuzzy macro lookup
+// Shared fuzzy macro lookup (longest-match)
 function lookupMacro(db: Record<string, number>, name: string): number {
   if (db[name] !== undefined) return db[name];
+  let best = 0;
+  let bestLen = 0;
   for (const [k, v] of Object.entries(db)) {
-    if (name.includes(k) || k.includes(name)) return v;
+    if ((name.includes(k) || k.includes(name)) && k.length > bestLen) {
+      best = v;
+      bestLen = k.length;
+    }
   }
-  return 0;
+  return best;
 }
 
 function foodKcal(food: string, grams: number): number {
@@ -782,9 +791,9 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     const g = parseGrams(f.amount, name);
     if (g <= 0) continue;
     const prot = getProteinPer100g(name);
-    const kcal = KCAL_PER_100G[name] ?? Object.entries(KCAL_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
-    const carb = CARBS_PER_100G[name] ?? Object.entries(CARBS_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
-    const fat = FAT_PER_100G[name] ?? Object.entries(FAT_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1] ?? 0;
+    const kcal = lookupMacro(KCAL_PER_100G, name);
+    const carb = lookupMacro(CARBS_PER_100G, name);
+    const fat = lookupMacro(FAT_PER_100G, name);
     origMacros.kcal += kcal * g / 100;
     origMacros.protein += prot * g / 100;
     origMacros.carbs += carb * g / 100;
@@ -827,7 +836,7 @@ export function optimizeMeal(foods: FoodInput[], targetNNU: number = 96, allowed
     const eaa = getEAAProfile(name);
     const prot = getProteinPer100g(name);
     const grams = parseGrams(foods[i].amount, name);
-    const kcal = KCAL_PER_100G[name] || Object.entries(KCAL_PER_100G).find(([k]) => name.includes(k) || k.includes(name))?.[1];
+    const kcal = lookupMacro(KCAL_PER_100G, name);
     if (eaa && prot && grams > 0 && kcal) {
       adjustable.push({ idx: i, food: name, grams, kcalPer100: kcal });
     }
@@ -1222,10 +1231,10 @@ export function autoOptimize(
   return {
     rounds,
     finalMeals: currentMeals,
-    finalSupplement: lastRound.supplement,
+    finalSupplement: lastRound?.supplement ?? null,
     originalNNU,
-    finalFoodNNU: lastRound.foodNNU,
-    finalWithEAANNU: lastRound.withEAANNU,
+    finalFoodNNU: lastRound?.foodNNU ?? originalNNU,
+    finalWithEAANNU: lastRound?.withEAANNU ?? originalNNU,
   };
 }
 

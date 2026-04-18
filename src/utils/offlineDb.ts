@@ -12,6 +12,7 @@ export interface PendingSyncEntry {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data?: any;
   timestamp: number;
+  attempts?: number;
 }
 
 export interface PendingPhotoEntry {
@@ -20,6 +21,7 @@ export interface PendingPhotoEntry {
   angle: string;
   base64: string;
   timestamp: number;
+  attempts?: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

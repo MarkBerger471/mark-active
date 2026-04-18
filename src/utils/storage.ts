@@ -239,6 +239,19 @@ export async function getMeasurements(): Promise<Measurement[]> {
 export async function saveMeasurement(measurement: Measurement) {
   const toSave = { ...measurement, savedAt: measurement.savedAt || new Date().toISOString() };
 
+  // Cancel any pending photo uploads for this date whose angle is no longer in the new photos.
+  // Prevents the "deleted photo gets re-added on flush" bug.
+  try {
+    const pendingPhotos = await getAllPendingPhotos();
+    const photos = (toSave.photos || {}) as Record<string, string | undefined>;
+    const wantedAngles = new Set(Object.keys(photos).filter(a => photos[a]));
+    for (const pp of pendingPhotos) {
+      if (pp.measurementDate === toSave.date && !wantedAngles.has(pp.angle) && pp.id != null) {
+        await deletePendingPhoto(pp.id);
+      }
+    }
+  } catch {}
+
   // Queue base64 photos for background upload, but keep them in local data
   const localPhotos: Record<string, string> = {};
   const firestorePhotos: Record<string, string> = {};
@@ -246,7 +259,15 @@ export async function saveMeasurement(measurement: Measurement) {
     for (const [angle, val] of Object.entries(toSave.photos)) {
       if (!val) continue;
       if (val.startsWith('data:')) {
-        // Queue photo for upload when online
+        // Queue photo for upload when online (dedupe: remove any prior pending entry for same date+angle)
+        try {
+          const existing = await getAllPendingPhotos();
+          for (const pp of existing) {
+            if (pp.measurementDate === toSave.date && pp.angle === angle && pp.id != null) {
+              await deletePendingPhoto(pp.id);
+            }
+          }
+        } catch {}
         await addPendingPhoto({
           measurementDate: toSave.date,
           angle,
@@ -654,6 +675,17 @@ export async function saveNutritionPlan(plan: NutritionPlan) {
   flushSyncQueue();
 }
 
+// Check if Firestore has a nutrition plan — used to avoid overwriting remote data with default
+export async function nutritionPlanExistsRemotely(): Promise<boolean> {
+  if (typeof window === 'undefined' || !navigator.onLine) return false;
+  try {
+    const snap = await getDoc(doc(db, 'nutrition', 'plan'));
+    return snap.exists() && !!snap.data().current;
+  } catch {
+    return false;
+  }
+}
+
 // Blood tests — stored as JSON in settings
 export async function getBloodTests(): Promise<import('@/types').BloodTest[]> {
   try {
@@ -700,7 +732,17 @@ export async function flushSyncQueue() {
         if (entry.id != null) await deletePendingSync(entry.id);
       } catch (e) {
         console.error('Sync failed for entry:', entry, e);
-        break; // Stop on failure, retry later
+        // Don't block other entries — increment attempt counter, drop after 5 tries
+        const attempts = ((entry as { attempts?: number }).attempts || 0) + 1;
+        if (entry.id != null) {
+          await deletePendingSync(entry.id);
+          if (attempts < 5) {
+            await addPendingSync({ ...entry, attempts });
+          } else {
+            console.warn('Dropping sync entry after 5 failed attempts:', entry);
+          }
+        }
+        continue;
       }
     }
 
@@ -725,7 +767,17 @@ export async function flushSyncQueue() {
         if (photo.id != null) await deletePendingPhoto(photo.id);
       } catch (e) {
         console.error('Photo sync failed:', photo, e);
-        break;
+        // Don't block other photos — drop after 5 attempts
+        const attempts = ((photo as { attempts?: number }).attempts || 0) + 1;
+        if (photo.id != null) {
+          await deletePendingPhoto(photo.id);
+          if (attempts < 5) {
+            await addPendingPhoto({ ...photo, attempts });
+          } else {
+            console.warn('Dropping photo upload after 5 failed attempts:', photo.measurementDate, photo.angle);
+          }
+        }
+        continue;
       }
     }
   } finally {
@@ -738,46 +790,52 @@ export async function seedInitialData() {
   const existing = await idbGetMeasurements();
   if (existing.length > 0) return;
 
-  // Also check Firestore if online — pull ALL data
+  // Also check Firestore if online — pull each collection independently
   if (navigator.onLine) {
+    let foundAny = false;
+
+    // Pull measurements
     try {
-      const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
-      const snap = await getDocs(q);
+      const snap = await getDocs(query(collection(db, 'measurements'), orderBy('date', 'asc')));
       if (!snap.empty) {
-        const items = snap.docs.map(d => d.data() as Measurement);
-        await bulkPutMeasurements(items);
-
-        // Also pull training sessions
-        try {
-          const sessSnap = await getDocs(collection(db, 'trainingSessions'));
-          if (!sessSnap.empty) {
-            const sessions = sessSnap.docs.map(d => d.data() as TrainingSession);
-            await bulkPutTrainingSessions(sessions);
-          }
-        } catch {}
-
-        // Also pull nutrition plan
-        try {
-          const nutSnap = await getDoc(doc(db, 'nutrition', 'plan'));
-          if (nutSnap.exists() && nutSnap.data().current) {
-            await idbPutNutrition(nutSnap.data() as NutritionPlan);
-          }
-        } catch {}
-
-        // Also pull settings
-        try {
-          const settSnap = await getDocs(collection(db, 'settings'));
-          for (const d of settSnap.docs) {
-            const data = d.data();
-            if (data.value !== undefined) await idbPutSetting(d.id, data.value);
-          }
-        } catch {}
-
-        return;
+        await bulkPutMeasurements(snap.docs.map(d => d.data() as Measurement));
+        foundAny = true;
       }
-    } catch (e) {
-      console.warn('Firestore check during seed failed:', e);
-    }
+    } catch (e) { console.warn('Seed measurements failed:', e); }
+
+    // Pull training sessions (independent)
+    try {
+      const snap = await getDocs(collection(db, 'trainingSessions'));
+      if (!snap.empty) {
+        await bulkPutTrainingSessions(snap.docs.map(d => d.data() as TrainingSession));
+        foundAny = true;
+      }
+    } catch (e) { console.warn('Seed sessions failed:', e); }
+
+    // Pull nutrition plan (independent)
+    try {
+      const snap = await getDoc(doc(db, 'nutrition', 'plan'));
+      if (snap.exists() && snap.data().current) {
+        await idbPutNutrition(snap.data() as NutritionPlan);
+        foundAny = true;
+      }
+    } catch (e) { console.warn('Seed nutrition failed:', e); }
+
+    // Pull settings (independent) — also seed timestamps for proper sync
+    try {
+      const snap = await getDocs(collection(db, 'settings'));
+      for (const d of snap.docs) {
+        const data = d.data();
+        if (data.value !== undefined) {
+          await idbPutSetting(d.id, data.value);
+          if (data.lastModified) await idbPutSetting(`${d.id}_ts`, String(data.lastModified));
+        }
+      }
+      if (!snap.empty) foundAny = true;
+    } catch (e) { console.warn('Seed settings failed:', e); }
+
+    // If any real data was found, skip the historical demo seed
+    if (foundAny) return;
   }
 
   const historicalData: Measurement[] = [

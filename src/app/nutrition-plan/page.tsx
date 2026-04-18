@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Navigation from '@/components/Navigation';
-import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan, getSetting, saveSetting } from '@/utils/storage';
+import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan, getSetting, saveSetting, nutritionPlanExistsRemotely } from '@/utils/storage';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
 import { calcNNU, optimizeMeal, calcDailyEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult } from '@/utils/eaa';
 
@@ -279,30 +279,31 @@ function getPieceWeight(name: string): number | null {
 
 function parseGrams(amount: string | undefined, foodName: string): number | null {
   if (!amount) return null;
+  const safe = (s: string, fb = 0) => { const v = parseFloat(s); return isFinite(v) ? v : fb; };
   // Explicit gram unit
   const gMatch = amount.match(/([\d.]+)\s*(?:gr|g|grams?)$/i);
-  if (gMatch) return parseFloat(gMatch[1]);
+  if (gMatch) return safe(gMatch[1]);
   // Explicit ml (treat as grams for liquids)
   const mlMatch = amount.match(/([\d.]+)\s*ml$/i);
-  if (mlMatch) return parseFloat(mlMatch[1]);
+  if (mlMatch) return safe(mlMatch[1]);
   // Cups (1 cup ≈ 240ml for liquids, 150g for solids)
   const cupMatch = amount.match(/([\d.]*)\s*cups?$/i);
   if (cupMatch) {
-    const count = parseFloat(cupMatch[1] || '1');
+    const count = safe(cupMatch[1] || '1', 1);
     return count * 240;
   }
   // Tablespoon / teaspoon
   const tbspMatch = amount.match(/([\d.]+)\s*(?:tbsp|tablespoons?)$/i);
-  if (tbspMatch) return parseFloat(tbspMatch[1]) * 15;
+  if (tbspMatch) return safe(tbspMatch[1]) * 15;
   const tspMatch = amount.match(/([\d.]+)\s*(?:tsp|teaspoons?)$/i);
-  if (tspMatch) return parseFloat(tspMatch[1]) * 5;
+  if (tspMatch) return safe(tspMatch[1]) * 5;
   // Scoop (assume ~30g per scoop for protein powder)
   const scoopMatch = amount.match(/([\d.]*)\s*scoops?$/i);
-  if (scoopMatch) return parseFloat(scoopMatch[1] || '1') * 30;
+  if (scoopMatch) return safe(scoopMatch[1] || '1', 1) * 30;
   // Bare number — check if this food is countable (pieces)
   const bare = amount.match(/^([\d.]+)$/);
   if (bare) {
-    const count = parseFloat(bare[1]);
+    const count = safe(bare[1]);
     const pieceWeight = getPieceWeight(foodName);
     if (pieceWeight) return count * pieceWeight;
     // Not a known countable food — assume grams
@@ -1597,17 +1598,22 @@ export default function NutritionPlanPage() {
         getSetting('eaa_per_meal').then(v => { if (v) localStorage.setItem('eaa_per_meal', v); });
       }
 
-      getNutritionPlan().then(stored => {
+      getNutritionPlan().then(async stored => {
         if (stored && 'current' in stored) {
           const p = stored as NutritionPlan;
           // Don't recompute macros on load — trust the stored values.
           // Macros are recomputed only in persist() when user explicitly saves.
           setPlan(p);
         } else {
+          // Show default in memory, but only persist if Firestore is also empty.
+          // Otherwise we'd overwrite the real plan that other devices haven't synced yet.
           const defaultVersion = getDefaultNutritionPlan();
           const newPlan: NutritionPlan = { current: defaultVersion, history: [] };
           setPlan(newPlan);
-          saveNutritionPlan(newPlan);
+          const remoteExists = await nutritionPlanExistsRemotely();
+          if (!remoteExists) {
+            await saveNutritionPlan(newPlan);
+          }
         }
         setLoaded(true);
       });

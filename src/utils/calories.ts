@@ -29,10 +29,16 @@ const COMPOUND_KEYWORDS = [
 
 function getCardioMET(name: string): number {
   const lower = name.toLowerCase();
+  // Longest-match wins so "incline walk" picks up its own MET, not "walk"'s
+  let best = 5.0;
+  let bestLen = 0;
   for (const [key, met] of Object.entries(CARDIO_METS)) {
-    if (lower.includes(key)) return met;
+    if (lower.includes(key) && key.length > bestLen) {
+      best = met;
+      bestLen = key.length;
+    }
   }
-  return 5.0;
+  return best;
 }
 
 export function parseDurationMinutes(targetReps: string): number {
@@ -65,15 +71,18 @@ export function calcSessionCalories(session: TrainingSession, bodyWeight: number
 
   const duration = session.durationMinutes;
 
+  // Session-wide check: once ANY set is marked done, only count done sets across all exercises.
+  // This prevents un-started exercises from inflating the kcal estimate mid-workout.
+  const hasAnyDone = session.exercises.some(e => e.sets.some(s => s.done));
+
   let totalSets = 0;
   let compoundSets = 0;
   let isolationSets = 0;
   for (const ex of session.exercises) {
     if (ex.skipped) continue;
-    const hasDone = ex.sets.some(s => s.done);
     const isCompound = COMPOUND_KEYWORDS.some(kw => ex.name.toLowerCase().includes(kw));
     for (const set of ex.sets) {
-      if (hasDone && !set.done) continue;
+      if (hasAnyDone && !set.done) continue;
       totalSets++;
       if (isCompound) compoundSets++; else isolationSets++;
     }
@@ -143,9 +152,9 @@ export function calcRollingTDEE(
   const nonWatchTrainingCals = nonWatchSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
 
   // Weighted average across all 7 days
+  // Always include training cals — even if no wearables, logged sessions count toward TDEE
   const totalActivity = watchTotalCals + ouraTotalCals + nonWatchTrainingCals;
-  const totalDaysWithData = watchDays + ouraDays;
-  const dailyActivityAvg = totalDaysWithData > 0 ? Math.round(totalActivity / 7) : 0;
+  const dailyActivityAvg = Math.round(totalActivity / 7);
 
   // For display: split into training + neat
   const dailyTraining = Math.round(nonWatchTrainingCals / 7);
