@@ -76,10 +76,32 @@ function backgroundRefreshSessions() {
   setTimeout(() => (async () => {
     try {
       const snap = await getDocs(collection(db, 'trainingSessions'));
-      const items = snap.docs.map(d => d.data() as TrainingSession);
-      for (const s of items) {
+      const remoteItems = snap.docs.map(d => d.data() as TrainingSession);
+      const localItems = await idbGetSessions();
+      const localMap = new Map(localItems.map(s => [s.id, s]));
+
+      // Pull remote sessions not in local
+      for (const s of remoteItems) {
         const pending = await hasPendingSyncFor('trainingSessions', s.id);
-        if (!pending) await idbPutSession(s);
+        if (!pending) {
+          const local = localMap.get(s.id);
+          const remoteTs = (s as TrainingSession & { lastModified?: number }).lastModified || 0;
+          const localTs = (local as TrainingSession & { lastModified?: number })?.lastModified || 0;
+          if (!local || remoteTs >= localTs) {
+            await idbPutSession(s);
+          }
+        }
+      }
+
+      // Push local sessions not in remote
+      const remoteIds = new Set(remoteItems.map(s => s.id));
+      for (const s of localItems) {
+        if (!remoteIds.has(s.id)) {
+          const pending = await hasPendingSyncFor('trainingSessions', s.id);
+          if (!pending) {
+            try { await setDoc(doc(db, 'trainingSessions', s.id), stripUndefined(s)); } catch {}
+          }
+        }
       }
     } catch (e) {
       console.warn('Background refresh sessions failed:', e);
@@ -93,11 +115,25 @@ function backgroundRefreshNutrition() {
     try {
       const snap = await getDoc(doc(db, 'nutrition', 'plan'));
       if (snap.exists()) {
-        const data = snap.data();
-        // Only accept new format (has 'current' key); skip legacy data
-        if (!data.current) return;
+        const remoteData = snap.data();
+        if (!remoteData.current) return;
         const pending = await hasPendingSyncFor('nutrition', 'plan');
-        if (!pending) await idbPutNutrition(data as NutritionPlan);
+        if (pending) return; // local has unsaved changes, don't overwrite
+
+        const local = await idbGetNutrition();
+        const remoteTs = remoteData.lastModified || 0;
+        const localTs = (local as NutritionPlan & { lastModified?: number })?.lastModified || 0;
+
+        if (remoteTs >= localTs) {
+          // Remote is newer or same — pull into IDB
+          if (local) {
+            try { localStorage.setItem('nutrition_backup', JSON.stringify(local)); } catch {}
+          }
+          await idbPutNutrition(remoteData as NutritionPlan);
+        } else {
+          // Local is newer — push to Firestore
+          await setDoc(doc(db, 'nutrition', 'plan'), stripUndefined(local));
+        }
       }
     } catch (e) {
       console.warn('Background refresh nutrition failed:', e);
@@ -111,9 +147,24 @@ function backgroundRefreshSetting(key: string) {
     try {
       const snap = await getDoc(doc(db, 'settings', key));
       const pending = await hasPendingSyncFor('settings', key);
-      if (!pending) {
-        if (snap.exists()) {
-          await idbPutSetting(key, snap.data().value);
+      if (pending) return;
+
+      if (snap.exists()) {
+        const remoteData = snap.data();
+        const remoteTs = remoteData.lastModified || 0;
+
+        // Check local timestamp
+        const localTs = Number(await idbGetSetting(`${key}_ts`) || '0');
+
+        if (remoteTs >= localTs) {
+          await idbPutSetting(key, remoteData.value);
+          if (remoteData.lastModified) await idbPutSetting(`${key}_ts`, String(remoteData.lastModified));
+        } else {
+          // Local is newer — push to Firestore
+          const localVal = await idbGetSetting(key);
+          if (localVal !== null) {
+            await setDoc(doc(db, 'settings', key), { value: localVal, lastModified: localTs });
+          }
         }
       }
     } catch (e) {
@@ -149,22 +200,25 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 export async function saveSetting(key: string, value: string | null) {
+  const now = Date.now();
   if (value === null) {
     await idbDeleteSetting(key);
+    await idbDeleteSetting(`${key}_ts`);
     await addPendingSync({
       collection: 'settings',
       docId: key,
       operation: 'delete',
-      timestamp: Date.now(),
+      timestamp: now,
     });
   } else {
     await idbPutSetting(key, value);
+    await idbPutSetting(`${key}_ts`, String(now));
     await addPendingSync({
       collection: 'settings',
       docId: key,
       operation: 'set',
-      data: { value },
-      timestamp: Date.now(),
+      data: { value, lastModified: now },
+      timestamp: now,
     });
   }
   flushSyncQueue();
@@ -287,6 +341,7 @@ export async function saveTrainingSession(session: TrainingSession) {
     session.durationMinutes = 0;
   }
 
+  (session as TrainingSession & { lastModified?: number }).lastModified = Date.now();
   await idbPutSession(session);
 
   await addPendingSync({
@@ -587,12 +642,13 @@ export async function getNutritionPlan(): Promise<NutritionPlan | null> {
 }
 
 export async function saveNutritionPlan(plan: NutritionPlan) {
-  await idbPutNutrition(plan);
+  const planWithTs = { ...plan, lastModified: Date.now() };
+  await idbPutNutrition(planWithTs);
   await addPendingSync({
     collection: 'nutrition',
     docId: 'plan',
     operation: 'set',
-    data: stripUndefined(plan),
+    data: stripUndefined(planWithTs),
     timestamp: Date.now(),
   });
   flushSyncQueue();
