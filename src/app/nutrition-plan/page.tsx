@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Navigation from '@/components/Navigation';
-import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan } from '@/utils/storage';
+import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan, getSetting, saveSetting } from '@/utils/storage';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
 import { calcNNU, optimizeMeal, calcDailyEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult } from '@/utils/eaa';
 
@@ -1197,17 +1197,30 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   editPlan: DayPlan | null;
   setEditPlan: (p: DayPlan) => void;
 }) {
-  // Target macros — editable, stored in localStorage
+  // Target macros — editable, stored in localStorage + synced via settings
   const [targets, setTargets] = useState(() => {
     if (typeof window !== 'undefined') {
       try { const stored = localStorage.getItem('macro_targets'); if (stored) return JSON.parse(stored); } catch {}
     }
     return { kcal: dayPlan.macros.kcal, protein: dayPlan.macros.protein, carbs: dayPlan.macros.carbs, fat: dayPlan.macros.fat };
   });
+  // Load targets from synced settings (Firestore) if localStorage is empty
+  useEffect(() => {
+    getSetting('macro_targets').then(v => {
+      if (v) {
+        try {
+          const parsed = JSON.parse(v);
+          setTargets(parsed);
+          localStorage.setItem('macro_targets', v);
+        } catch {}
+      }
+    });
+  }, []);
   const updateTarget = (key: string, value: number) => {
     const next = { ...targets, [key]: value };
     setTargets(next);
     localStorage.setItem('macro_targets', JSON.stringify(next));
+    saveSetting('macro_targets', JSON.stringify(next));
   };
 
   // Actual macros — computed in real-time from all meals + EAA supplement (from localStorage)
