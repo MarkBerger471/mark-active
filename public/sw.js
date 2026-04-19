@@ -1,17 +1,14 @@
-const CACHE_NAME = 'bb-shell-v37';
+const CACHE_NAME = 'bb-shell-v38';
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
-const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan'];
+const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan', '/vitals'];
 
 self.addEventListener('install', (event) => {
   if (IS_LOCALHOST) {
-    // In development, skip caching entirely
     self.skipWaiting();
     return;
   }
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(PAGES);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PAGES).catch(() => {}))
   );
   self.skipWaiting();
 });
@@ -19,46 +16,43 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      )
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
 });
 
+// Helper: cache a response only if it's a real OK page (not redirect, not error)
+function cacheable(response) {
+  return response && response.ok && response.status === 200 && !response.redirected;
+}
+
 self.addEventListener('fetch', (event) => {
-  // In development, never intercept — let everything go to the dev server
   if (IS_LOCALHOST) return;
 
   const url = new URL(event.request.url);
-
-  // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
-  // Skip Firebase/Firestore API calls — handled by IndexedDB layer
+  // Skip Firebase/Firestore — handled by IDB layer
   if (
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('firebase') ||
     url.hostname.includes('googleapis.com')
-  ) {
-    return;
-  }
+  ) return;
 
-  // Skip API routes entirely — let them go straight to the network.
-  // Data caching is handled by localStorage/IndexedDB in the app layer.
-  if (url.pathname.startsWith('/api/')) {
-    return;
-  }
+  // Skip API routes — straight to network
+  if (url.pathname.startsWith('/api/')) return;
 
-  // Static assets (immutable, hash-based filenames) — cache first
+  // Static assets (immutable, hash-based filenames) — cache first, never refetch
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;
         return fetch(event.request).then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          if (cacheable(response)) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+          }
           return response;
         });
       })
@@ -66,34 +60,40 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigation requests — stale-while-revalidate
+  // Navigation requests — TRUE stale-while-revalidate
+  // Serve from cache instantly; fetch in background to update cache for next time.
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          return response;
-        })
-        .catch(() => {
-          return caches.match(event.request).then((cached) => {
-            return cached || caches.match('/');
-          });
-        })
+      caches.match(event.request).then((cached) => {
+        const networkPromise = fetch(event.request)
+          .then((response) => {
+            if (cacheable(response)) {
+              const clone = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+            }
+            return response;
+          })
+          .catch(() => cached || caches.match('/'));
+        // If we have a cached response, return it instantly — no waiting on network
+        return cached || networkPromise;
+      })
     );
     return;
   }
 
-  // Other resources — network first, cache fallback
+  // Other resources — stale-while-revalidate (instant from cache, refresh in background)
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      })
-      .catch(() => caches.match(event.request))
+    caches.match(event.request).then((cached) => {
+      const networkPromise = fetch(event.request)
+        .then((response) => {
+          if (cacheable(response)) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => cached);
+      return cached || networkPromise;
+    })
   );
 });
