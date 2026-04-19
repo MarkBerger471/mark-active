@@ -10,20 +10,18 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
   afterSrc: string;
   beforeLabel: string;
   afterLabel: string;
-  adjustKey?: string; // unique key per photo pair, e.g. "2026-04-12_2026-04-19_front"
+  adjustKey?: string;
 }) {
   const [pos, setPos] = useState(50);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
-  // Photo adjustments — persisted per pair
   const storageKey = adjustKey ? `photo_adjust_${adjustKey}` : null;
   const [beforeAdj, setBeforeAdj] = useState<PhotoAdjust>(DEFAULT_ADJUST);
   const [afterAdj, setAfterAdj] = useState<PhotoAdjust>(DEFAULT_ADJUST);
-  const [showControls, setShowControls] = useState(false);
+  const [adjustMode, setAdjustMode] = useState(false);
   const [activePhoto, setActivePhoto] = useState<'before' | 'after'>('before');
 
-  // Load saved adjustments on mount / key change
   useEffect(() => {
     if (!storageKey) return;
     try {
@@ -36,7 +34,6 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
     } catch {}
   }, [storageKey]);
 
-  // Save adjustments
   const saveAdj = useCallback((b: PhotoAdjust, a: PhotoAdjust) => {
     if (!storageKey) return;
     try { localStorage.setItem(storageKey, JSON.stringify({ before: b, after: a })); } catch {}
@@ -44,10 +41,8 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
 
   const updateBefore = (next: PhotoAdjust) => { setBeforeAdj(next); saveAdj(next, afterAdj); };
   const updateAfter = (next: PhotoAdjust) => { setAfterAdj(next); saveAdj(beforeAdj, next); };
-  const resetActive = () => {
-    if (activePhoto === 'before') updateBefore(DEFAULT_ADJUST);
-    else updateAfter(DEFAULT_ADJUST);
-  };
+  const updateActive = (next: PhotoAdjust) => activePhoto === 'before' ? updateBefore(next) : updateAfter(next);
+  const resetActive = () => updateActive(DEFAULT_ADJUST);
 
   const updatePos = useCallback((clientX: number) => {
     const el = containerRef.current;
@@ -58,10 +53,10 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
   }, []);
 
   const onStart = useCallback((clientX: number) => {
-    if (showControls) return; // disable slider drag while adjusting
+    if (adjustMode) return;
     dragging.current = true;
     updatePos(clientX);
-  }, [updatePos, showControls]);
+  }, [updatePos, adjustMode]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => { if (dragging.current) updatePos(e.clientX); };
@@ -82,82 +77,116 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
 
   const transformOf = (a: PhotoAdjust) => `translate(${a.offsetX}%, ${a.offsetY}%) scale(${a.scale})`;
   const active = activePhoto === 'before' ? beforeAdj : afterAdj;
-  const updateActive = (next: PhotoAdjust) => activePhoto === 'before' ? updateBefore(next) : updateAfter(next);
+
+  // In adjust mode, lock divider at 50% so both photos always visible
+  const dividerPos = adjustMode ? 50 : pos;
+  const enterAdjustMode = () => { setAdjustMode(true); setPos(50); };
+  const exitAdjustMode = () => setAdjustMode(false);
+
+  // +/- step increments
+  const adjStep = (key: keyof PhotoAdjust, delta: number) => {
+    const next = { ...active, [key]: Math.round((active[key] + delta) * 100) / 100 };
+    // Clamp ranges
+    if (key === 'scale') next.scale = Math.max(0.5, Math.min(2, next.scale));
+    if (key === 'offsetX' || key === 'offsetY') next[key] = Math.max(-50, Math.min(50, next[key]));
+    updateActive(next);
+  };
 
   return (
     <div>
       <div
         ref={containerRef}
-        className={`relative aspect-[3/4] rounded-xl overflow-hidden select-none touch-none ${showControls ? '' : 'cursor-col-resize'}`}
+        className={`relative aspect-[3/4] rounded-xl overflow-hidden select-none touch-none ${adjustMode ? '' : 'cursor-col-resize'}`}
         onMouseDown={e => onStart(e.clientX)}
         onTouchStart={e => onStart(e.touches[0].clientX)}
         onTouchMove={e => onTouchMove(e.touches[0].clientX)}
         onTouchEnd={onEnd}
       >
-        {/* After (full) */}
+        {/* After (right side, full image) */}
         <img src={afterSrc} alt="After" className="absolute top-0 left-0 w-full min-h-full" style={{ transform: transformOf(afterAdj), transformOrigin: 'center center' }} />
-        {/* Before (clipped to left portion) */}
-        <img src={beforeSrc} alt="Before" className="absolute top-0 left-0 w-full min-h-full" style={{ transform: transformOf(beforeAdj), transformOrigin: 'center center', clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
-        {/* Divider line + drag handle */}
-        {!showControls && (
-          <div className="absolute top-0 bottom-0" style={{ left: `${pos}%`, transform: 'translateX(-50%)' }}>
-            <div className="w-0.5 h-full bg-white/80" style={{ boxShadow: '0 0 8px rgba(255,255,255,0.4)' }} />
+        {/* Before (left side, clipped) */}
+        <img src={beforeSrc} alt="Before" className="absolute top-0 left-0 w-full min-h-full" style={{ transform: transformOf(beforeAdj), transformOrigin: 'center center', clipPath: `inset(0 ${100 - dividerPos}% 0 0)` }} />
+
+        {/* Tap zones in adjust mode (left = before, right = after) */}
+        {adjustMode && (
+          <>
+            <button
+              onClick={() => setActivePhoto('before')}
+              className={`absolute top-0 left-0 bottom-0 transition-all ${activePhoto === 'before' ? 'ring-2 ring-inset ring-cyan-400/60' : ''}`}
+              style={{ width: '50%' }}
+              aria-label="Select before"
+            />
+            <button
+              onClick={() => setActivePhoto('after')}
+              className={`absolute top-0 right-0 bottom-0 transition-all ${activePhoto === 'after' ? 'ring-2 ring-inset ring-cyan-400/60' : ''}`}
+              style={{ width: '50%' }}
+              aria-label="Select after"
+            />
+          </>
+        )}
+
+        {/* Divider line */}
+        <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: `${dividerPos}%`, transform: 'translateX(-50%)' }}>
+          <div className="w-0.5 h-full bg-white/80" style={{ boxShadow: '0 0 8px rgba(255,255,255,0.4)' }} />
+          {!adjustMode && (
             <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-9 h-9 bg-white/90 rounded-full flex items-center justify-center" style={{ boxShadow: '0 0 15px rgba(255,255,255,0.5), 0 0 30px rgba(255,255,255,0.2)' }}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M5 3L2 8L5 13M11 3L14 8L11 13" stroke="#1a1a2e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-          </div>
-        )}
-        {/* Date labels */}
-        <div className="absolute top-3 left-3 bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1 text-[10px] text-white/80">{beforeLabel}</div>
-        <div className="absolute top-3 right-3 bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1 text-[10px] text-white/80">{afterLabel}</div>
-        {/* Adjust toggle */}
+          )}
+        </div>
+
+        {/* Date labels — highlight the active one in adjust mode */}
+        <div className={`absolute top-3 left-3 backdrop-blur-sm rounded-lg px-2 py-1 text-[10px] transition-all pointer-events-none ${adjustMode && activePhoto === 'before' ? 'bg-cyan-500/40 text-white font-semibold' : 'bg-black/50 text-white/80'}`}>{beforeLabel}</div>
+        <div className={`absolute top-3 right-3 backdrop-blur-sm rounded-lg px-2 py-1 text-[10px] transition-all pointer-events-none ${adjustMode && activePhoto === 'after' ? 'bg-cyan-500/40 text-white font-semibold' : 'bg-black/50 text-white/80'}`}>{afterLabel}</div>
+
+        {/* Adjust toggle button */}
         {adjustKey && (
-          <button onClick={() => setShowControls(s => !s)}
-            className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-sm rounded-lg px-2.5 py-1 text-[10px] text-white/80 hover:bg-black/80 transition-all">
-            {showControls ? 'Done' : '⚙ Adjust'}
+          <button onClick={adjustMode ? exitAdjustMode : enterAdjustMode}
+            className={`absolute bottom-3 right-3 backdrop-blur-sm rounded-lg px-2.5 py-1 text-[10px] transition-all ${adjustMode ? 'bg-cyan-500/60 text-white' : 'bg-black/60 text-white/80 hover:bg-black/80'}`}>
+            {adjustMode ? 'Done' : '⚙ Adjust'}
           </button>
         )}
       </div>
 
-      {/* Adjustment controls */}
-      {showControls && adjustKey && (
+      {/* +/- adjustment controls */}
+      {adjustMode && adjustKey && (
         <div className="mt-2 p-3 bg-white/[0.04] border border-white/[0.08] rounded-xl">
-          <div className="flex gap-2 mb-3">
-            <button onClick={() => setActivePhoto('before')}
-              className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${activePhoto === 'before' ? 'bg-white/15 text-white' : 'bg-white/[0.03] text-white/40'}`}>
-              ◀ {beforeLabel}
-            </button>
-            <button onClick={() => setActivePhoto('after')}
-              className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${activePhoto === 'after' ? 'bg-white/15 text-white' : 'bg-white/[0.03] text-white/40'}`}>
-              {afterLabel} ▶
-            </button>
+          <div className="text-[10px] text-white/40 mb-2 text-center">
+            Editing: <span className="text-cyan-400 font-semibold">{activePhoto === 'before' ? beforeLabel : afterLabel}</span>
+            <span className="text-white/30"> — tap the other half to switch</span>
           </div>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-[10px] text-white/50">
-              <span className="w-12">Scale</span>
-              <input type="range" min="0.5" max="2" step="0.01" value={active.scale}
-                onChange={e => updateActive({ ...active, scale: parseFloat(e.target.value) })}
-                className="flex-1 accent-white" />
-              <span className="w-10 text-right text-white/70">{active.scale.toFixed(2)}×</span>
-            </label>
-            <label className="flex items-center gap-2 text-[10px] text-white/50">
-              <span className="w-12">↕ Y</span>
-              <input type="range" min="-30" max="30" step="0.5" value={active.offsetY}
-                onChange={e => updateActive({ ...active, offsetY: parseFloat(e.target.value) })}
-                className="flex-1 accent-white" />
-              <span className="w-10 text-right text-white/70">{active.offsetY > 0 ? '+' : ''}{active.offsetY.toFixed(1)}%</span>
-            </label>
-            <label className="flex items-center gap-2 text-[10px] text-white/50">
-              <span className="w-12">↔ X</span>
-              <input type="range" min="-30" max="30" step="0.5" value={active.offsetX}
-                onChange={e => updateActive({ ...active, offsetX: parseFloat(e.target.value) })}
-                className="flex-1 accent-white" />
-              <span className="w-10 text-right text-white/70">{active.offsetX > 0 ? '+' : ''}{active.offsetX.toFixed(1)}%</span>
-            </label>
+          <div className="grid grid-cols-3 gap-2">
+            {/* Scale */}
+            <div className="flex flex-col items-center bg-white/[0.03] rounded-lg py-2">
+              <span className="text-[9px] text-white/40 uppercase tracking-wider mb-1">Scale</span>
+              <span className="text-[12px] font-bold text-white mb-2">{active.scale.toFixed(2)}×</span>
+              <div className="flex gap-1">
+                <button onClick={() => adjStep('scale', -0.05)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">−</button>
+                <button onClick={() => adjStep('scale', 0.05)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">+</button>
+              </div>
+            </div>
+            {/* Y */}
+            <div className="flex flex-col items-center bg-white/[0.03] rounded-lg py-2">
+              <span className="text-[9px] text-white/40 uppercase tracking-wider mb-1">Y ↕</span>
+              <span className="text-[12px] font-bold text-white mb-2">{active.offsetY > 0 ? '+' : ''}{active.offsetY.toFixed(1)}%</span>
+              <div className="flex gap-1">
+                <button onClick={() => adjStep('offsetY', -1)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">↑</button>
+                <button onClick={() => adjStep('offsetY', 1)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">↓</button>
+              </div>
+            </div>
+            {/* X */}
+            <div className="flex flex-col items-center bg-white/[0.03] rounded-lg py-2">
+              <span className="text-[9px] text-white/40 uppercase tracking-wider mb-1">X ↔</span>
+              <span className="text-[12px] font-bold text-white mb-2">{active.offsetX > 0 ? '+' : ''}{active.offsetX.toFixed(1)}%</span>
+              <div className="flex gap-1">
+                <button onClick={() => adjStep('offsetX', -1)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">←</button>
+                <button onClick={() => adjStep('offsetX', 1)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">→</button>
+              </div>
+            </div>
           </div>
-          <button onClick={resetActive} className="text-[10px] text-white/30 hover:text-white/60 mt-2 transition-all">↻ Reset {activePhoto}</button>
+          <button onClick={resetActive} className="block mx-auto text-[10px] text-white/30 hover:text-white/60 mt-3 transition-all">↻ Reset {activePhoto}</button>
         </div>
       )}
     </div>
