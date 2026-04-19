@@ -17,30 +17,43 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
   const dragging = useRef(false);
 
   const storageKey = adjustKey ? `photo_adjust_${adjustKey}` : null;
-  const [beforeAdj, setBeforeAdj] = useState<PhotoAdjust>(DEFAULT_ADJUST);
-  const [afterAdj, setAfterAdj] = useState<PhotoAdjust>(DEFAULT_ADJUST);
+
+  // Synchronous loader — avoids flash of defaults before useEffect runs
+  const loadAdj = (which: 'before' | 'after'): PhotoAdjust => {
+    if (!storageKey || typeof window === 'undefined') return DEFAULT_ADJUST;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return DEFAULT_ADJUST;
+      const data = JSON.parse(raw);
+      return { ...DEFAULT_ADJUST, ...(data[which] || {}) };
+    } catch { return DEFAULT_ADJUST; }
+  };
+
+  const [beforeAdj, setBeforeAdj] = useState<PhotoAdjust>(() => loadAdj('before'));
+  const [afterAdj, setAfterAdj] = useState<PhotoAdjust>(() => loadAdj('after'));
   const [adjustMode, setAdjustMode] = useState(false);
   const [activePhoto, setActivePhoto] = useState<'before' | 'after'>('before');
 
+  // Re-load when storageKey changes (e.g. new photo pair)
   useEffect(() => {
-    if (!storageKey) return;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const data = JSON.parse(raw);
-        if (data.before) setBeforeAdj({ ...DEFAULT_ADJUST, ...data.before });
-        if (data.after) setAfterAdj({ ...DEFAULT_ADJUST, ...data.after });
-      }
-    } catch {}
+    setBeforeAdj(loadAdj('before'));
+    setAfterAdj(loadAdj('after'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
+
+  // Refs always point to the latest state — prevents stale-closure when saving
+  const beforeRef = useRef(beforeAdj);
+  const afterRef = useRef(afterAdj);
+  useEffect(() => { beforeRef.current = beforeAdj; }, [beforeAdj]);
+  useEffect(() => { afterRef.current = afterAdj; }, [afterAdj]);
 
   const saveAdj = useCallback((b: PhotoAdjust, a: PhotoAdjust) => {
     if (!storageKey) return;
     try { localStorage.setItem(storageKey, JSON.stringify({ before: b, after: a })); } catch {}
   }, [storageKey]);
 
-  const updateBefore = (next: PhotoAdjust) => { setBeforeAdj(next); saveAdj(next, afterAdj); };
-  const updateAfter = (next: PhotoAdjust) => { setAfterAdj(next); saveAdj(beforeAdj, next); };
+  const updateBefore = (next: PhotoAdjust) => { setBeforeAdj(next); saveAdj(next, afterRef.current); };
+  const updateAfter = (next: PhotoAdjust) => { setAfterAdj(next); saveAdj(beforeRef.current, next); };
   const updateActive = (next: PhotoAdjust) => activePhoto === 'before' ? updateBefore(next) : updateAfter(next);
   const resetActive = () => updateActive(DEFAULT_ADJUST);
 
