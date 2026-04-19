@@ -163,8 +163,8 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
               <span className="text-[9px] text-white/40 uppercase tracking-wider mb-1">Scale</span>
               <span className="text-[12px] font-bold text-white mb-2">{active.scale.toFixed(2)}×</span>
               <div className="flex gap-1">
-                <button onClick={() => adjStep('scale', -0.05)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">−</button>
-                <button onClick={() => adjStep('scale', 0.05)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">+</button>
+                <button onClick={() => adjStep('scale', -0.01)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">−</button>
+                <button onClick={() => adjStep('scale', 0.01)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">+</button>
               </div>
             </div>
             {/* Y */}
@@ -172,8 +172,8 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
               <span className="text-[9px] text-white/40 uppercase tracking-wider mb-1">Y ↕</span>
               <span className="text-[12px] font-bold text-white mb-2">{active.offsetY > 0 ? '+' : ''}{active.offsetY.toFixed(1)}%</span>
               <div className="flex gap-1">
-                <button onClick={() => adjStep('offsetY', -1)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">↑</button>
-                <button onClick={() => adjStep('offsetY', 1)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">↓</button>
+                <button onClick={() => adjStep('offsetY', -0.25)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">↑</button>
+                <button onClick={() => adjStep('offsetY', 0.25)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">↓</button>
               </div>
             </div>
             {/* X */}
@@ -181,8 +181,8 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
               <span className="text-[9px] text-white/40 uppercase tracking-wider mb-1">X ↔</span>
               <span className="text-[12px] font-bold text-white mb-2">{active.offsetX > 0 ? '+' : ''}{active.offsetX.toFixed(1)}%</span>
               <div className="flex gap-1">
-                <button onClick={() => adjStep('offsetX', -1)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">←</button>
-                <button onClick={() => adjStep('offsetX', 1)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">→</button>
+                <button onClick={() => adjStep('offsetX', -0.25)} className="w-7 h-7 rounded-lg bg-red-500/15 text-red-400 text-sm font-bold active:bg-red-500/30 transition-all">←</button>
+                <button onClick={() => adjStep('offsetX', 0.25)} className="w-7 h-7 rounded-lg bg-green-500/15 text-green-400 text-sm font-bold active:bg-green-500/30 transition-all">→</button>
               </div>
             </div>
           </div>
