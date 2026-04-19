@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { getSetting, saveSetting } from '@/utils/storage';
 
 interface PhotoAdjust { scale: number; offsetX: number; offsetY: number }
 const DEFAULT_ADJUST: PhotoAdjust = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -41,6 +42,21 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
+  // Sync from Firestore on mount — overrides localStorage if remote is newer
+  useEffect(() => {
+    if (!storageKey) return;
+    getSetting(storageKey).then(v => {
+      if (!v) return;
+      try {
+        const data = JSON.parse(v);
+        if (data.before) setBeforeAdj({ ...DEFAULT_ADJUST, ...data.before });
+        if (data.after) setAfterAdj({ ...DEFAULT_ADJUST, ...data.after });
+        // Keep localStorage in sync
+        localStorage.setItem(storageKey, v);
+      } catch {}
+    }).catch(() => {});
+  }, [storageKey]);
+
   // Refs always point to the latest state — prevents stale-closure when saving
   const beforeRef = useRef(beforeAdj);
   const afterRef = useRef(afterAdj);
@@ -49,7 +65,10 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
 
   const saveAdj = useCallback((b: PhotoAdjust, a: PhotoAdjust) => {
     if (!storageKey) return;
-    try { localStorage.setItem(storageKey, JSON.stringify({ before: b, after: a })); } catch {}
+    const json = JSON.stringify({ before: b, after: a });
+    try { localStorage.setItem(storageKey, json); } catch {}
+    // Sync to Firestore so adjustments roam across devices
+    saveSetting(storageKey, json);
   }, [storageKey]);
 
   const updateBefore = (next: PhotoAdjust) => { setBeforeAdj(next); saveAdj(next, afterRef.current); };
