@@ -1175,6 +1175,7 @@ export default function Dashboard() {
                           afterSrc={latestMeasurement.photos.front}
                           beforeLabel={new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                           afterLabel={new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                          adjustKey={`${previousMeasurement.date}_${latestMeasurement.date}_front`}
                         />
                       ) : (
                         <div className="grid grid-cols-2 gap-4">
@@ -1203,6 +1204,7 @@ export default function Dashboard() {
                           afterSrc={latestMeasurement.photos.back}
                           beforeLabel={new Date(previousMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                           afterLabel={new Date(latestMeasurement.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                          adjustKey={`${previousMeasurement.date}_${latestMeasurement.date}_back`}
                         />
                       ) : (
                         <div className="grid grid-cols-2 gap-4">
