@@ -56,6 +56,13 @@ export default function Dashboard() {
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
   const [sleepIdx, setSleepIdx] = useState(0);
 
+  // Subjective readiness — stored per day
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [subjective, setSubjective] = useState<{ energy: number; soreness: number; motivation: number } | null>(null);
+  useEffect(() => {
+    try { const raw = localStorage.getItem(`subj_${todayStr}`); if (raw) setSubjective(JSON.parse(raw)); } catch {}
+  }, [todayStr]);
+
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number; source?: string }>>({});
@@ -733,6 +740,184 @@ export default function Dashboard() {
                 </div>
               );
             })()}
+
+          {/* Workout Readiness Score */}
+          {(() => {
+            // ONLY use last night's data. If the ring wasn't worn last night,
+            // don't fall back to older data — that would misrepresent current state.
+            const todayStr2 = new Date().toISOString().split('T')[0];
+            const lastNight = sleepData.find(d => d.day === todayStr2);
+
+            // Baselines computed from past 14 days (excluding the most recent night,
+            // so a missing night doesn't pollute the average)
+            const recent = sleepData.slice(0, 14);
+            const hrvValues = recent.map(d => d.avgHrv).filter((v): v is number => v != null && v > 0);
+            const hrvBaseline = hrvValues.length >= 3 ? hrvValues.reduce((a, b) => a + b, 0) / hrvValues.length : null;
+            const rhrValues = recent.map(d => d.lowestHr).filter((v): v is number => v != null && v > 0);
+            const rhrBaseline = rhrValues.length >= 3 ? rhrValues.reduce((a, b) => a + b, 0) / rhrValues.length : null;
+
+            // Flags for missing last-night data
+            const hrvStale = !lastNight?.avgHrv || lastNight.avgHrv <= 0;
+            const rhrStale = !lastNight?.lowestHr || lastNight.lowestHr <= 0;
+            const sleepStale = !lastNight?.score || lastNight.score <= 0;
+
+            // HRV score — baseline = 65 (neutral/amber), +10% = 90, -10% = 40
+            let hrvScore: number | null = null;
+            let hrvDelta: number | null = null;
+            if (!hrvStale && lastNight!.avgHrv && hrvBaseline) {
+              hrvDelta = lastNight!.avgHrv! - hrvBaseline;
+              const pctDelta = hrvDelta / hrvBaseline;
+              hrvScore = Math.max(0, Math.min(100, 65 + pctDelta * 250));
+            }
+
+            // RHR score — lower is better. baseline = 65, -5% = 90, +5% = 40
+            let rhrScore: number | null = null;
+            let rhrDelta: number | null = null;
+            if (!rhrStale && lastNight!.lowestHr && rhrBaseline) {
+              rhrDelta = lastNight!.lowestHr! - rhrBaseline;
+              const pctDelta = rhrDelta / rhrBaseline;
+              rhrScore = Math.max(0, Math.min(100, 65 - pctDelta * 500));
+            }
+
+            // Sleep score — only count last night's score
+            const sleepScore = !sleepStale ? lastNight!.score : null;
+
+            // Subjective score (each is 1-5, avg * 20 = 0-100)
+            const subjectiveScore = subjective ? ((subjective.energy + subjective.motivation + (6 - subjective.soreness)) / 3) * 20 : null;
+
+            // Hours since last workout — use savedAt timestamp for precision
+            const lastSession = trainingSessions.length > 0 ? trainingSessions[trainingSessions.length - 1] : null;
+            const lastWorkoutTs = lastSession ? new Date(lastSession.savedAt || lastSession.startedAt || lastSession.date).getTime() : null;
+            const hoursSinceWorkout = lastWorkoutTs ? Math.floor((Date.now() - lastWorkoutTs) / 3600000) : 168;
+            const daysSinceWorkout = Math.floor(hoursSinceWorkout / 24);
+            // Display label: "5h ago", "2d 3h ago", "3d ago"
+            const recoveryLabel = hoursSinceWorkout < 24 ? `${hoursSinceWorkout}h`
+              : hoursSinceWorkout < 72 ? `${daysSinceWorkout}d ${hoursSinceWorkout % 24}h`
+              : `${daysSinceWorkout}d`;
+            // Scoring: 0-12h = active recovery (25-45), 12-24h = 45-60, 24-48h = 60-85,
+            // 48-72h = 85-100 (optimal), 72-168h = 100-85, >168h = 60 (detraining)
+            const recoveryScore = hoursSinceWorkout < 12 ? 25 + hoursSinceWorkout * 1.67
+              : hoursSinceWorkout < 24 ? 45 + (hoursSinceWorkout - 12) * 1.25
+              : hoursSinceWorkout < 48 ? 60 + (hoursSinceWorkout - 24) * 1.04
+              : hoursSinceWorkout < 72 ? 85 + (hoursSinceWorkout - 48) * 0.63
+              : hoursSinceWorkout <= 168 ? 100 - (hoursSinceWorkout - 72) * 0.16
+              : 60;
+
+            // If no sleep data at all AND no subjective, don't show the card — nothing to measure
+            const hasAnyFreshData = hrvScore != null || rhrScore != null || sleepScore != null || subjectiveScore != null;
+            if (!hasAnyFreshData && sleepData.length === 0) return null;
+
+            // Weighted composite
+            const components: { score: number; weight: number }[] = [];
+            if (hrvScore != null) components.push({ score: hrvScore, weight: 0.22 });
+            if (rhrScore != null) components.push({ score: rhrScore, weight: 0.15 });
+            if (sleepScore != null) components.push({ score: sleepScore, weight: 0.20 });
+            if (subjectiveScore != null) components.push({ score: subjectiveScore, weight: 0.28 });
+            components.push({ score: recoveryScore, weight: 0.15 });
+
+            const totalWeight = components.reduce((s, c) => s + c.weight, 0);
+            let readinessScore = Math.round(components.reduce((s, c) => s + c.score * c.weight, 0) / totalWeight);
+
+            // Veto: if subjective is very low (<40), cap overall at 65 (can't be "Ready" if you feel bad)
+            if (subjectiveScore != null && subjectiveScore < 40) readinessScore = Math.min(readinessScore, 65);
+            // Veto: if <12h since last workout, cap at 60
+            if (hoursSinceWorkout < 12) readinessScore = Math.min(readinessScore, 60);
+
+            const label = readinessScore >= 80 ? 'READY' : readinessScore >= 60 ? 'CAUTION' : 'RECOVER';
+            const color = readinessScore >= 80 ? '#22c55e' : readinessScore >= 60 ? '#f59e0b' : '#ef4444';
+            const emoji = readinessScore >= 80 ? '🟢' : readinessScore >= 60 ? '🟡' : '🔴';
+
+            // Helper for per-signal color
+            const sigColor = (s: number | null) => s == null ? 'rgba(255,255,255,0.25)' : s >= 75 ? '#22c55e' : s >= 50 ? '#f59e0b' : '#ef4444';
+
+            return (
+              <div className="glass-card p-3 mb-6 fade-up" style={{ fontFeatureSettings: '"tnum"' }}>
+                {/* Top bar: icon · score · label · signal count */}
+                <div className="flex items-center gap-3 mb-2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ color }}>
+                    <rect x="3" y="8" width="15" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                    <rect x="19" y="11" width="2" height="4" rx="0.5" fill="currentColor" />
+                    <rect x="5" y="10" width={Math.max(1, (readinessScore / 100) * 11)} height="6" rx="1" fill="currentColor" />
+                  </svg>
+                  <span className="text-[10px] text-white/40 uppercase tracking-[0.15em]">Readiness</span>
+                  <span className="text-3xl font-black tabular-nums leading-none" style={{ color }}>{readinessScore}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color }}>{label}</span>
+                  <span className="text-[9px] text-white/25 ml-auto font-mono">{components.length}/5</span>
+                </div>
+
+                {/* Signal strip — compact, table-like */}
+                <div className="flex items-stretch divide-x divide-white/5 border border-white/5 rounded-md overflow-hidden">
+                  {([
+                    { label: 'HRV', value: hrvScore != null ? `${lastNight?.avgHrv}` : '—', unit: hrvScore != null ? 'ms' : '', sub: hrvScore != null && hrvDelta != null ? `${hrvDelta > 0 ? '+' : ''}${hrvDelta.toFixed(0)}` : 'no data', score: hrvScore },
+                    { label: 'RHR', value: rhrScore != null ? `${Math.round(lastNight!.lowestHr!)}` : '—', unit: rhrScore != null ? 'bpm' : '', sub: rhrScore != null && rhrDelta != null ? `${rhrDelta > 0 ? '+' : ''}${rhrDelta.toFixed(0)}` : 'no data', score: rhrScore },
+                    { label: 'SLP', value: sleepScore != null ? `${sleepScore}` : '—', unit: '', sub: sleepScore != null ? 'score' : 'no data', score: sleepScore },
+                    { label: 'REC', value: recoveryLabel, unit: '', sub: 'last', score: recoveryScore },
+                    { label: 'SUBJ', value: subjectiveScore != null ? `${Math.round(subjectiveScore)}` : '—', unit: '', sub: subjective ? 'check-in' : 'tap ↓', score: subjectiveScore },
+                  ] as const).map((sig, i) => (
+                    <div key={i} className={`flex-1 px-2 py-1.5 text-center ${sig.score == null ? 'opacity-40' : ''}`}>
+                      <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">{sig.label}</div>
+                      <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(sig.score) }}>
+                        {sig.value}{sig.unit && <span className="text-[9px] font-normal text-white/40 ml-0.5">{sig.unit}</span>}
+                      </div>
+                      <div className="text-[8px] text-white/25 font-mono leading-tight">{sig.sub}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Stale warning — inline and terse */}
+                {(hrvStale || rhrStale || sleepStale) && (
+                  <div className="text-[9px] text-amber-400/50 mt-1.5 font-mono">
+                    ⚠ {[hrvStale && 'HRV', rhrStale && 'RHR', sleepStale && 'SLP'].filter(Boolean).join(' ')} — no data last night
+                  </div>
+                )}
+
+                {/* Subjective check-in — compact row */}
+                {!subjective ? (
+                  <button
+                    onClick={() => {
+                      const def = { energy: 3, soreness: 3, motivation: 3 };
+                      setSubjective(def);
+                      try { localStorage.setItem(`subj_${todayStr}`, JSON.stringify(def)); } catch {}
+                    }}
+                    className="w-full mt-2 py-1 text-[10px] font-mono uppercase tracking-wider text-white/40 bg-white/[0.03] hover:bg-white/[0.06] rounded transition-all">
+                    + Quick check-in
+                  </button>
+                ) : (
+                  <div className="mt-2 space-y-0.5">
+                    {([
+                      { key: 'energy', label: 'ENERGY', inverse: false },
+                      { key: 'motivation', label: 'MOTIV', inverse: false },
+                      { key: 'soreness', label: 'SORE', inverse: true },
+                    ] as const).map(({ key, label: lbl, inverse }) => (
+                      <div key={key} className="flex items-center gap-1.5">
+                        <span className="text-[9px] text-white/40 w-12 font-mono">{lbl}</span>
+                        <div className="flex gap-0.5 flex-1">
+                          {[1, 2, 3, 4, 5].map(n => {
+                            const active = subjective[key] === n;
+                            const goodVal = inverse ? 6 - n : n;
+                            const bg = active
+                              ? (goodVal >= 4 ? 'bg-green-500/25 text-green-300' : goodVal === 3 ? 'bg-amber-500/25 text-amber-300' : 'bg-red-500/25 text-red-300')
+                              : 'bg-white/[0.04] text-white/30';
+                            return (
+                              <button key={n}
+                                onClick={() => {
+                                  const next = { ...subjective, [key]: n };
+                                  setSubjective(next);
+                                  try { localStorage.setItem(`subj_${todayStr}`, JSON.stringify(next)); } catch {}
+                                }}
+                                className={`flex-1 py-0.5 text-[9px] font-mono rounded ${bg} transition-all`}>
+                                {n}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Weight Progress Chart */}
           {measurements.length >= 2 && (() => {
