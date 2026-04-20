@@ -56,12 +56,28 @@ export default function Dashboard() {
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
   const [sleepIdx, setSleepIdx] = useState(0);
 
-  // Subjective readiness — stored per day
+  // Subjective readiness — stored per day, synced to Firestore
   const todayStr = new Date().toISOString().split('T')[0];
+  const subjKey = `subj_${todayStr}`;
   const [subjective, setSubjective] = useState<{ energy: number; soreness: number; motivation: number } | null>(null);
   useEffect(() => {
-    try { const raw = localStorage.getItem(`subj_${todayStr}`); if (raw) setSubjective(JSON.parse(raw)); } catch {}
-  }, [todayStr]);
+    // Instant load from localStorage
+    try { const raw = localStorage.getItem(subjKey); if (raw) setSubjective(JSON.parse(raw)); } catch {}
+    // Then sync from Firestore — overrides if remote exists
+    getSetting(subjKey).then(v => {
+      if (!v) return;
+      try {
+        setSubjective(JSON.parse(v));
+        localStorage.setItem(subjKey, v);
+      } catch {}
+    }).catch(() => {});
+  }, [subjKey]);
+  const saveSubjective = (next: { energy: number; soreness: number; motivation: number }) => {
+    setSubjective(next);
+    const json = JSON.stringify(next);
+    try { localStorage.setItem(subjKey, json); } catch {}
+    saveSetting(subjKey, json);
+  };
 
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
@@ -875,9 +891,7 @@ export default function Dashboard() {
                 {!subjective ? (
                   <button
                     onClick={() => {
-                      const def = { energy: 3, soreness: 3, motivation: 3 };
-                      setSubjective(def);
-                      try { localStorage.setItem(`subj_${todayStr}`, JSON.stringify(def)); } catch {}
+                      saveSubjective({ energy: 3, soreness: 3, motivation: 3 });
                     }}
                     className="w-full mt-2 py-1 text-[10px] font-mono uppercase tracking-wider text-white/40 bg-white/[0.03] hover:bg-white/[0.06] rounded transition-all">
                     + Quick check-in
@@ -901,9 +915,7 @@ export default function Dashboard() {
                             return (
                               <button key={n}
                                 onClick={() => {
-                                  const next = { ...subjective, [key]: n };
-                                  setSubjective(next);
-                                  try { localStorage.setItem(`subj_${todayStr}`, JSON.stringify(next)); } catch {}
+                                  saveSubjective({ ...subjective, [key]: n });
                                 }}
                                 className={`flex-1 py-0.5 text-[9px] font-mono rounded ${bg} transition-all`}>
                                 {n}
