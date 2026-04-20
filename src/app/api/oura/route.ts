@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const OURA_TOKEN = process.env.OURA_ACCESS_TOKEN;
 const OURA_BASE = 'https://api.ouraring.com/v2/usercollection';
 
@@ -89,7 +92,9 @@ export async function GET(request: Request) {
       .filter(([day]) => !sleepDays.has(day))
       .map(([day, a]) => ({ day, steps: a.steps, activeCalories: a.activeCalories, totalCalories: a.totalCalories }));
 
-    return NextResponse.json({ data: sleepData, activity: activityOnly });
+    return NextResponse.json({ data: sleepData, activity: activityOnly }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
   } catch (e) {
     console.error('Oura API error:', e);
     return NextResponse.json({ error: 'Failed to fetch sleep data' }, { status: 500 });

@@ -104,8 +104,12 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      // IDB reads — all in parallel, no delays
+    if (!isAuthenticated) return;
+
+    // Bypass HTTP/SW caches — PWA was serving stale data on resume
+    const NO_CACHE: RequestInit = { cache: 'no-store' };
+
+    const refreshIDB = () => {
       getMeasurements().then(all => {
         setMeasurements(all);
         if (all.length > 0) {
@@ -117,58 +121,60 @@ export default function Dashboard() {
       getSetting('targetWeight').then(v => { if (v) setTargetWeight(parseFloat(v)); });
       getTrainingSessions().then(setTrainingSessions);
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
+    };
 
-      // API calls — no artificial delays, all in parallel
-      fetch('/api/oura?days=7').then(r => r.json()).then(d => {
-        if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
-      }).catch(() => {});
+    const refreshSleep = () => fetch('/api/oura?days=7', NO_CACHE).then(r => r.json()).then(d => {
+      if (d.data?.length) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
+    }).catch(() => {});
 
-      // Activity: merge Oura + Apple Health (Apple Watch takes priority)
-      (async () => {
-        const act: Record<string, { activeCalories: number; source?: string }> = {};
-        try {
-          const d = await fetch('/api/oura?days=60').then(r => r.json());
-          const addDay = (day: string, steps?: number, activeCal?: number) => {
-            if (steps || activeCal) act[day] = { activeCalories: activeCal || 0, source: 'oura' };
-          };
-          if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
-          if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
-        } catch {}
-        try {
-          const h = await fetch('/api/health-sync?days=60').then(r => r.json());
-          if (h.activity) {
-            for (const [day, data] of Object.entries(h.activity) as [string, { activeCalories: number }][]) {
-              if (data.activeCalories > 0) act[day] = { activeCalories: data.activeCalories, source: 'apple-watch' };
-            }
+    const refreshActivity = async () => {
+      const act: Record<string, { activeCalories: number; source?: string }> = {};
+      try {
+        const d = await fetch('/api/oura?days=60', NO_CACHE).then(r => r.json());
+        const addDay = (day: string, steps?: number, activeCal?: number) => {
+          if (steps || activeCal) act[day] = { activeCalories: activeCal || 0, source: 'oura' };
+        };
+        if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
+        if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
+      } catch {}
+      try {
+        const h = await fetch('/api/health-sync?days=60', NO_CACHE).then(r => r.json());
+        if (h.activity) {
+          for (const [day, data] of Object.entries(h.activity) as [string, { activeCalories: number }][]) {
+            if (data.activeCalories > 0) act[day] = { activeCalories: data.activeCalories, source: 'apple-watch' };
           }
-        } catch {}
+        }
+      } catch {}
+      if (Object.keys(act).length > 0) {
         setDailyActivity(act);
         try { localStorage.setItem('activity_cache', JSON.stringify(act)); } catch {}
-      })();
+      }
+    };
 
-      // Glucose: fetch immediately + every 5 min + on focus
-      const fetchGlucose = () => fetch('/api/glucose').then(r => r.json()).then(d => {
-        if (d.current) { setGlucose(d); try { localStorage.setItem('glucose_cache', JSON.stringify(d)); } catch {} }
-      }).catch(() => {});
-      fetchGlucose();
-      const glucoseInterval = setInterval(fetchGlucose, 5 * 60 * 1000);
+    const refreshGlucose = () => fetch('/api/glucose', NO_CACHE).then(r => r.json()).then(d => {
+      if (d.current) { setGlucose(d); try { localStorage.setItem('glucose_cache', JSON.stringify(d)); } catch {} }
+    }).catch(() => {});
 
-      // Refresh all data on app focus (PWA returning from background)
-      const onFocus = () => {
-        fetchGlucose();
-        fetch('/api/oura?days=7').then(r => r.json()).then(d => {
-          if (d.data) { const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day)); setSleepData(sorted); try { localStorage.setItem('sleep_cache', JSON.stringify(sorted)); } catch {} }
-        }).catch(() => {});
-      };
-      const onVisibility = () => { if (document.visibilityState === 'visible') onFocus(); };
-      document.addEventListener('visibilitychange', onVisibility);
-      window.addEventListener('focus', onFocus);
-      return () => {
-        clearInterval(glucoseInterval);
-        window.removeEventListener('focus', onFocus);
-        document.removeEventListener('visibilitychange', onVisibility);
-      };
-    }
+    const refreshAll = () => {
+      refreshIDB();
+      refreshSleep();
+      refreshActivity();
+      refreshGlucose();
+    };
+
+    refreshAll();
+    const glucoseInterval = setInterval(refreshGlucose, 5 * 60 * 1000);
+
+    // Full refresh on PWA resume (was only refreshing glucose + sleep)
+    const onFocus = () => refreshAll();
+    const onVisibility = () => { if (document.visibilityState === 'visible') refreshAll(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(glucoseInterval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [isAuthenticated]);
 
   const togglePhase = () => {
@@ -462,13 +468,8 @@ export default function Dashboard() {
                   {/* Details */}
                   <div className="flex gap-4 pt-2 border-t border-white/5 text-[10px] text-white/20">
                     <span>BMR {bmr}</span>
-                    {activitySource === 'apple-watch' ? (
-                      <span>⌚ Activity +{dailyNeat + dailyTrainingAvg}</span>
-                    ) : activitySource === 'mixed' ? (
-                      <><span>⌚+Training +{dailyTrainingAvg}</span>{dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}</>
-                    ) : (
-                      <><span>Training +{dailyTrainingAvg}</span>{dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}</>
-                    )}
+                    <span>{activitySource === 'apple-watch' ? '⌚ ' : ''}Training +{dailyTrainingAvg}</span>
+                    {dailyNeat > 0 && <span>NEAT +{dailyNeat}</span>}
                     <span>{weekSessions.length} sessions</span>
                   </div>
                 </div>

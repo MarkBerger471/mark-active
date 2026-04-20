@@ -180,7 +180,7 @@ export default function TrainingPlanPage() {
   const [measurementDates, setMeasurementDates] = useState<string[]>([]);
   const [latestBmr, setLatestBmr] = useState<number>(0);
   const [latestWeight, setLatestWeight] = useState<number>(80);
-  const [dailyActivity, setDailyActivity] = useState<Record<string, { steps: number; activeCalories: number }>>({});
+  const [dailyActivity, setDailyActivity] = useState<Record<string, { steps: number; activeCalories: number; source?: string }>>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const exercisesRef = useRef(exercises);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -289,16 +289,27 @@ export default function TrainingPlanPage() {
           if (ms[i].bmr) { setLatestBmr(ms[i].bmr!); break; }
         }
       });
-      // Fetch activity data from Oura (last 60 days)
-      fetch('/api/oura?days=60').then(r => r.json()).then(d => {
-        const act: Record<string, { steps: number; activeCalories: number }> = {};
-        const addDay = (day: string, steps?: number, activeCal?: number) => {
-          if (steps || activeCal) act[day] = { steps: steps || 0, activeCalories: activeCal || 0 };
-        };
-        if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
-        if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
+      // Fetch activity data: Oura NEAT + Apple Watch (watch takes priority)
+      (async () => {
+        const act: Record<string, { steps: number; activeCalories: number; source?: string }> = {};
+        try {
+          const d = await fetch('/api/oura?days=60').then(r => r.json());
+          const addDay = (day: string, steps?: number, activeCal?: number) => {
+            if (steps || activeCal) act[day] = { steps: steps || 0, activeCalories: activeCal || 0, source: 'oura' };
+          };
+          if (d.data) for (const day of d.data) addDay(day.day, day.steps, day.activeCalories);
+          if (d.activity) for (const day of d.activity) addDay(day.day, day.steps, day.activeCalories);
+        } catch {}
+        try {
+          const h = await fetch('/api/health-sync?days=60').then(r => r.json());
+          if (h.activity) {
+            for (const [day, data] of Object.entries(h.activity) as [string, { activeCalories: number; steps?: number }][]) {
+              if (data.activeCalories > 0) act[day] = { steps: data.steps || 0, activeCalories: data.activeCalories, source: 'apple-watch' };
+            }
+          }
+        } catch {}
         setDailyActivity(act);
-      }).catch(() => {});
+      })();
       // Load last session for each workout
       Promise.all(workouts.map(async w => {
         const last = await getLastSessionForWorkout(w.name);

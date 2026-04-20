@@ -176,14 +176,17 @@ export function calcWindowTDEE(
   // Training calories only for non-watch days (watch already includes gym)
   const nonWatchSessions = rollingSessions.filter(s => nonWatchDates.includes(s.date));
   const nonWatchTrainingCals = nonWatchSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
+  // Session-estimated training across ALL days (used only for display split)
+  const allTrainingCals = rollingSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
 
   // Weighted daily average across the full window length
   // Always include training cals — even if no wearables, logged sessions count toward TDEE
   const totalActivity = watchTotalCals + ouraTotalCals + nonWatchTrainingCals;
   const dailyActivityAvg = Math.round(totalActivity / days);
 
-  // For display: split into training + neat
-  const dailyTraining = Math.round(nonWatchTrainingCals / days);
+  // For display: split into training + neat using session estimates across ALL days
+  // (watch days bundle training+NEAT in one number — subtract estimated training to surface NEAT)
+  const dailyTraining = Math.round(allTrainingCals / days);
   const neat = dailyActivityAvg - dailyTraining;
   const source = watchDays > ouraDays ? 'apple-watch' : watchDays > 0 ? 'mixed' : 'oura';
 
