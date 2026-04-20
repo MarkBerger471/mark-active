@@ -73,6 +73,15 @@ export interface TrainingSession {
   manualDuration?: boolean; // true if user manually set the duration
   workoutName: string;
   exercises: TrainingExercise[];
+  // User-reported actual energy during the workout (1=Low, 2=Medium, 3=High)
+  actualEnergy?: 1 | 2 | 3;
+  // Snapshot of the readiness score at workout start — for later calibration/analysis
+  readinessSnapshot?: {
+    score: number;          // 0-100
+    label: 'READY' | 'CAUTION' | 'RECOVER';
+    timestamp: string;      // ISO
+    signals: number;        // how many of 5 signals were available
+  };
 }
 
 // Legacy types kept for migration

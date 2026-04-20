@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, updateSessionDuration, getMeasurements } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
-import { calcSessionCalories, calcRollingTDEE, parseDurationMinutes } from '@/utils/calories';
+import { calcSessionCalories, calcWindowTDEE, parseDurationMinutes } from '@/utils/calories';
 import { hapticLight } from '@/utils/haptics';
 
 // LEGACY — replaced by shared @/utils/calories.ts
@@ -194,20 +194,30 @@ export default function TrainingPlanPage() {
   sessionDateRef.current = sessionDate;
   activeWorkoutRef.current = activeWorkout;
 
+  const refreshSessions = useCallback(async () => {
+    const updated = await getTrainingSessions();
+    setSessions(updated);
+  }, []);
+
   const flushSave = useCallback(async () => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
     if (!activeWorkoutRef.current || !sessionIdRef.current) return;
+    // Preserve fields set elsewhere (actualEnergy, readinessSnapshot) by merging with existing session
+    const allSessions = await getTrainingSessions();
+    const existing = allSessions.find(s => s.id === sessionIdRef.current);
     const session: TrainingSession = {
+      ...(existing || {}),
       id: sessionIdRef.current,
       date: sessionDateRef.current || new Date().toISOString().split('T')[0],
       workoutName: activeWorkoutRef.current,
       exercises: exercisesRef.current,
     };
     await saveTrainingSession(session);
-  }, []);
+    await refreshSessions();
+  }, [refreshSessions]);
 
   const triggerAutoSave = useCallback(() => {
     if (!activeWorkoutRef.current) return;
@@ -346,14 +356,28 @@ export default function TrainingPlanPage() {
     setSaveStatus('saving');
     setView('workout');
 
+    // Snapshot the current readiness score (computed by the dashboard)
+    let readinessSnapshot: TrainingSession['readinessSnapshot'];
+    try {
+      const raw = localStorage.getItem('latest_readiness');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Only use if it's from the last 12 hours (stale otherwise)
+        const ageMs = Date.now() - new Date(parsed.timestamp).getTime();
+        if (ageMs < 12 * 3600 * 1000) readinessSnapshot = parsed;
+      }
+    } catch {}
+
     // Save immediately
     const session: TrainingSession = {
       id: newId,
       date: today,
       workoutName,
       exercises: exerciseData,
+      readinessSnapshot,
     };
     await saveTrainingSession(session);
+    await refreshSessions();
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 2000);
   };
@@ -548,60 +572,52 @@ export default function TrainingPlanPage() {
               })}
             </div>
 
-            {/* Weekly Calorie Averages */}
+            {/* Weekly Calorie Averages — calendar weeks (Mon–Sun) */}
             {latestBmr > 0 && sessions.length > 0 && (() => {
               const now = new Date();
               const todayStr = now.toISOString().split('T')[0];
-
-              const rolling = calcRollingTDEE(sessions, latestWeight, latestBmr, dailyActivity);
-              const rollingTotal = rolling.total;
-              const rollingDailyTraining = rolling.training;
-              const rollingNeat = rolling.neat;
-              const rollingSessions = rolling.sessions;
-
-              const rollingStart = new Date(now);
-              rollingStart.setDate(rollingStart.getDate() - 6);
               const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-              const rollingLabel = `${fmt(rollingStart)} – ${fmt(now)}`;
 
-              // Previous week: last completed Monday–Sunday
-              const prevMonday = new Date(getWeekKey(todayStr) + 'T00:00:00');
-              prevMonday.setDate(prevMonday.getDate() - 7);
-              const prevSunday = new Date(prevMonday);
-              prevSunday.setDate(prevSunday.getDate() + 6);
-              const prevMondayStr = prevMonday.toISOString().split('T')[0];
-              const prevSundayStr = prevSunday.toISOString().split('T')[0];
+              // Current week's Monday (00:00 local)
+              const thisMondayStr = getWeekKey(todayStr);
+              const thisMonday = new Date(thisMondayStr + 'T00:00:00');
 
-              const prevSessions = sessions.filter(s => s.date >= prevMondayStr && s.date <= prevSundayStr);
-              const prevTrainingCals = prevSessions.reduce((sum, s) => sum + calcSessionCalories(s, latestWeight), 0);
-              const prevDailyTraining = Math.round(prevTrainingCals / 7);
+              // Show last 2 completed weeks (skip the in-progress current week)
+              const cards: Array<{
+                key: string;
+                label: string;
+                total: number;
+                training: number;
+                neat: number;
+                count: number;
+              }> = [];
 
-              let prevActiveCals = 0, prevActDays = 0;
-              for (let i = 0; i < 7; i++) {
-                const d = new Date(prevMonday);
-                d.setDate(d.getDate() + i);
-                const dayStr = d.toISOString().split('T')[0];
-                const act = dailyActivity[dayStr];
-                if (act && act.activeCalories > 0) { prevActiveCals += act.activeCalories; prevActDays++; }
+              for (let w = 1; w <= 2; w++) {
+                const monday = new Date(thisMonday);
+                monday.setDate(monday.getDate() - w * 7);
+                const sunday = new Date(monday);
+                sunday.setDate(sunday.getDate() + 6);
+
+                const tdee = calcWindowTDEE(sessions, latestWeight, latestBmr, dailyActivity, monday, sunday);
+
+                cards.push({
+                  key: monday.toISOString().split('T')[0],
+                  label: `${fmt(monday)} – ${fmt(sunday)}`,
+                  total: tdee.total,
+                  training: tdee.training,
+                  neat: tdee.neat,
+                  count: tdee.sessions.length,
+                });
               }
-              const prevNeat = prevActDays > 0 ? Math.round(prevActiveCals / prevActDays) : 0;
-              const prevTotal = latestBmr + prevDailyTraining + prevNeat;
-              const prevLabel = `${fmt(prevMonday)} – ${fmt(prevSunday)}`;
-
-              const cards = [
-                { key: 'rolling', label: rollingLabel, total: rollingTotal, training: rollingDailyTraining, neat: rollingNeat, count: rollingSessions.length, isCurrent: true },
-                { key: 'prev', label: prevLabel, total: prevTotal, training: prevDailyTraining, neat: prevNeat, count: prevSessions.length, isCurrent: false },
-              ];
 
               return (
                 <div className="mb-6">
                   <h3 className="text-sm font-semibold text-white/60 mb-3">Weekly TDEE</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {cards.map(c => (
-                      <div key={c.key} className={`glass-card p-4 ${c.isCurrent ? 'border border-green-500/30' : ''}`}>
+                      <div key={c.key} className="glass-card p-4">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-xs text-white/40">{c.label}</span>
-                          {c.isCurrent && <span className="text-[10px] text-green-400 uppercase">Current</span>}
                         </div>
                         <div className="text-xl font-bold text-white">{c.total} <span className="text-xs text-white/30 font-normal">kcal/day</span></div>
                         <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px] text-white/30">
@@ -966,7 +982,7 @@ export default function TrainingPlanPage() {
               style={{ width: `${totalSets > 0 ? (completedSets / totalSets) * 100 : 0}%` }}
             />
           </div>
-          <div className="flex items-center justify-between mb-6 -mt-4">
+          <div className="flex items-center justify-between mb-4 -mt-4">
             <p className="text-xs text-white/30">{completedSets}/{totalSets} sets completed</p>
             <div className="flex items-center gap-2">
               {elapsedStr && (
@@ -974,6 +990,47 @@ export default function TrainingPlanPage() {
               )}
             </div>
           </div>
+
+          {/* Actual energy rating — user tracks how they feel during/after workout */}
+          {(() => {
+            const current = sessions.find(s => s.id === sessionId);
+            const actualEnergy = current?.actualEnergy;
+            const setEnergy = async (n: 1 | 2 | 3) => {
+              const newValue = actualEnergy === n ? undefined : n;
+              const updatedSession: TrainingSession = {
+                ...(current || { id: sessionId, date: sessionDate, workoutName: activeWorkout!, exercises }),
+                actualEnergy: newValue,
+                exercises: exercisesRef.current,
+              };
+              await saveTrainingSession(updatedSession);
+              await refreshSessions();
+            };
+            return (
+              <div className="glass-card p-2.5 mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-white/40 font-mono uppercase tracking-wider w-16">How I feel</span>
+                  <div className="flex gap-1 flex-1">
+                    {([
+                      { n: 1, label: 'Low', color: '#ef4444' },
+                      { n: 2, label: 'Medium', color: '#f59e0b' },
+                      { n: 3, label: 'High', color: '#22c55e' },
+                    ] as const).map(({ n, label: lbl, color: col }) => {
+                      const active = actualEnergy === n;
+                      return (
+                        <button key={n} onClick={() => setEnergy(n)}
+                          className={`flex-1 py-1 text-[10px] font-mono rounded transition-all ${
+                            active ? '' : 'bg-white/[0.04] text-white/40 hover:bg-white/[0.08]'
+                          }`}
+                          style={active ? { background: `${col}30`, color: col, border: `1px solid ${col}40` } : {}}>
+                          {lbl}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Exercises */}
           <div className="space-y-3">

@@ -118,17 +118,42 @@ export function calcRollingTDEE(
   const todayStr = now.toISOString().split('T')[0];
   const rollingStart = new Date(now);
   rollingStart.setDate(rollingStart.getDate() - 6);
-  const rollingStartStr = rollingStart.toISOString().split('T')[0];
+  return calcWindowTDEE(sessions, bodyWeight, bmr, dailyActivity, rollingStart, now);
+}
 
-  const rollingSessions = sessions.filter(s => s.date >= rollingStartStr && s.date <= todayStr);
+/**
+ * Compute TDEE averaged over a fixed date window [start, end] inclusive.
+ * Same watch-vs-oura logic as calcRollingTDEE, but over an arbitrary window
+ * (e.g. a calendar week Monday–Sunday).
+ *
+ * Averages across the FULL window length in days — so a partially-elapsed
+ * current week still divides by 7, matching the "daily average" semantics.
+ */
+export function calcWindowTDEE(
+  sessions: TrainingSession[],
+  bodyWeight: number,
+  bmr: number,
+  dailyActivity: Record<string, { activeCalories: number; source?: string }>,
+  startDate: Date,
+  endDate: Date,
+): { total: number; training: number; neat: number; sessions: TrainingSession[]; source: string } {
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+  const startStr = start.toISOString().split('T')[0];
+  const endStr = end.toISOString().split('T')[0];
+  const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+
+  const rollingSessions = sessions.filter(s => s.date >= startStr && s.date <= endStr);
 
   // Separate watch days vs non-watch days
   let watchTotalCals = 0, watchDays = 0;
   let ouraTotalCals = 0, ouraDays = 0;
   const nonWatchDates: string[] = [];
 
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(rollingStart);
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
     d.setDate(d.getDate() + i);
     const dayStr = d.toISOString().split('T')[0];
     const act = dailyActivity[dayStr];
@@ -152,13 +177,13 @@ export function calcRollingTDEE(
   const nonWatchSessions = rollingSessions.filter(s => nonWatchDates.includes(s.date));
   const nonWatchTrainingCals = nonWatchSessions.reduce((sum, s) => sum + calcSessionCalories(s, bodyWeight), 0);
 
-  // Weighted average across all 7 days
+  // Weighted daily average across the full window length
   // Always include training cals — even if no wearables, logged sessions count toward TDEE
   const totalActivity = watchTotalCals + ouraTotalCals + nonWatchTrainingCals;
-  const dailyActivityAvg = Math.round(totalActivity / 7);
+  const dailyActivityAvg = Math.round(totalActivity / days);
 
   // For display: split into training + neat
-  const dailyTraining = Math.round(nonWatchTrainingCals / 7);
+  const dailyTraining = Math.round(nonWatchTrainingCals / days);
   const neat = dailyActivityAvg - dailyTraining;
   const source = watchDays > ouraDays ? 'apple-watch' : watchDays > 0 ? 'mixed' : 'oura';
 

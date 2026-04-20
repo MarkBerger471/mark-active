@@ -779,13 +779,20 @@ export default function Dashboard() {
             const rhrStale = !lastNight?.lowestHr || lastNight.lowestHr <= 0;
             const sleepStale = !lastNight?.score || lastNight.score <= 0;
 
+            // Sunday cheat-meal correction: Oura's `day` field = wake-up day,
+            // so Monday's data reflects Sunday night's sleep. Apply a one-night
+            // compensation (+20) to HRV/RHR/Sleep scores for Monday readings only.
+            // (RHR typically spikes most after a cheat meal — insulin/digestion elevates HR.)
+            const isMondayData = lastNight && new Date(lastNight.day + 'T00:00:00').getDay() === 1;
+            const cheatBonus = isMondayData ? 20 : 0;
+
             // HRV score — baseline = 65 (neutral/amber), +10% = 90, -10% = 40
             let hrvScore: number | null = null;
             let hrvDelta: number | null = null;
             if (!hrvStale && lastNight!.avgHrv && hrvBaseline) {
               hrvDelta = lastNight!.avgHrv! - hrvBaseline;
               const pctDelta = hrvDelta / hrvBaseline;
-              hrvScore = Math.max(0, Math.min(100, 65 + pctDelta * 250));
+              hrvScore = Math.max(0, Math.min(100, 65 + pctDelta * 250 + cheatBonus));
             }
 
             // RHR score — lower is better. baseline = 65, -5% = 90, +5% = 40
@@ -794,32 +801,53 @@ export default function Dashboard() {
             if (!rhrStale && lastNight!.lowestHr && rhrBaseline) {
               rhrDelta = lastNight!.lowestHr! - rhrBaseline;
               const pctDelta = rhrDelta / rhrBaseline;
-              rhrScore = Math.max(0, Math.min(100, 65 - pctDelta * 500));
+              rhrScore = Math.max(0, Math.min(100, 65 - pctDelta * 500 + cheatBonus));
             }
 
-            // Sleep score — only count last night's score
-            const sleepScore = !sleepStale ? lastNight!.score : null;
+            // Sleep score — last night's score, with Sunday cheat compensation
+            const sleepScore = !sleepStale ? Math.min(100, lastNight!.score! + cheatBonus) : null;
 
-            // Subjective score (each is 1-5, avg * 20 = 0-100)
-            const subjectiveScore = subjective ? ((subjective.energy + subjective.motivation + (6 - subjective.soreness)) / 3) * 20 : null;
+            // Subjective score — 3 levels (1/2/3). Soreness: 1=High(bad), 3=None(good).
+            // Energy/Motivation: 1=Low(bad), 3=High(good). Same direction after mapping: higher = better.
+            const scoreOf = (v: number) => (v / 3) * 100;
+            const subjectiveScore = subjective
+              ? (scoreOf(subjective.energy) + scoreOf(subjective.motivation) + scoreOf(subjective.soreness)) / 3
+              : null;
 
-            // Hours since last workout — use savedAt timestamp for precision
-            const lastSession = trainingSessions.length > 0 ? trainingSessions[trainingSessions.length - 1] : null;
-            const lastWorkoutTs = lastSession ? new Date(lastSession.savedAt || lastSession.startedAt || lastSession.date).getTime() : null;
-            const hoursSinceWorkout = lastWorkoutTs ? Math.floor((Date.now() - lastWorkoutTs) / 3600000) : 168;
+            // Muscle-group-aware recovery: find NEXT scheduled group in rotation,
+            // measure hours since THAT group was last trained (cardio excluded).
+            // Rotation: Shoulders+Abs → Legs → Chest+Triceps → Back+Biceps → (repeat)
+            const ROTATION = ['Shoulders + Abs', 'Legs', 'Chest + Triceps', 'Back + Biceps'];
+            const weightSessions = trainingSessions.filter(s => s.workoutName !== 'Cardio' && ROTATION.includes(s.workoutName));
+            const lastWeightSession = weightSessions[weightSessions.length - 1];
+            const lastIdx = lastWeightSession ? ROTATION.indexOf(lastWeightSession.workoutName) : -1;
+            const nextGroup = lastIdx === -1 ? ROTATION[0] : ROTATION[(lastIdx + 1) % ROTATION.length];
+            const lastOfNextGroup = [...weightSessions].reverse().find(s => s.workoutName === nextGroup);
+
+            const lastWorkoutTs = lastOfNextGroup ? new Date(lastOfNextGroup.savedAt || lastOfNextGroup.startedAt || lastOfNextGroup.date).getTime() : null;
+            const hoursSinceWorkout = lastWorkoutTs ? Math.floor((Date.now() - lastWorkoutTs) / 3600000) : 240;
             const daysSinceWorkout = Math.floor(hoursSinceWorkout / 24);
-            // Display label: "5h ago", "2d 3h ago", "3d ago"
             const recoveryLabel = hoursSinceWorkout < 24 ? `${hoursSinceWorkout}h`
               : hoursSinceWorkout < 72 ? `${daysSinceWorkout}d ${hoursSinceWorkout % 24}h`
               : `${daysSinceWorkout}d`;
-            // Scoring: 0-12h = active recovery (25-45), 12-24h = 45-60, 24-48h = 60-85,
-            // 48-72h = 85-100 (optimal), 72-168h = 100-85, >168h = 60 (detraining)
-            const recoveryScore = hoursSinceWorkout < 12 ? 25 + hoursSinceWorkout * 1.67
-              : hoursSinceWorkout < 24 ? 45 + (hoursSinceWorkout - 12) * 1.25
-              : hoursSinceWorkout < 48 ? 60 + (hoursSinceWorkout - 24) * 1.04
-              : hoursSinceWorkout < 72 ? 85 + (hoursSinceWorkout - 48) * 0.63
-              : hoursSinceWorkout <= 168 ? 100 - (hoursSinceWorkout - 72) * 0.16
-              : 60;
+            // Scoring for muscle-group recovery (5-day cycle optimal):
+            // 0-24h: 20→35 (just trained, not recovered)
+            // 24-48h: 35→50 (still recovering)
+            // 48-72h: 50→70 (half-recovered)
+            // 72-96h (3-4d): 70→85 (mostly recovered)
+            // 96-120h (4-5d): 85→100 (optimal window)
+            // 120-168h (5-7d): 100→95 (still strong)
+            // 168-240h (7-10d): 95→85
+            // >240h: 75 (mild detraining)
+            const h = hoursSinceWorkout;
+            const recoveryScore = h < 24 ? 20 + h * 0.625
+              : h < 48 ? 35 + (h - 24) * 0.625
+              : h < 72 ? 50 + (h - 48) * 0.833
+              : h < 96 ? 70 + (h - 72) * 0.625
+              : h < 120 ? 85 + (h - 96) * 0.625
+              : h < 168 ? 100 - (h - 120) * 0.104
+              : h < 240 ? 95 - (h - 168) * 0.139
+              : 75;
 
             // If no sleep data at all AND no subjective, don't show the card — nothing to measure
             const hasAnyFreshData = hrvScore != null || rhrScore != null || sleepScore != null || subjectiveScore != null;
@@ -844,6 +872,18 @@ export default function Dashboard() {
             const label = readinessScore >= 80 ? 'READY' : readinessScore >= 60 ? 'CAUTION' : 'RECOVER';
             const color = readinessScore >= 80 ? '#22c55e' : readinessScore >= 60 ? '#f59e0b' : '#ef4444';
             const emoji = readinessScore >= 80 ? '🟢' : readinessScore >= 60 ? '🟡' : '🔴';
+
+            // Save latest readiness to localStorage so workout page can snapshot it at session start
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('latest_readiness', JSON.stringify({
+                  score: readinessScore,
+                  label,
+                  timestamp: new Date().toISOString(),
+                  signals: components.length,
+                }));
+              } catch {}
+            }
 
             // Helper for per-signal color
             const sigColor = (s: number | null) => s == null ? 'rgba(255,255,255,0.25)' : s >= 75 ? '#22c55e' : s >= 50 ? '#f59e0b' : '#ef4444';
@@ -888,12 +928,18 @@ export default function Dashboard() {
                     ⚠ {[hrvStale && 'HRV', rhrStale && 'RHR', sleepStale && 'SLP'].filter(Boolean).join(' ')} — no data last night
                   </div>
                 )}
+                {/* Sunday cheat-meal correction indicator */}
+                {isMondayData && !hrvStale && (
+                  <div className="text-[9px] text-cyan-400/50 mt-1.5 font-mono">
+                    ✦ Monday: +20 correction on HRV/RHR/SLP (Sunday cheat meal)
+                  </div>
+                )}
 
-                {/* Subjective check-in — compact row */}
+                {/* Subjective check-in — compact row, 3 levels: worst → best (left to right) */}
                 {!subjective ? (
                   <button
                     onClick={() => {
-                      saveSubjective({ energy: 3, soreness: 3, motivation: 3 });
+                      saveSubjective({ energy: 2, soreness: 2, motivation: 2 });
                     }}
                     className="w-full mt-2 py-1 text-[10px] font-mono uppercase tracking-wider text-white/40 bg-white/[0.03] hover:bg-white/[0.06] rounded transition-all">
                     + Quick check-in
@@ -901,31 +947,167 @@ export default function Dashboard() {
                 ) : (
                   <div className="mt-2 space-y-0.5">
                     {([
-                      { key: 'energy', label: 'ENERGY', inverse: false },
-                      { key: 'motivation', label: 'MOTIV', inverse: false },
-                      { key: 'soreness', label: 'SORE', inverse: true },
-                    ] as const).map(({ key, label: lbl, inverse }) => (
+                      { key: 'energy', label: 'ENERGY', options: ['Low', 'Medium', 'High'] },
+                      { key: 'motivation', label: 'MOTIV', options: ['Low', 'Medium', 'High'] },
+                      { key: 'soreness', label: 'SORE', options: ['High', 'Medium', 'None'] },
+                    ] as const).map(({ key, label: lbl, options }) => (
                       <div key={key} className="flex items-center gap-1.5">
                         <span className="text-[9px] text-white/40 w-12 font-mono">{lbl}</span>
                         <div className="flex gap-0.5 flex-1">
-                          {[1, 2, 3, 4, 5].map(n => {
+                          {[1, 2, 3].map(n => {
                             const active = subjective[key] === n;
-                            const goodVal = inverse ? 6 - n : n;
+                            // n maps 1→worst (left), 2→middle, 3→best (right). Same for all including soreness.
                             const bg = active
-                              ? (goodVal >= 4 ? 'bg-green-500/25 text-green-300' : goodVal === 3 ? 'bg-amber-500/25 text-amber-300' : 'bg-red-500/25 text-red-300')
+                              ? (n === 3 ? 'bg-green-500/25 text-green-300' : n === 2 ? 'bg-amber-500/25 text-amber-300' : 'bg-red-500/25 text-red-300')
                               : 'bg-white/[0.04] text-white/30';
                             return (
                               <button key={n}
                                 onClick={() => {
                                   saveSubjective({ ...subjective, [key]: n });
                                 }}
-                                className={`flex-1 py-0.5 text-[9px] font-mono rounded ${bg} transition-all`}>
-                                {n}
+                                className={`flex-1 py-1 text-[10px] font-mono rounded ${bg} transition-all`}>
+                                {options[n - 1]}
                               </button>
                             );
                           })}
                         </div>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Bulk Health — bulking-phase KPIs */}
+          {phase === 'bulking' && measurements.length >= 3 && (() => {
+            const bw = measurements[measurements.length - 1].weight;
+
+            // Last 4 weeks of measurements (or all if fewer)
+            const now = Date.now();
+            const fourWeeksAgo = now - 28 * 86400000;
+            const recentMeasurements = measurements.filter(m => new Date(m.date).getTime() >= fourWeeksAgo);
+            const windowData = recentMeasurements.length >= 2 ? recentMeasurements : measurements.slice(-8);
+
+            if (windowData.length < 2) return null;
+
+            const first = windowData[0];
+            const last = windowData[windowData.length - 1];
+            const days = Math.max(7, (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86400000);
+
+            // KPI 1: Weekly weight rate (% of bodyweight per week)
+            const weightDelta = last.weight - first.weight;
+            const weeks = days / 7;
+            const weeklyRatePct = (weightDelta / first.weight / weeks) * 100;
+            const weightRateOk = weeklyRatePct >= 0.25 && weeklyRatePct <= 0.50;
+            const weightRateStatus = weeklyRatePct >= 0.25 && weeklyRatePct <= 0.50 ? 'good'
+              : weeklyRatePct >= 0.15 && weeklyRatePct <= 0.65 ? 'ok' : 'off';
+
+            // KPI 2: Waist/kg ratio — waist growth per kg of weight gain
+            const waistDelta = last.waist - first.waist;
+            const waistPerKg = weightDelta > 0.5 ? waistDelta / weightDelta : null;
+            const waistStatus = waistPerKg == null ? 'ok'
+              : waistPerKg <= 0.35 ? 'good'
+              : waistPerKg <= 0.50 ? 'ok' : 'off';
+
+            // KPI 3: Body fat trend — change in BF% during window
+            const firstBF = first.bodyFat;
+            const lastBF = last.bodyFat;
+            const bfDelta = firstBF != null && lastBF != null ? lastBF - firstBF : null;
+            const bfStatus = bfDelta == null ? 'ok'
+              : Math.abs(bfDelta) <= 1.0 ? 'good'
+              : Math.abs(bfDelta) <= 1.5 ? 'ok' : 'off';
+
+            // KPI 4: Arm/kg growth ratio
+            const armDelta = last.arms - first.arms;
+            const armPerKg = weightDelta > 0.5 ? armDelta / weightDelta : null;
+            const armStatus = armPerKg == null ? 'ok'
+              : armPerKg >= 0.25 ? 'good'
+              : armPerKg >= 0.15 ? 'ok' : 'off';
+
+            // Overall status (count good/ok/off)
+            const statuses = [weightRateStatus, waistStatus, bfStatus, armStatus];
+            const goodCount = statuses.filter(s => s === 'good').length;
+            const offCount = statuses.filter(s => s === 'off').length;
+            const overall = offCount >= 2 ? 'off' : goodCount >= 3 ? 'good' : 'ok';
+            const overallLabel = overall === 'good' ? 'ON TARGET' : overall === 'ok' ? 'WATCH' : 'OFF TRACK';
+            const overallColor = overall === 'good' ? '#22c55e' : overall === 'ok' ? '#f59e0b' : '#ef4444';
+
+            // Plateau alerts
+            const alerts: string[] = [];
+            // Weight flat 14+ days during bulk
+            const fourteenDaysAgo = now - 14 * 86400000;
+            const twoWeekMeasurements = measurements.filter(m => new Date(m.date).getTime() >= fourteenDaysAgo);
+            if (twoWeekMeasurements.length >= 2) {
+              const w1 = twoWeekMeasurements[0].weight;
+              const w2 = twoWeekMeasurements[twoWeekMeasurements.length - 1].weight;
+              const deltaPctIn14d = ((w2 - w1) / w1) * 100;
+              if (deltaPctIn14d < 0.2) {
+                const kcalBump = deltaPctIn14d < 0 ? 250 : 150;
+                alerts.push(`Weight stalled 14d — consider +${kcalBump} kcal/day`);
+              }
+            }
+            // Waist growing faster than weight (>0.5 cm/kg)
+            if (waistPerKg != null && waistPerKg > 0.5) {
+              alerts.push(`Waist +${waistDelta.toFixed(1)}cm vs +${weightDelta.toFixed(1)}kg — reduce surplus ~150 kcal`);
+            }
+            // BF rising too fast
+            if (bfDelta != null && bfDelta > 1.5) {
+              alerts.push(`BF up ${bfDelta.toFixed(1)}% in ${Math.round(days)}d — slow the bulk`);
+            }
+
+            const sigColor = (s: string) => s === 'good' ? '#22c55e' : s === 'ok' ? '#f59e0b' : '#ef4444';
+
+            return (
+              <div className="glass-card p-3 mb-6 fade-up" style={{ fontFeatureSettings: '"tnum"' }}>
+                {/* Top bar */}
+                <div className="flex items-center gap-3 mb-2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ color: overallColor }}>
+                    <path d="M3 17l6-6 4 4 8-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M14 7h7v7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="text-[10px] text-white/40 uppercase tracking-[0.15em]">Bulk Health</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider ml-auto" style={{ color: overallColor }}>{overallLabel}</span>
+                  <span className="text-[9px] text-white/25 font-mono">{Math.round(days)}d</span>
+                </div>
+
+                {/* 4 KPI strip */}
+                <div className="flex items-stretch divide-x divide-white/5 border border-white/5 rounded-md overflow-hidden">
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Rate</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(weightRateStatus) }}>
+                      {weeklyRatePct > 0 ? '+' : ''}{weeklyRatePct.toFixed(2)}<span className="text-[9px] font-normal text-white/40 ml-0.5">%/wk</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">tgt 0.25-0.50</div>
+                  </div>
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Waist/kg</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(waistStatus) }}>
+                      {waistPerKg != null ? `${waistPerKg.toFixed(2)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">cm/kg</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">ideal ~0.3</div>
+                  </div>
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">BF</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(bfStatus) }}>
+                      {bfDelta != null ? `${bfDelta > 0 ? '+' : ''}${bfDelta.toFixed(1)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">%</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">keep &lt;±1.5</div>
+                  </div>
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Arm/kg</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(armStatus) }}>
+                      {armPerKg != null ? `${armPerKg.toFixed(2)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">cm/kg</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">tgt ≥0.20</div>
+                  </div>
+                </div>
+
+                {/* Plateau alerts */}
+                {alerts.length > 0 && (
+                  <div className="mt-1.5 space-y-0.5">
+                    {alerts.map((a, i) => (
+                      <div key={i} className="text-[9px] text-amber-400/70 font-mono">⚠ {a}</div>
                     ))}
                   </div>
                 )}
