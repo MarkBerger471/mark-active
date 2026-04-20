@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import Navigation from '@/components/Navigation';
 
-import { getMeasurements, getSetting, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
+import { getMeasurements, getSetting, getSettingRemote, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
 import { calcSessionCalories, calcRollingTDEE } from '@/utils/calories';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
@@ -61,10 +61,12 @@ export default function Dashboard() {
   const subjKey = `subj_${todayStr}`;
   const [subjective, setSubjective] = useState<{ energy: number; soreness: number; motivation: number } | null>(null);
   useEffect(() => {
+    // Reset state when day changes (avoid carrying over yesterday's values)
+    setSubjective(null);
     // Instant load from localStorage
     try { const raw = localStorage.getItem(subjKey); if (raw) setSubjective(JSON.parse(raw)); } catch {}
-    // Then sync from Firestore — overrides if remote exists
-    getSetting(subjKey).then(v => {
+    // Then sync from Firestore DIRECTLY (bypasses IDB since we need cross-device freshness)
+    getSettingRemote(subjKey).then(v => {
       if (!v) return;
       try {
         setSubjective(JSON.parse(v));

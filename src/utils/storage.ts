@@ -728,6 +728,24 @@ export async function nutritionPlanExistsRemotely(): Promise<boolean> {
   }
 }
 
+// Fetch a setting directly from Firestore (bypasses IDB). Also writes
+// to IDB so subsequent reads are fresh. Used when a component needs
+// cross-device sync immediately on mount.
+export async function getSettingRemote(key: string): Promise<string | null> {
+  if (typeof window === 'undefined' || !navigator.onLine) return null;
+  try {
+    const snap = await getDoc(doc(db, 'settings', key));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    if (data.value === undefined) return null;
+    // Keep IDB in sync
+    try { await idbPutSetting(key, data.value); if (data.lastModified) await idbPutSetting(`${key}_ts`, String(data.lastModified)); } catch {}
+    return data.value as string;
+  } catch {
+    return null;
+  }
+}
+
 // Blood tests — stored as JSON in settings
 export async function getBloodTests(): Promise<import('@/types').BloodTest[]> {
   try {

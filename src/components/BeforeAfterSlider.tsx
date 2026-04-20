@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { getSetting, saveSetting } from '@/utils/storage';
+import { getSettingRemote, saveSetting } from '@/utils/storage';
 
 interface PhotoAdjust { scale: number; offsetX: number; offsetY: number }
 const DEFAULT_ADJUST: PhotoAdjust = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -42,16 +42,15 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, beforeLabel, af
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
-  // Sync from Firestore on mount — overrides localStorage if remote is newer
+  // Sync from Firestore DIRECTLY on mount (bypass IDB for cross-device freshness)
   useEffect(() => {
     if (!storageKey) return;
-    getSetting(storageKey).then(v => {
+    getSettingRemote(storageKey).then(v => {
       if (!v) return;
       try {
         const data = JSON.parse(v);
         if (data.before) setBeforeAdj({ ...DEFAULT_ADJUST, ...data.before });
         if (data.after) setAfterAdj({ ...DEFAULT_ADJUST, ...data.after });
-        // Keep localStorage in sync
         localStorage.setItem(storageKey, v);
       } catch {}
     }).catch(() => {});
