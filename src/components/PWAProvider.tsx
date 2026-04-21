@@ -5,20 +5,32 @@ import { flushSyncQueue } from '@/utils/storage';
 
 export default function PWAProvider() {
   useEffect(() => {
-    // Unregister service worker in development
     if ('serviceWorker' in navigator) {
       if (process.env.NODE_ENV === 'development') {
         navigator.serviceWorker.getRegistrations().then(regs =>
           regs.forEach(r => r.unregister())
         );
       } else {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((e) => {
+        // Auto-reload once when a new SW takes control (delivers fresh code after deploy)
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshing) return;
+          refreshing = true;
+          window.location.reload();
+        });
+
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(reg => {
+          // Check for updates on every mount + on focus (PWA resume)
+          reg.update().catch(() => {});
+          const checkOnFocus = () => { reg.update().catch(() => {}); };
+          window.addEventListener('focus', checkOnFocus);
+          return () => window.removeEventListener('focus', checkOnFocus);
+        }).catch((e) => {
           console.warn('SW registration failed:', e);
         });
       }
     }
 
-    // Flush pending sync on mount and when coming online
     flushSyncQueue();
     window.addEventListener('online', flushSyncQueue);
     return () => window.removeEventListener('online', flushSyncQueue);
