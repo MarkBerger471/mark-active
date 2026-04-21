@@ -155,7 +155,7 @@ function formatResponse(graphData: any) {
     history,
     stats: { timeInRange, avgGlucose, avgMmol, estimatedA1c, readings: values.length },
   }, {
-    // Single-user app: browser always revalidates, Netlify edge caches 5min + 10min stale window
-    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=600' },
+    // Near-real-time: 60s fresh + 60s stale. Single-user → edge cache is safe.
+    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=60' },
   });
 }

@@ -90,8 +90,8 @@ export async function GET(request: Request) {
       .map(([day, a]) => ({ day, steps: a.steps, activeCalories: a.activeCalories, totalCalories: a.totalCalories }));
 
     return NextResponse.json({ data: sleepData, activity: activityOnly }, {
-      // Sleep/activity change at most hourly; CDN cache 30min + 1h stale.
-      headers: { 'Cache-Control': 'public, max-age=0, s-maxage=1800, stale-while-revalidate=3600' },
+      // Sleep/activity update a few times per hour. 5 min fresh + 5 min stale.
+      headers: { 'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=300' },
     });
   } catch (e) {
     console.error('Oura API error:', e);

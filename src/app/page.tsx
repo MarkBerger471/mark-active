@@ -131,9 +131,9 @@ export default function Dashboard() {
       getNutritionPlan().then(p => { if (p && 'current' in p) setNutritionPlan(p as NutritionPlan); });
     };
 
-    // TTL: sleep 30min (rarely changes mid-day), activity 30min, glucose 5min
+    // TTL matches edge cache s-maxage: glucose 60s, sleep/activity 5min, health-sync 2min
     const refreshSleep = (force = false) => {
-      if (!force && fresh('sleep_cache', 30 * 60 * 1000)) return Promise.resolve();
+      if (!force && fresh('sleep_cache', 5 * 60 * 1000)) return Promise.resolve();
       return fetch('/api/oura?days=7').then(r => r.json()).then(d => {
         if (d.data?.length) {
           const sorted = d.data.sort((a: SleepDay, b: SleepDay) => b.day.localeCompare(a.day));
@@ -145,7 +145,7 @@ export default function Dashboard() {
     };
 
     const refreshActivity = async (force = false) => {
-      if (!force && fresh('activity_cache', 30 * 60 * 1000)) return;
+      if (!force && fresh('activity_cache', 2 * 60 * 1000)) return;
       const act: Record<string, { activeCalories: number; source?: string }> = {};
       try {
         const d = await fetch('/api/oura?days=60').then(r => r.json());
@@ -171,7 +171,7 @@ export default function Dashboard() {
     };
 
     const refreshGlucose = (force = false) => {
-      if (!force && fresh('glucose_cache', 5 * 60 * 1000)) return Promise.resolve();
+      if (!force && fresh('glucose_cache', 60 * 1000)) return Promise.resolve();
       return fetch('/api/glucose').then(r => r.json()).then(d => {
         if (d.current) {
           setGlucose(d);
@@ -189,8 +189,8 @@ export default function Dashboard() {
     };
 
     refreshAll();
-    // Glucose auto-refresh: 15min (was 5min) — TTL ensures no duplicate fetch mid-interval
-    const glucoseInterval = setInterval(() => refreshGlucose(), 15 * 60 * 1000);
+    // Glucose auto-refresh: 2min — near-real-time, edge cache absorbs repeats from multiple windows
+    const glucoseInterval = setInterval(() => refreshGlucose(true), 2 * 60 * 1000);
 
     // PWA resume: TTL-gated, so rapid open/close doesn't burn function invocations
     const onFocus = () => refreshAll();

@@ -63,7 +63,7 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({ activity: result }, {
-    // Apple Watch syncs every few min via iOS Shortcut — 10 min cache is fine.
-    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=600, stale-while-revalidate=1200' },
+    // Apple Watch syncs every few min via iOS Shortcut. 2 min fresh + 3 min stale.
+    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=120, stale-while-revalidate=180' },
   });
 }
