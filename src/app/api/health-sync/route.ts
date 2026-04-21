@@ -2,9 +2,6 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 // POST: iOS Shortcut sends Apple Health data
 export async function POST(request: Request) {
   try {
@@ -66,6 +63,7 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({ activity: result }, {
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
+    // Apple Watch syncs every few min via iOS Shortcut — 10 min cache is fine.
+    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=600, stale-while-revalidate=1200' },
   });
 }

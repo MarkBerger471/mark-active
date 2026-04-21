@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 const LIBRE_EMAIL = process.env.LIBRE_EMAIL;
 const LIBRE_PASSWORD = process.env.LIBRE_PASSWORD;
 
@@ -158,6 +155,7 @@ function formatResponse(graphData: any) {
     history,
     stats: { timeInRange, avgGlucose, avgMmol, estimatedA1c, readings: values.length },
   }, {
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
+    // Single-user app: browser always revalidates, Netlify edge caches 5min + 10min stale window
+    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=600' },
   });
 }

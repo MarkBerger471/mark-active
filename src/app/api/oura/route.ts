@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 const OURA_TOKEN = process.env.OURA_ACCESS_TOKEN;
 const OURA_BASE = 'https://api.ouraring.com/v2/usercollection';
 
@@ -93,7 +90,8 @@ export async function GET(request: Request) {
       .map(([day, a]) => ({ day, steps: a.steps, activeCalories: a.activeCalories, totalCalories: a.totalCalories }));
 
     return NextResponse.json({ data: sleepData, activity: activityOnly }, {
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
+      // Sleep/activity change at most hourly; CDN cache 30min + 1h stale.
+      headers: { 'Cache-Control': 'public, max-age=0, s-maxage=1800, stale-while-revalidate=3600' },
     });
   } catch (e) {
     console.error('Oura API error:', e);
