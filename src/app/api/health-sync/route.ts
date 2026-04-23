@@ -1,38 +1,77 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, addDoc } from 'firebase/firestore';
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Log a bad payload so we can see what the Shortcut is actually sending
+async function logError(reason: string, payload: unknown) {
+  try {
+    await addDoc(collection(db, 'health-sync-errors'), {
+      reason,
+      payload,
+      at: new Date().toISOString(),
+    });
+  } catch {}
+}
 
 // POST: iOS Shortcut sends Apple Health data
 export async function POST(request: Request) {
+  let body: Record<string, unknown> = {};
   try {
-    const body = await request.json();
-    const { secret, date, activeCalories, steps } = body;
+    body = await request.json();
+  } catch {
+    await logError('invalid-json', { raw: 'unparseable' });
+    return NextResponse.json({ error: 'Body must be JSON' }, { status: 400 });
+  }
 
-    // Validate secret (read at request time for serverless compatibility)
-    const syncSecret = process.env.HEALTH_SYNC_SECRET;
-    if (!syncSecret || secret !== syncSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const { secret, date, activeCalories, steps } = body as {
+    secret?: string; date?: string; activeCalories?: unknown; steps?: unknown;
+  };
 
-    // Validate required fields
-    if (!date || activeCalories === undefined) {
-      return NextResponse.json({ error: 'Missing date or activeCalories' }, { status: 400 });
-    }
+  const syncSecret = process.env.HEALTH_SYNC_SECRET;
+  if (!syncSecret || secret !== syncSecret) {
+    await logError('unauthorized', { date, activeCalories, steps, hasSecret: Boolean(secret) });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
-    // Store in Firestore
-    const docRef = doc(db, 'health-activity', date);
-    await setDoc(docRef, {
+  // Date must be YYYY-MM-DD — reject the localized "15. April 2026 at 09:57" format
+  if (typeof date !== 'string' || !ISO_DATE.test(date)) {
+    await logError('bad-date-format', { date, expected: 'YYYY-MM-DD' });
+    return NextResponse.json({
+      error: 'date must be YYYY-MM-DD format',
+      got: date,
+      hint: 'In iOS Shortcut: Format Date → Custom Format → "yyyy-MM-dd"',
+    }, { status: 400 });
+  }
+
+  // activeCalories must be a positive number — reject nulls / zero / strings that don't parse
+  const cal = Number(activeCalories);
+  if (!isFinite(cal) || cal <= 0) {
+    await logError('bad-active-calories', { date, activeCalories });
+    return NextResponse.json({
+      error: 'activeCalories must be a positive number',
+      got: activeCalories,
+      hint: 'In iOS Shortcut: use "Find Health Samples → Active Energy → Today" then "Calculate Statistics → Sum"',
+    }, { status: 400 });
+  }
+
+  const stepCount = Math.round(Number(steps || 0));
+
+  try {
+    await setDoc(doc(db, 'health-activity', date), {
       date,
-      activeCalories: Math.round(Number(activeCalories)),
-      steps: Math.round(Number(steps || 0)),
+      activeCalories: Math.round(cal),
+      steps: isFinite(stepCount) ? stepCount : 0,
       source: 'apple-watch',
       updatedAt: new Date().toISOString(),
     }, { merge: true });
-
-    return NextResponse.json({ ok: true, date, activeCalories: Math.round(Number(activeCalories)) });
   } catch (e) {
-    return NextResponse.json({ error: 'Failed to sync' }, { status: 500 });
+    await logError('firestore-write-failed', { date, message: String(e) });
+    return NextResponse.json({ error: 'Storage failed' }, { status: 500 });
   }
+
+  return NextResponse.json({ ok: true, date, activeCalories: Math.round(cal), steps: stepCount });
 }
 
 // GET: Dashboard fetches Apple Health activity data

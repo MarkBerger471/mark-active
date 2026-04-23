@@ -42,3 +42,6 @@ next-env.d.ts
 
 # Local Netlify folder
 .netlify
+
+# Local Firestore dump (personal data — never commit)
+data-snapshot.json
