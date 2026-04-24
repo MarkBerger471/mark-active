@@ -444,12 +444,13 @@ function parseFoodItem(item: FoodItem | string): FoodItem {
   return calcItemMacros(parsed);
 }
 
-function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPerMeal }: {
+function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPerMeal, woSupplement }: {
   meal: NutritionMeal;
   allowedFoods?: string[];
   onSaveOptimized?: (meal: NutritionMeal) => void;
   avgTargets?: { kcal: number; protein: number; carbs: number; fat: number };
   dailyEAAPerMeal?: { aa: string; mg: number }[];
+  woSupplement?: { aas: { aa: string; mg: number }[]; totalMg: number; foodNNU: number; finalNNU: number } | null;
 }) {
   const [showNNU, setShowNNU] = useState(false);
   const [level, setLevel] = useState(2);
@@ -470,19 +471,11 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
   const isAfterWO = meal.name.toLowerCase().includes('after workout');
   let nnuWithEAA: number | null = null;
   if (nnu) {
-    const eaaData: { aa: string; mg: number }[] = (() => {
-      if (typeof window === 'undefined') return [];
-      if (isAfterWO) {
-        // Use individual After WO supplement
-        try {
-          const wo = JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null');
-          return wo?.aas || [];
-        } catch { return []; }
-      }
-      // Use avg per-meal supplement
-      if (dailyEAAPerMeal && dailyEAAPerMeal.length > 0) return dailyEAAPerMeal;
-      try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; }
-    })();
+    // Use live data from props (not stale localStorage). After WO uses its
+    // individual supplement, all other meals use the daily-EAA per-meal split.
+    const eaaData: { aa: string; mg: number }[] = isAfterWO
+      ? (woSupplement?.aas || [])
+      : (dailyEAAPerMeal || []);
     if (eaaData.length > 0) {
       const p = { ...nnu.profile };
       for (const s of eaaData) {
@@ -518,6 +511,8 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
   const [optimizing, setOptimizing] = useState(false);
   const computeOptimization = (lvl?: number) => {
     if (!nnu || nnu.nnu >= 95) return;
+    // After Workout uses an EAA supplement only — skip the food optimizer.
+    if (isAfterWO) return;
     const useLevel = lvl ?? level;
     setOptimizing(true);
     setOptimization(null);
@@ -648,8 +643,34 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
           </div>
           <div className="text-xs text-white/30 mb-1">{nnu.totalProtein}g protein · {nnu.usedProtein}g used · {nnu.wastedProtein}g wasted</div>
 
-          {/* Aggressiveness slider */}
-          {nnu && nnu.nnu < 95 && (
+          {/* After Workout: show ONLY the EAA supplement table (food optimizer
+              would suggest changing the post-workout drink, which Mark doesn't
+              want — this meal is supplement-driven by design) */}
+          {isAfterWO && woSupplement && (
+            <div className="mt-3 p-3 rounded-lg bg-amber-500/8 border border-amber-500/15">
+              <div className="flex items-baseline justify-between mb-2">
+                <span className="text-sm font-semibold text-amber-400">+ Individual EAA supplement</span>
+                <span className="text-xs text-white/40">
+                  NNU {woSupplement.foodNNU}% → <span className="text-amber-300 font-bold">{woSupplement.finalNNU}%</span>
+                  <span className="text-white/30 ml-2">{(woSupplement.totalMg / 1000).toFixed(1)}g total</span>
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                {woSupplement.aas.map((s, i) => (
+                  <div key={i} className="text-xs flex justify-between">
+                    <span className="text-amber-400/70">{EAA_NAMES[s.aa as keyof typeof EAA_NAMES] || s.aa}</span>
+                    <span className="text-white/50 font-mono">{s.mg}mg</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 pt-2 border-t border-white/5 text-[10px] text-white/30">
+                Mix into the post-workout drink. No food changes recommended for this meal.
+              </div>
+            </div>
+          )}
+
+          {/* Aggressiveness slider — only for non-After-Workout meals */}
+          {nnu && nnu.nnu < 95 && !isAfterWO && (
             <div className="mt-3 mb-2">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[10px] text-white/25 uppercase tracking-wider">Optimization Level</span>
@@ -1285,6 +1306,12 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   })();
   const eaaG = liveDaily ? liveDaily.totalPerDay / 1000 : 0;
   const dailyEAAFromStorage = liveDaily?.perMeal || [];
+  const liveWO = (() => {
+    const wo = dayPlan.meals.find(m => m.name.toLowerCase().includes('after workout'));
+    if (!wo) return null;
+    const items = wo.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string }));
+    return items.length > 0 ? calcIndividualSupplement(items, 96) : null;
+  })();
   const actualMacros = {
     kcal: foodMacros.kcal + Math.round(eaaG * 4),
     protein: foodMacros.protein + Math.round(eaaG),
@@ -1644,7 +1671,9 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                 const avg = { kcal: Math.round(remaining.kcal / mealCount), protein: Math.round(remaining.protein / mealCount), carbs: Math.round(remaining.carbs / mealCount), fat: Math.round(remaining.fat / mealCount) };
                 return plan.meals.map((meal, i) => (
                   <MealCard key={i} meal={meal} allowedFoods={allowedFoods}
-                    avgTargets={isIntra(meal.name) ? INTRA_TARGETS : avg} dailyEAAPerMeal={dailyEAAFromStorage}
+                    avgTargets={isIntra(meal.name) ? INTRA_TARGETS : avg}
+                    dailyEAAPerMeal={dailyEAAFromStorage}
+                    woSupplement={liveWO}
                     onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
                 ));
               })()}
