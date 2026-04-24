@@ -1273,6 +1273,9 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   setEditPlan: (p: DayPlan) => void;
   recommendedTargets?: { kcal: number; protein: number; carbs: number; fat: number } | null;
 }) {
+  // Track which Recommended-macro info popover is open
+  const [expandedRec, setExpandedRec] = useState<string | null>(null);
+
   // Target macros — editable, stored in localStorage + synced via settings
   const [targets, setTargets] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1462,7 +1465,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                   <div className="mb-1">
                     <div className="flex items-center justify-between mb-1">
                       <div className="text-[9px] text-cyan-400/40 uppercase tracking-wider">
-                        Recommended <span className="text-white/20 normal-case tracking-normal">— science-based</span>
+                        Recommended <span className="text-white/20 normal-case tracking-normal">— science-based, tap for sources</span>
                       </div>
                     </div>
                     <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-cyan-500/[0.04] border border-cyan-500/10">
@@ -1474,23 +1477,78 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                       ].map(m => {
                         const delta = m.current - m.val;
                         const matched = Math.abs(delta) <= (m.label === 'Kcal' ? 50 : 5);
+                        const isOpen = expandedRec === m.label;
                         return (
-                          <div key={m.label}>
+                          <button
+                            key={m.label}
+                            type="button"
+                            onClick={() => setExpandedRec(isOpen ? null : m.label)}
+                            className={`text-left rounded p-1 -m-1 transition-colors ${isOpen ? 'bg-cyan-500/10' : 'hover:bg-white/[0.03]'}`}
+                          >
                             <div className="flex items-center gap-1.5">
                               <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
                               <span className="text-xs text-white/40">{m.label}</span>
                               <span className="text-sm font-bold text-white">{m.val}</span>
                               <span className="text-[10px] text-white/30">{m.unit}</span>
+                              <span className="text-[9px] text-cyan-400/40 ml-auto">{isOpen ? '×' : 'ⓘ'}</span>
                             </div>
                             {!matched && (
                               <div className={`text-[9px] ml-4 ${delta > 0 ? 'text-green-400/60' : 'text-yellow-400/60'}`}>
                                 target {delta > 0 ? '−' : '+'}{Math.abs(delta)}
                               </div>
                             )}
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
+                    {expandedRec && (
+                      <div className="mt-2 p-3 rounded-lg bg-cyan-500/[0.06] border border-cyan-500/15 text-[11px] text-white/70 leading-relaxed">
+                        {expandedRec === 'Kcal' && (
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Kcal — TDEE × (1 + surplus%)</div>
+                            <div className="mb-2">
+                              <strong className="text-white">{recommendedTargets.kcal} kcal/day</strong> = your derived TDEE × 1.15 (rounded to 50). Bulks of +10–20% surplus give the cleanest muscle:fat ratio. Above +20% the extra calories almost all become fat.
+                            </div>
+                            <div className="text-white/40 text-[10px]">
+                              <strong className="text-white/60">Sources:</strong> Helms et al. <em>Recommendations for natural bodybuilding contest preparation</em> (J Int Soc Sports Nutr, 2014) · Israetel, <em>Renaissance Periodization Diet</em> · MASS Research Review meta-analyses.
+                            </div>
+                          </div>
+                        )}
+                        {expandedRec === 'Protein' && (
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Protein — 2.25 g/kg bodyweight</div>
+                            <div className="mb-2">
+                              <strong className="text-white">{recommendedTargets.protein} g/day</strong> = bodyweight × 2.25 g/kg. Range 1.6–2.4 g/kg covers nearly all muscle-building outcomes; upper-end favoured for trained lifters and TRT users (slightly elevated MPS resistance). Distributed evenly across 4–5 meals at ~0.4 g/kg each maximizes the MPS pulse.
+                            </div>
+                            <div className="text-white/40 text-[10px]">
+                              <strong className="text-white/60">Sources:</strong> Jäger et al. <em>ISSN Position Stand: Protein and exercise</em> (J Int Soc Sports Nutr, 2017) · Schoenfeld & Aragon, <em>How much protein can the body use in a single meal</em> (J Int Soc Sports Nutr, 2018) · Morton et al. meta-analysis (Br J Sports Med, 2018).
+                            </div>
+                          </div>
+                        )}
+                        {expandedRec === 'Carbs' && (
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Carbs — fill the remainder</div>
+                            <div className="mb-2">
+                              <strong className="text-white">{recommendedTargets.carbs} g/day</strong> = (kcal − protein·4 − fat·9) / 4. No fixed g/kg needed once protein and fat floors are met. Higher carbs drive training performance, glycogen replenishment, and insulin/IGF-1 response — all anabolic signals during a bulk.
+                            </div>
+                            <div className="text-white/40 text-[10px]">
+                              <strong className="text-white/60">Sources:</strong> Burke et al. <em>Carbohydrates for training and competition</em> (J Sports Sci, 2011) · Vandenbogaerde & Hopkins meta-analysis on CHO and endurance/strength performance (Sports Med, 2011) · Helms (MASS).
+                            </div>
+                          </div>
+                        )}
+                        {expandedRec === 'Fat' && (
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Fat — 25% of total kcal</div>
+                            <div className="mb-2">
+                              <strong className="text-white">{recommendedTargets.fat} g/day</strong> = 25% of total kcal ÷ 9. Floor is 0.8–1.0 g/kg bodyweight to keep testosterone, recovery, and absorption of fat-soluble vitamins (A, D, E, K) intact. Going below this floor consistently degrades hormonal markers.
+                            </div>
+                            <div className="text-white/40 text-[10px]">
+                              <strong className="text-white/60">Sources:</strong> Volek et al. <em>Testosterone and cortisol response to dietary fat</em> (J Appl Physiol, 1997) · Lyle McDonald, <em>The Stubborn Fat Solution</em> + <em>Body Recomposition</em> · Andy Galpin lectures on hormonal effects of low-fat diets.
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
