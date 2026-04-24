@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 
 import { getMeasurements, getSetting, getSettingRemote, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
-import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE, calcWeeklyIntake } from '@/utils/calories';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import Sparkline from '@/components/Sparkline';
@@ -505,7 +505,11 @@ export default function Dashboard() {
 
           {/* Energy Balance — derived TDEE from real intake vs weight change */}
           {nutritionPlan && measurements.length >= 2 && (() => {
-            const intake = nutritionPlan.current.trainingDay.macros.kcal;
+            const dailyPlanKcal = nutritionPlan.current.trainingDay.macros.kcal;
+            // Weekly average INCLUDES Sunday cheat meal replacement (1300 kcal swap)
+            const wk = calcWeeklyIntake(dailyPlanKcal, nutritionPlan.current.trainingDay.meals);
+            const intake = wk.weeklyAvgKcal;
+            const cheatDiff = wk.cheatMealKcal - wk.lastMealKcal;
             const derived = calcDerivedTDEE(measurements, intake, 28);
             if (!derived) return null;
 
@@ -549,7 +553,7 @@ export default function Dashboard() {
                   <div>
                     <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Intake</p>
                     <p className="text-base font-bold text-white data-value">{intake.toLocaleString()}</p>
-                    <p className="text-[9px] text-white/20">kcal/day</p>
+                    <p className="text-[9px] text-white/20">kcal/day avg</p>
                   </div>
                   <div>
                     <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Surplus</p>
@@ -576,8 +580,10 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                <div className="flex gap-3 pt-3 mt-3 border-t border-white/5 text-[10px] text-white/20">
-                  <span>5500 kcal/kg multiplier</span>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-3 mt-3 border-t border-white/5 text-[10px] text-white/20">
+                  <span>plan {dailyPlanKcal.toLocaleString()} + Sun cheat {cheatDiff > 0 ? '+' : ''}{cheatDiff} = {intake.toLocaleString()}/day</span>
+                  <span>•</span>
+                  <span>5500 kcal/kg</span>
                   <span>•</span>
                   <span>updates after each weigh-in</span>
                 </div>
