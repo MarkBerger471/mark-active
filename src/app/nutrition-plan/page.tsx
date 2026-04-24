@@ -192,14 +192,15 @@ const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: numb
   'zinc': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'magnesium': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'creatine': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
-  'glutamine': { kcal: 20, protein: 5, carbs: 0, fat: 0 },
-  'bcaa': { kcal: 20, protein: 5, carbs: 0, fat: 0 },
-  'eaa': { kcal: 20, protein: 5, carbs: 0, fat: 0 },
+  'glutamine': { kcal: 4, protein: 1, carbs: 0, fat: 0 },
+  'bcaa': { kcal: 4, protein: 1, carbs: 0, fat: 0 },
+  'eaa': { kcal: 4, protein: 1, carbs: 0, fat: 0 },
   'multivitamin': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'ashwagandha': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'melatonin': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'probiotics': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
-  'collagen': { kcal: 35, protein: 9, carbs: 0, fat: 0 },
+  // Per-gram values (see SUPPLEMENT_PER_GRAM below) — scaled by parsed amount
+  'collagen': { kcal: 3.6, protein: 0.9, carbs: 0, fat: 0 },
   'biotin': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'iron': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'calcium': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
@@ -214,9 +215,9 @@ const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: numb
   'beta alanine': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'sea salt': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'salt': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
-  'maltodextrin': { kcal: 76, protein: 0, carbs: 19, fat: 0 },
-  'dextrose': { kcal: 20, protein: 0, carbs: 5, fat: 0 },
-  'cluster dextrin': { kcal: 19, protein: 0, carbs: 5, fat: 0 },
+  'maltodextrin': { kcal: 3.8, protein: 0, carbs: 0.95, fat: 0 },
+  'dextrose': { kcal: 4, protein: 0, carbs: 1, fat: 0 },
+  'cluster dextrin': { kcal: 3.8, protein: 0, carbs: 0.95, fat: 0 },
   'citrulline': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'caffeine': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
   'taurine': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
@@ -334,15 +335,43 @@ function calcItemMacros(item: FoodItem): FoodItem {
   return item;
 }
 
+// Supplements where macros scale with grams (DB values are per 1g)
+const SUPPLEMENT_PER_GRAM = new Set([
+  'maltodextrin', 'dextrose', 'cluster dextrin',
+  'bcaa', 'eaa', 'glutamine', 'collagen',
+]);
+
 function lookupSupplement(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
   const key = name.toLowerCase().trim();
   // Strip dosage from the end: "Krill oil 500mg" -> "krill oil"
   const stripped = key.replace(/\s+\d[\d.,]*\s*(?:mg|gr?|iu|mcg|ml|caps?|tablets?|scoops?)\s*$/i, '').trim();
-  if (SUPPLEMENT_DB[stripped]) return SUPPLEMENT_DB[stripped];
-  for (const [dbKey, val] of Object.entries(SUPPLEMENT_DB)) {
-    if (stripped.includes(dbKey) || dbKey.includes(stripped)) return val;
+
+  let macros: { kcal: number; protein: number; carbs: number; fat: number } | null = null;
+  let matchedKey: string | null = null;
+  if (SUPPLEMENT_DB[stripped]) { macros = SUPPLEMENT_DB[stripped]; matchedKey = stripped; }
+  else {
+    for (const [dbKey, val] of Object.entries(SUPPLEMENT_DB)) {
+      if (stripped.includes(dbKey) || dbKey.includes(stripped)) { macros = val; matchedKey = dbKey; break; }
+    }
   }
-  return null;
+  if (!macros || !matchedKey) return null;
+
+  // For per-gram supplements, scale by the parsed gram amount
+  if (SUPPLEMENT_PER_GRAM.has(matchedKey)) {
+    const gMatch = key.match(/(\d[\d.]*)\s*g(?:r|ram)?s?\b/i);
+    if (gMatch) {
+      const grams = parseFloat(gMatch[1]);
+      if (isFinite(grams) && grams > 0) {
+        return {
+          kcal: Math.round(macros.kcal * grams),
+          protein: Math.round(macros.protein * grams * 10) / 10,
+          carbs: Math.round(macros.carbs * grams * 10) / 10,
+          fat: Math.round(macros.fat * grams * 10) / 10,
+        };
+      }
+    }
+  }
+  return macros;
 }
 
 function sumMacros(meals: NutritionMeal[]): { kcal: number; protein: number; carbs: number; fat: number } {
