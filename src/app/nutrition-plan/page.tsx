@@ -1881,12 +1881,8 @@ export default function NutritionPlanPage() {
       getNutritionPlan().then(async stored => {
         if (stored && 'current' in stored) {
           const p = stored as NutritionPlan;
-          // Don't recompute macros on load — trust the stored values.
-          // Macros are recomputed only in persist() when user explicitly saves.
           setPlan(p);
         } else {
-          // Show default in memory, but only persist if Firestore is also empty.
-          // Otherwise we'd overwrite the real plan that other devices haven't synced yet.
           const defaultVersion = getDefaultNutritionPlan();
           const newPlan: NutritionPlan = { current: defaultVersion, history: [] };
           setPlan(newPlan);
@@ -1897,6 +1893,28 @@ export default function NutritionPlanPage() {
         }
         setLoaded(true);
       });
+
+      // Also pull directly from Firestore — the IDB cache may be stale on
+      // other devices or when background sync hasn't completed yet.
+      // This overrides state if remote is newer by lastModified.
+      (async () => {
+        try {
+          const { getDoc, doc } = await import('firebase/firestore');
+          const { db } = await import('@/lib/firebase');
+          const snap = await getDoc(doc(db, 'nutrition', 'plan'));
+          if (!snap.exists()) return;
+          const remote = snap.data() as NutritionPlan & { lastModified?: number };
+          if (!('current' in remote)) return;
+          setPlan(prev => {
+            if (!prev) return remote;
+            const prevTs = (prev as NutritionPlan & { lastModified?: number }).lastModified || 0;
+            const remoteTs = remote.lastModified || 0;
+            return remoteTs > prevTs ? remote : prev;
+          });
+        } catch (e) {
+          console.warn('Direct Firestore nutrition fetch failed:', e);
+        }
+      })();
     }
   }, [isAuthenticated]);
 
