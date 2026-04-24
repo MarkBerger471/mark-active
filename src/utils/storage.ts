@@ -639,29 +639,29 @@ export function getDefaultNutritionPlan(): NutritionPlanVersion {
     meals: [
       {
         name: 'Meal 1', subtitle: 'pre workout meal',
-        items: [f('Greek yogurt', '250 gr'), f('Whey', '25 gr'), f('Oatmeal', '100 gr'), f('Berries'), f('Cheese', '40 gr')],
+        items: [f('Greek yogurt', '250 g'), f('Whey', '25 g'), f('Oatmeal', '100 g'), f('Berries'), f('Cheese', '40 g')],
         supplements: ['Krill oil 500mg', 'Omega 3 1000 mg', 'D3+K2 1000 iu', 'CoQ10 100 mg', 'Daflon 500mg', 'Vitamin C 1000mg'],
       },
       {
         name: 'Intra workout drink',
-        items: [f('Creatine', '5 gr'), f('EAA or BCAA', '5 gr')],
+        items: [f('Creatine', '5 g'), f('EAA or BCAA', '5 g')],
       },
       {
         name: 'Meal 2', subtitle: 'post workout meal',
-        items: [f('Cream of rice (or flakes without sugar)', '70 gr'), f('Whey', '45 gr')],
+        items: [f('Cream of rice (or flakes without sugar)', '70 g'), f('Whey', '45 g')],
       },
       {
         name: 'Meal 3',
-        items: [f('Chicken / white fish / tuna / turkey', '150 gr'), f('Whole rye bread', '150 gr'), f('Feta', '90 gr')],
+        items: [f('Chicken / white fish / tuna / turkey', '150 g'), f('Whole rye bread', '150 g'), f('Feta', '90 g')],
       },
       {
         name: 'Meal 4',
-        items: [f('Red fish / lean beef', '150 gr'), f('Rice', '250 gr'), f('Olive oil', '7 gr'), f('Veggies')],
+        items: [f('Red fish / lean beef', '150 g'), f('Rice', '250 g'), f('Olive oil', '7 g'), f('Veggies')],
       },
       {
         name: 'Meal 5',
-        items: [f('Egg white', '150 gr'), f('Egg', '2'), f('Whole rye bread', '200 gr'), f('Whey', '25 gr')],
-        supplements: ['Krill oil 500mg', 'Omega 3 2000 mg', 'D3+K2 1000 iu', 'Glutamine 5 gr', 'Magnesium 400 mg'],
+        items: [f('Egg white', '150 g'), f('Egg', '2'), f('Whole rye bread', '200 g'), f('Whey', '25 g')],
+        supplements: ['Krill oil 500mg', 'Omega 3 2000 mg', 'D3+K2 1000 iu', 'Glutamine 5 g', 'Magnesium 400 mg'],
       },
     ],
     macros: { kcal: 3429, protein: 265, carbs: 416, fat: 79 },
@@ -671,25 +671,25 @@ export function getDefaultNutritionPlan(): NutritionPlanVersion {
     meals: [
       {
         name: 'Meal 1',
-        items: [f('Greek yogurt', '200 gr'), f('Whey', '25 gr'), f('Nuts', '25 gr'), f('Oatmeal', '90 gr'), f('Berries'), f('Cottage cheese 5%', '200 gr')],
+        items: [f('Greek yogurt', '200 g'), f('Whey', '25 g'), f('Nuts', '25 g'), f('Oatmeal', '90 g'), f('Berries'), f('Cottage cheese 5%', '200 g')],
         supplements: ['Krill oil 500mg', 'Omega 3 1000 mg', 'D3+K2 1000 iu', 'CoQ10 100 mg', 'Daflon 500mg', 'Vitamin C 1000mg'],
       },
       {
         name: 'Meal 2',
-        items: [f('Chicken / white fish / tuna / turkey', '150 gr'), f('Rice', '200 gr'), f('Olive oil', '7 gr'), f('Veggies'), f('Whole rye bread', '150 gr')],
+        items: [f('Chicken / white fish / tuna / turkey', '150 g'), f('Rice', '200 g'), f('Olive oil', '7 g'), f('Veggies'), f('Whole rye bread', '150 g')],
       },
       {
         name: 'Meal 3',
-        items: [f('Greek yogurt', '200 gr'), f('Nuts', '15 gr'), f('Whey', '25 gr'), f('Oatmeal', '60 gr')],
+        items: [f('Greek yogurt', '200 g'), f('Nuts', '15 g'), f('Whey', '25 g'), f('Oatmeal', '60 g')],
       },
       {
         name: 'Meal 4',
-        items: [f('Red fish / lean beef', '150 gr'), f('Rice', '200 gr')],
+        items: [f('Red fish / lean beef', '150 g'), f('Rice', '200 g')],
       },
       {
         name: 'Meal 5',
-        items: [f('Egg white', '150 gr'), f('Egg', '2'), f('Nuts', '20 gr'), f('Whey 25 gr OR egg white', '170 ml')],
-        supplements: ['Krill oil 500mg', 'Omega 3 2000 mg', 'D3+K2 1000 iu', 'Glutamine 5 gr', 'Magnesium 400 mg'],
+        items: [f('Egg white', '150 g'), f('Egg', '2'), f('Nuts', '20 g'), f('Whey 25 gr OR egg white', '170 ml')],
+        supplements: ['Krill oil 500mg', 'Omega 3 2000 mg', 'D3+K2 1000 iu', 'Glutamine 5 g', 'Magnesium 400 mg'],
       },
     ],
     macros: { kcal: 3429, protein: 257, carbs: 346, fat: 89 },
@@ -700,7 +700,7 @@ export function getDefaultNutritionPlan(): NutritionPlanVersion {
     startDate: new Date().toISOString().split('T')[0],
     trainingDay,
     restDay,
-    emptyStomach: ['Glutamine 5 gr', 'Greens superfood 1 scoop', 'Lemon juice 20 ml', 'Apple vinegar 10 ml', 'NAC 600 mg', 'BCAA 1 scoop'],
+    emptyStomach: ['Glutamine 5 g', 'Greens superfood 1 scoop', 'Lemon juice 20 ml', 'Apple vinegar 10 ml', 'NAC 600 mg', 'BCAA 1 scoop'],
   };
 }
 
