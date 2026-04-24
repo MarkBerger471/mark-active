@@ -8,6 +8,7 @@ import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTr
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, calcWindowTDEE, parseDurationMinutes } from '@/utils/calories';
+import { getEffectiveReps } from '@/utils/training';
 import { hapticLight } from '@/utils/haptics';
 
 // LEGACY — replaced by shared @/utils/calories.ts
@@ -523,8 +524,7 @@ export default function TrainingPlanPage() {
       const working = ex.sets.filter(set => !set.isWarmup && isDone(set));
       if (working.length === 0) continue;
       const maxW = Math.max(...working.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0));
-      const defReps = parseInt(ex.targetReps) || 0;
-      const totalReps = working.reduce((sum, set) => sum + (set.reps || defReps), 0);
+      const totalReps = working.reduce((sum, set) => sum + getEffectiveReps(set, ex.targetReps), 0);
       return { sets: working.length, reps: totalReps, maxWeight: maxW };
     }
     return null;
@@ -789,8 +789,7 @@ export default function TrainingPlanPage() {
                                   const workingSets = ex.sets.filter(set => !set.isWarmup && isDone(set));
                                   if (workingSets.length === 0 && warmupSets.length === 0) return null;
                                   const maxWeight = workingSets.length > 0 ? Math.max(...workingSets.map(set => typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0)) : 0;
-                                  const defaultReps = parseInt(ex.targetReps) || 0;
-                                  const totalReps = workingSets.reduce((sum, set) => sum + (set.reps || defaultReps), 0);
+                                  const totalReps = workingSets.reduce((sum, set) => sum + getEffectiveReps(set, ex.targetReps), 0);
                                   const setCount = workingSets.length;
                                   const wuCount = warmupSets.length;
 
