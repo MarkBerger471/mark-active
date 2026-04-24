@@ -551,13 +551,18 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
           { label: 'Carbs', val: mealMacros.carbs, avg: avgTargets?.carbs, unit: 'g' },
           { label: 'Fat', val: mealMacros.fat, avg: avgTargets?.fat, unit: 'g' },
         ].map(m => {
-          const delta = m.avg ? m.val - m.avg : 0;
+          const hasTarget = m.avg != null;
+          const delta = hasTarget ? m.val - (m.avg as number) : 0;
           return (
             <div key={m.label}>
               <span className="text-xs text-white/50 font-semibold">{m.val}</span>
+              {m.unit && <span className="text-[10px] text-white/40 ml-0.5">{m.unit}</span>}
               <span className="text-[10px] text-white/25 ml-0.5">{m.label}</span>
-              {m.avg && delta !== 0 && (
+              {hasTarget && delta !== 0 && (
                 <span className={`text-[10px] ml-1 ${delta > 0 ? 'text-red-400/50' : 'text-green-400/50'}`}>{delta > 0 ? '+' : ''}{Math.round(delta)}</span>
+              )}
+              {hasTarget && delta === 0 && (
+                <span className="text-[10px] ml-1 text-green-400/50">✓</span>
               )}
             </div>
           );
