@@ -1831,16 +1831,23 @@ export default function NutritionPlanPage() {
     }
     return DEFAULT_OPTIMIZER_FOODS;
   });
-  // Load from Firestore if localStorage is empty
+  // Always pull latest from Firestore on mount (was only loading if localStorage
+  // was empty — so a stale cached list on one device would override the real
+  // saved selection from another device, silently reverting edits).
+  const allowedFoodsEditedRef = useRef(false);
   useEffect(() => {
-    if (typeof window !== 'undefined' && !localStorage.getItem('nnu_allowed_foods')) {
-      getSetting('nnu_allowed_foods').then(v => {
-        if (v) { try { setAllowedFoods(JSON.parse(v)); localStorage.setItem('nnu_allowed_foods', v); } catch {} }
-      });
-    }
+    getSettingRemote('nnu_allowed_foods').then(v => {
+      if (!v || allowedFoodsEditedRef.current) return;
+      try {
+        const parsed = JSON.parse(v);
+        setAllowedFoods(parsed);
+        localStorage.setItem('nnu_allowed_foods', v);
+      } catch {}
+    });
   }, []);
 
   const toggleFood = (food: string) => {
+    allowedFoodsEditedRef.current = true;
     const next = allowedFoods.includes(food) ? allowedFoods.filter(f => f !== food) : [...allowedFoods, food];
     setAllowedFoods(next);
     const json = JSON.stringify(next);
