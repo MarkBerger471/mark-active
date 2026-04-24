@@ -1476,16 +1476,32 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
           {!editing ? (
             <div>
               {(() => {
-                // Only count real food meals (exclude supplement-only meals like During Workout)
+                // Intra-workout meal needs different targets — gut tolerance limits
+                // protein (EAA/BCAA only), no fat (slows gastric emptying), 30-50g carbs.
+                const isIntra = (name: string) => {
+                  const l = name.toLowerCase();
+                  return l.includes('during workout') || l.includes('intra');
+                };
+                const INTRA_TARGETS = { kcal: 230, protein: 10, carbs: 40, fat: 0 };
+
+                // Real meals split the daily target equally
                 const realMeals = plan.meals.filter(m => {
                   const l = m.name.toLowerCase();
-                  return !l.includes('during workout') && !l.includes('intra') && !l.includes('empty stomach');
+                  return !isIntra(m.name) && !l.includes('empty stomach');
                 });
                 const mealCount = realMeals.length || 1;
-                const avg = { kcal: Math.round(targets.kcal / mealCount), protein: Math.round(targets.protein / mealCount), carbs: Math.round(targets.carbs / mealCount), fat: Math.round(targets.fat / mealCount) };
+                // Subtract intra targets from daily so real meals split the remainder
+                const intraDaily = plan.meals.some(m => isIntra(m.name)) ? INTRA_TARGETS : { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+                const remaining = {
+                  kcal: targets.kcal - intraDaily.kcal,
+                  protein: targets.protein - intraDaily.protein,
+                  carbs: targets.carbs - intraDaily.carbs,
+                  fat: targets.fat - intraDaily.fat,
+                };
+                const avg = { kcal: Math.round(remaining.kcal / mealCount), protein: Math.round(remaining.protein / mealCount), carbs: Math.round(remaining.carbs / mealCount), fat: Math.round(remaining.fat / mealCount) };
                 return plan.meals.map((meal, i) => (
                   <MealCard key={i} meal={meal} allowedFoods={allowedFoods}
-                    avgTargets={avg} dailyEAAPerMeal={dailyEAAFromStorage}
+                    avgTargets={isIntra(meal.name) ? INTRA_TARGETS : avg} dailyEAAPerMeal={dailyEAAFromStorage}
                     onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
                 ));
               })()}
