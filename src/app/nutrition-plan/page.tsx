@@ -1518,39 +1518,55 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                         Recommended <span className="text-white/20 normal-case tracking-normal">— science-based, tap for sources</span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-cyan-500/[0.04] border border-cyan-500/10">
-                      {[
-                        { label: 'Kcal', val: recommendedTargets.kcal, current: targets.kcal, unit: '', color: '#b90a0a' },
-                        { label: 'Protein', val: recommendedTargets.protein, current: targets.protein, unit: 'g', color: '#3b82f6' },
-                        { label: 'Carbs', val: recommendedTargets.carbs, current: targets.carbs, unit: 'g', color: '#f59e0b' },
-                        { label: 'Fat', val: recommendedTargets.fat, current: targets.fat, unit: 'g', color: '#10b981' },
-                      ].map(m => {
-                        const delta = m.current - m.val;
-                        const matched = Math.abs(delta) <= (m.label === 'Kcal' ? 50 : 5);
-                        const isOpen = expandedRec === m.label;
-                        return (
-                          <button
-                            key={m.label}
-                            type="button"
-                            onClick={() => setExpandedRec(isOpen ? null : m.label)}
-                            className={`text-left rounded p-1 -m-1 transition-colors ${isOpen ? 'bg-cyan-500/10' : 'hover:bg-white/[0.03]'}`}
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                              <span className="text-xs text-white/40">{m.label}</span>
-                              <span className="text-sm font-bold text-white">{m.val}</span>
-                              <span className="text-[10px] text-white/30">{m.unit}</span>
-                              <span className="text-[9px] text-cyan-400/40 ml-auto">{isOpen ? '×' : 'ⓘ'}</span>
-                            </div>
-                            {!matched && (
-                              <div className={`text-[9px] ml-4 ${delta > 0 ? 'text-green-400/60' : 'text-yellow-400/60'}`}>
-                                target {delta > 0 ? '−' : '+'}{Math.abs(delta)}
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {(() => {
+                      // NNU-adjusted protein: at standard ~70% NNU the rec is 2.25 g/kg;
+                      // Mark's whole-day NNU with EAA is ~92% → equivalent MPS at less protein.
+                      // Formula: adjusted = standard × (70 / actual_NNU), rounded to nearest 5g.
+                      const refNNU = 70;
+                      const nnuAdjProtein = (avgNNUWithEAA != null && avgNNUWithEAA > refNNU)
+                        ? Math.round(recommendedTargets.protein * refNNU / avgNNUWithEAA / 5) * 5
+                        : null;
+                      return (
+                        <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-cyan-500/[0.04] border border-cyan-500/10">
+                          {[
+                            { label: 'Kcal', val: recommendedTargets.kcal, current: targets.kcal, unit: '', color: '#b90a0a' },
+                            { label: 'Protein', val: recommendedTargets.protein, current: targets.protein, unit: 'g', color: '#3b82f6', adj: nnuAdjProtein },
+                            { label: 'Carbs', val: recommendedTargets.carbs, current: targets.carbs, unit: 'g', color: '#f59e0b' },
+                            { label: 'Fat', val: recommendedTargets.fat, current: targets.fat, unit: 'g', color: '#10b981' },
+                          ].map(m => {
+                            const delta = m.current - m.val;
+                            const matched = Math.abs(delta) <= (m.label === 'Kcal' ? 50 : 5);
+                            const isOpen = expandedRec === m.label;
+                            return (
+                              <button
+                                key={m.label}
+                                type="button"
+                                onClick={() => setExpandedRec(isOpen ? null : m.label)}
+                                className={`text-left rounded p-1 -m-1 transition-colors ${isOpen ? 'bg-cyan-500/10' : 'hover:bg-white/[0.03]'}`}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                                  <span className="text-xs text-white/40">{m.label}</span>
+                                  <span className="text-sm font-bold text-white">{m.val}</span>
+                                  <span className="text-[10px] text-white/30">{m.unit}</span>
+                                  <span className="text-[9px] text-cyan-400/40 ml-auto">{isOpen ? '×' : 'ⓘ'}</span>
+                                </div>
+                                {'adj' in m && m.adj != null && (
+                                  <div className="text-[9px] ml-4 text-cyan-400/60">
+                                    NNU-adj: {m.adj}g
+                                  </div>
+                                )}
+                                {!matched && (
+                                  <div className={`text-[9px] ml-4 ${delta > 0 ? 'text-green-400/60' : 'text-yellow-400/60'}`}>
+                                    target {delta > 0 ? '−' : '+'}{Math.abs(delta)}
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                     {expandedRec && (
                       <div className="mt-2 p-3 rounded-lg bg-cyan-500/[0.06] border border-cyan-500/15 text-[11px] text-white/70 leading-relaxed">
                         {expandedRec === 'Kcal' && (
@@ -1570,6 +1586,18 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                             <div className="mb-2">
                               <strong className="text-white">{recommendedTargets.protein} g/day</strong> = bodyweight × 2.25 g/kg. Range 1.6–2.4 g/kg covers nearly all muscle-building outcomes; upper-end favoured for trained lifters and TRT users (slightly elevated MPS resistance). Distributed evenly across 4–5 meals at ~0.4 g/kg each maximizes the MPS pulse.
                             </div>
+                            {avgNNUWithEAA != null && avgNNUWithEAA > 70 && (
+                              <div className="rounded p-2 bg-cyan-500/10 border border-cyan-500/25 mb-2">
+                                <div className="text-[10px] font-semibold text-cyan-300 mb-0.5">NNU adjustment — why you could eat less</div>
+                                <div className="text-[10px] text-white/70 leading-relaxed">
+                                  Standard protein recommendations assume ~70% Net Nitrogen Utilization (the typical Western mixed diet). With your optimized plan (EAA supplement filling the gaps per meal), your whole-day NNU is <strong className="text-cyan-300">{avgNNUWithEAA}%</strong>. You&apos;re getting more usable protein per gram eaten.
+                                  <br/><br/>
+                                  Scaled equivalent: <strong className="text-white">~{Math.round(recommendedTargets.protein * 70 / avgNNUWithEAA / 5) * 5} g/day</strong> at your NNU gives the same MPS as 258 g at 70% NNU. Shown below the main target as &quot;NNU-adj&quot;.
+                                  <br/><br/>
+                                  <span className="text-white/50">Caveat: the main recommendation stays at 2.25 g/kg because protein has uses beyond MPS (immune, connective tissue, satiety, thermic effect) that don&apos;t benefit from high NNU. Treat the adjusted number as the floor — never go below it.</span>
+                                </div>
+                              </div>
+                            )}
                             <div className="grid grid-cols-2 gap-2 mb-2">
                               <div className="rounded p-2 bg-yellow-500/10 border border-yellow-500/20">
                                 <div className="text-[10px] font-semibold text-yellow-400 mb-0.5">Under-eating ⤓</div>

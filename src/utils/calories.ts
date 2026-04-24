@@ -318,11 +318,11 @@ export function calcRecommendedMacros(
   const surplusPct = phase === 'bulking' ? 0.15 : -0.20;
   const kcal = Math.round((tdeeKcal * (1 + surplusPct)) / 50) * 50; // round to nearest 50
 
-  // Bulk protein dropped from 2.25 → 2.0 g/kg because Mark's optimized EAA
-  // supplementation puts whole-day NNU at ~92%. Above 1.8-2.0 g/kg with that
-  // quality, additional protein is oxidized — better spent on carbs/fat.
-  // Cut keeps 2.4 g/kg (tighter muscle preservation window).
-  const proteinPerKg = phase === 'bulking' ? 2.0 : 2.4;
+  // Standard bulk protein recommendation (ISSN, Schoenfeld, Helms/MASS).
+  // The UI separately surfaces a lower "NNU-adjusted" target when whole-day
+  // NNU is high — but the main Recommended row uses the classical value so
+  // nothing is left on the table if Mark misses an EAA dose.
+  const proteinPerKg = phase === 'bulking' ? 2.25 : 2.4;
   const protein = Math.round(bodyWeightKg * proteinPerKg);
 
   const fatPctOfKcal = phase === 'bulking' ? 0.25 : 0.30;
