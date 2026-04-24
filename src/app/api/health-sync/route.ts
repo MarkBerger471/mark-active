@@ -67,8 +67,10 @@ export async function POST(request: Request) {
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   } catch (e) {
-    await logError('firestore-write-failed', { date, message: String(e) });
-    return NextResponse.json({ error: 'Storage failed' }, { status: 500 });
+    const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    console.error('[health-sync] setDoc failed:', msg, e);
+    await logError('firestore-write-failed', { date, message: msg });
+    return NextResponse.json({ error: 'Storage failed', detail: msg }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, date, activeCalories: Math.round(cal), steps: stepCount });

@@ -1,4 +1,8 @@
-'use client';
+// Note: do NOT add 'use client' here. This module is imported by both client
+// components AND server API routes; marking it as a client module turns its
+// exports into proxy references on the server, which makes setDoc/doc fail
+// with "Expected first argument to doc() to be a CollectionReference, …".
+// Firebase Web SDK runs fine in Node — no directive needed.
 
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
