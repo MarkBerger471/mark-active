@@ -1276,27 +1276,6 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   // Track which Recommended-macro info popover is open
   const [expandedRec, setExpandedRec] = useState<string | null>(null);
 
-  // EAA supplement data — kept in state so DayPlanView re-renders when it loads
-  // (vs reading localStorage synchronously, which races with the page-level load)
-  const [eaaPerMeal, setEaaPerMeal] = useState<{ aa: string; mg: number }[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; }
-  });
-  const [eaaWO, setEaaWO] = useState<{ aas?: { aa: string; mg: number }[] } | null>(() => {
-    if (typeof window === 'undefined') return null;
-    try { return JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null'); } catch { return null; }
-  });
-  useEffect(() => {
-    getSettingRemote('eaa_per_meal').then(v => {
-      if (!v) return;
-      try { const p = JSON.parse(v); setEaaPerMeal(p); localStorage.setItem('eaa_per_meal', v); } catch {}
-    });
-    getSettingRemote('eaa_wo_supplement').then(v => {
-      if (!v) return;
-      try { const p = JSON.parse(v); setEaaWO(p); localStorage.setItem('eaa_wo_supplement', v); } catch {}
-    });
-  }, []);
-
   // Target macros — editable, stored in localStorage + synced via settings
   const [targets, setTargets] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1439,46 +1418,27 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
   return (
     <div className="glass-card overflow-hidden p-5">
-          {/* Compute per-meal weighted average NNU */}
+          {/* Compute per-meal weighted average NNU — single source of truth.
+              Recompute live from the current plan via calcDailyEAA so this
+              header agrees with the Daily EAA Supplement panel below. */}
           {(() => {
-            const isExcludedMeal = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra'); };
-            const mainMeals = dayPlan.meals.filter(m => !isExcludedMeal(m.name));
+            const isExcludedFromMain = (n: string) => {
+              const l = n.toLowerCase();
+              return l.includes('during workout') || l.includes('intra') || l.includes('after workout');
+            };
+            const mainFoodsByMeal = dayPlan.meals
+              .filter(m => !isExcludedFromMain(m.name))
+              .map(meal => meal.items
+                .map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
+                .filter(it => it.name.trim() && it.amount)
+                .map(f => ({ name: f.name, amount: f.amount as string }))
+              )
+              .filter(m => m.length > 0);
 
-            // Per-meal NNU: food only
-            let totalProt = 0, weightedNNU = 0;
-            const mealNNUs: { nnu: number; protein: number; withEAA: number }[] = [];
-            const isAfterWOMeal = (n: string) => n.toLowerCase().includes('after workout');
-
-            // EAA supplements come from React state (loaded synchronously from
-            // localStorage initially, then refreshed from Firestore on mount)
-            const avgEAA = eaaPerMeal;
-            const woEAA = eaaWO?.aas || [];
-
-            for (const meal of mainMeals) {
-              const foods = meal.items.map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } }).filter(it => it.name.trim() && it.amount);
-              const inputs = foods.map(f => ({ name: f.name, amount: f.amount }));
-              const nnu = inputs.length > 0 ? calcNNU(inputs) : null;
-              if (!nnu) continue;
-
-              // NNU with appropriate EAA supplement
-              const eaaData = isAfterWOMeal(meal.name) ? woEAA : avgEAA;
-              let nnuWithEAA = nnu.nnu;
-              if (eaaData.length > 0) {
-                const p = { ...nnu.profile };
-                for (const s of eaaData) { const k = s.aa as keyof typeof p; if (p[k] !== undefined) p[k] += s.mg; }
-                const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
-                let minR = Infinity;
-                for (const aa of EAA_ORDER) { const r = (p[aa] / t * 100) / MAP[aa]; if (r < minR) minR = r; }
-                nnuWithEAA = Math.round(minR * 1000) / 10;
-              }
-
-              mealNNUs.push({ nnu: nnu.nnu, protein: nnu.totalProtein, withEAA: nnuWithEAA });
-              totalProt += nnu.totalProtein;
-              weightedNNU += nnu.nnu * nnu.totalProtein;
-            }
-
-            const avgNNUFood = totalProt > 0 ? Math.round(weightedNNU / totalProt * 10) / 10 : null;
-            const avgNNUWithEAA = totalProt > 0 ? Math.round(mealNNUs.reduce((s, m) => s + m.withEAA * m.protein, 0) / totalProt * 10) / 10 : null;
+            const dailyEAAResult = mainFoodsByMeal.length > 0 ? calcDailyEAA(mainFoodsByMeal, undefined, 2) : null;
+            const avgNNUFood = dailyEAAResult ? dailyEAAResult.avgNNUBefore : null;
+            const avgNNUWithEAA = dailyEAAResult ? dailyEAAResult.avgNNUAfter : avgNNUFood;
+            const supplementGramsPerMeal = dailyEAAResult ? Math.round(dailyEAAResult.totalPerDay / dailyEAAResult.mealCount / 100) / 10 : 0;
 
             return (
               <>
@@ -1505,7 +1465,9 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                           </span>
                           <span className="text-sm text-white/40">%</span>
                         </div>
-                        <span className="text-[9px] text-white/30 uppercase">with EAA{avgEAA.length === 0 && eaaWO == null ? ' (none configured)' : ''}</span>
+                        <span className="text-[9px] text-white/30 uppercase">
+                          {dailyEAAResult ? `with EAA (${supplementGramsPerMeal}g/meal)` : 'no EAA needed'}
+                        </span>
                       </div>
                     </div>
                   </div>
