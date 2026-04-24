@@ -15,8 +15,9 @@ type Phase = 'bulking' | 'cutting';
 const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
   'greek yogurt': { kcal: 59, protein: 10, carbs: 3.6, fat: 0.4 },
   'yogurt': { kcal: 59, protein: 10, carbs: 3.6, fat: 0.4 },
-  'whey': { kcal: 400, protein: 80, carbs: 10, fat: 5 },
-  'whey protein': { kcal: 400, protein: 80, carbs: 10, fat: 5 },
+  // Mark's whey label: 36g scoop = 140 kcal / 25g P / 4g C / 2g F → per 100g
+  'whey': { kcal: 389, protein: 69, carbs: 11, fat: 5.6 },
+  'whey protein': { kcal: 389, protein: 69, carbs: 11, fat: 5.6 },
   'oatmeal': { kcal: 389, protein: 17, carbs: 66, fat: 7 },
   'oats': { kcal: 389, protein: 17, carbs: 66, fat: 7 },
   'berries': { kcal: 57, protein: 1.2, carbs: 12, fat: 0.7 },
@@ -35,6 +36,7 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'dry rice': { kcal: 360, protein: 7, carbs: 79, fat: 0.6 },
   'cream of rice': { kcal: 370, protein: 6, carbs: 83, fat: 0.5 },
   'rice cakes': { kcal: 387, protein: 8, carbs: 82, fat: 3 },
+  // Chicken breast cooked (roasted) — USDA. Raw is ~120/23/0/2.6, don't use.
   'chicken': { kcal: 165, protein: 31, carbs: 0, fat: 3.6 },
   'chicken breast': { kcal: 165, protein: 31, carbs: 0, fat: 3.6 },
   'chicken thigh': { kcal: 179, protein: 25, carbs: 0, fat: 8.2 },
@@ -44,7 +46,8 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'ground beef': { kcal: 254, protein: 26, carbs: 0, fat: 17 },
   'steak': { kcal: 271, protein: 26, carbs: 0, fat: 18 },
   'salmon': { kcal: 208, protein: 20, carbs: 0, fat: 13 },
-  'tuna': { kcal: 132, protein: 28, carbs: 0, fat: 1.3 },
+  // Tuna, light, canned in water, drained — USDA
+  'tuna': { kcal: 116, protein: 26, carbs: 0, fat: 0.8 },
   'tilapia': { kcal: 96, protein: 20, carbs: 0, fat: 1.7 },
   'shrimp': { kcal: 99, protein: 24, carbs: 0.2, fat: 0.3 },
   'eggs': { kcal: 143, protein: 12.6, carbs: 0.7, fat: 9.5 },
