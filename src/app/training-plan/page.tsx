@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, updateSessionDuration, getMeasurements } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
-import { calcSessionCalories, calcWindowTDEE, parseDurationMinutes } from '@/utils/calories';
+import { calcSessionCalories, parseDurationMinutes } from '@/utils/calories';
 import { getEffectiveReps } from '@/utils/training';
 import { hapticLight } from '@/utils/haptics';
 
@@ -583,66 +583,7 @@ export default function TrainingPlanPage() {
               })}
             </div>
 
-            {/* Weekly Calorie Averages — calendar weeks (Mon–Sun) */}
-            {latestBmr > 0 && sessions.length > 0 && (() => {
-              const now = new Date();
-              const todayStr = now.toISOString().split('T')[0];
-              const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-
-              // Current week's Monday (00:00 local)
-              const thisMondayStr = getWeekKey(todayStr);
-              const thisMonday = new Date(thisMondayStr + 'T00:00:00');
-
-              // Show last 2 completed weeks (skip the in-progress current week)
-              const cards: Array<{
-                key: string;
-                label: string;
-                total: number;
-                training: number;
-                neat: number;
-                count: number;
-              }> = [];
-
-              for (let w = 1; w <= 2; w++) {
-                const monday = new Date(thisMonday);
-                monday.setDate(monday.getDate() - w * 7);
-                const sunday = new Date(monday);
-                sunday.setDate(sunday.getDate() + 6);
-
-                const tdee = calcWindowTDEE(sessions, latestWeight, latestBmr, dailyActivity, monday, sunday);
-
-                cards.push({
-                  key: monday.toISOString().split('T')[0],
-                  label: `${fmt(monday)} – ${fmt(sunday)}`,
-                  total: tdee.total,
-                  training: tdee.training,
-                  neat: tdee.neat,
-                  count: tdee.sessions.length,
-                });
-              }
-
-              return (
-                <div className="mb-6">
-                  <h3 className="text-sm font-semibold text-white/60 mb-3">Weekly TDEE</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {cards.map(c => (
-                      <div key={c.key} className="glass-card p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs text-white/40">{c.label}</span>
-                        </div>
-                        <div className="text-xl font-bold text-white">{c.total} <span className="text-xs text-white/30 font-normal">kcal/day</span></div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px] text-white/30">
-                          <span>BMR {latestBmr}</span>
-                          <span>Training +{c.training}</span>
-                          {c.neat > 0 && <span>NEAT +{c.neat}</span>}
-                          <span>{c.count} sessions</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
+            {/* TDEE moved to Dashboard → Energy Balance card (intake-based, more accurate) */}
 
             {/* Recent sessions */}
             {sessions.length > 0 && (

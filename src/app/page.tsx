@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 
 import { getMeasurements, getSetting, getSettingRemote, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
-import { calcSessionCalories, calcRollingTDEE } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE } from '@/utils/calories';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import Sparkline from '@/components/Sparkline';
@@ -502,6 +502,88 @@ export default function Dashboard() {
                 </div>
               );
             })()}
+
+          {/* Energy Balance — derived TDEE from real intake vs weight change */}
+          {nutritionPlan && measurements.length >= 2 && (() => {
+            const intake = nutritionPlan.current.trainingDay.macros.kcal;
+            const derived = calcDerivedTDEE(measurements, intake, 28);
+            if (!derived) return null;
+
+            const surplusPct = Math.round((derived.surplusKcalPerDay / derived.tdee) * 100);
+            // Phase-aware target ranges: bulk +0.25..+0.5%/wk, cut -0.5..-0.75%/wk
+            const targetMid = phase === 'bulking' ? 0.4 : -0.6;
+            const targetSurplusPct = phase === 'bulking' ? 15 : -15;
+            const recommendedIntake = Math.round(derived.tdee * (1 + targetSurplusPct / 100));
+            const intakeDelta = recommendedIntake - intake;
+
+            // Status: green if rate within ±0.15% of target, amber within ±0.3%, red otherwise
+            const rateDiff = Math.abs(derived.ratePerWeekPct - targetMid);
+            const status = rateDiff < 0.15 ? 'on-target' : rateDiff < 0.3 ? 'slightly-off' : 'off';
+            const statusColor = status === 'on-target' ? '#22c55e' : status === 'slightly-off' ? '#f59e0b' : '#ef4444';
+            const statusLabel = status === 'on-target' ? 'ON TARGET' : status === 'slightly-off' ? 'SLIGHTLY OFF' : 'OFF TARGET';
+
+            const surplusSign = derived.surplusKcalPerDay > 0 ? '+' : '';
+            const rateSign = derived.ratePerWeekPct > 0 ? '+' : '';
+            const deltaSign = intakeDelta > 0 ? '+' : '';
+
+            return (
+              <div className="glass-card p-5 mb-6 fade-up">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-white">Energy Balance</h2>
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: statusColor }}>{statusLabel}</span>
+                </div>
+
+                {/* Headline TDEE */}
+                <div className="mb-4">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-black gradient-text data-value">{derived.tdee.toLocaleString()}</span>
+                    <span className="text-xs text-white/40">kcal/day TDEE</span>
+                  </div>
+                  <p className="text-[10px] text-white/30 mt-1">
+                    derived from {derived.measurementCount} weigh-ins over {derived.daysSpan}d ({derived.weightChangeKg > 0 ? '+' : ''}{derived.weightChangeKg} kg)
+                  </p>
+                </div>
+
+                {/* 3-column stat row */}
+                <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+                  <div>
+                    <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Intake</p>
+                    <p className="text-base font-bold text-white data-value">{intake.toLocaleString()}</p>
+                    <p className="text-[9px] text-white/20">kcal/day</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Surplus</p>
+                    <p className="text-base font-bold data-value" style={{ color: statusColor }}>{surplusSign}{derived.surplusKcalPerDay}</p>
+                    <p className="text-[9px] text-white/20">kcal/day ({surplusSign}{surplusPct}%)</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Pace</p>
+                    <p className="text-base font-bold data-value" style={{ color: statusColor }}>{rateSign}{derived.ratePerWeekPct}%</p>
+                    <p className="text-[9px] text-white/20">BW/week</p>
+                  </div>
+                </div>
+
+                {/* Recommendation */}
+                {status !== 'on-target' && (
+                  <div className="rounded-lg p-3 text-[11px]" style={{ background: `${statusColor}12`, border: `1px solid ${statusColor}30` }}>
+                    <div className="font-semibold mb-1" style={{ color: statusColor }}>
+                      {phase === 'bulking' ? (intakeDelta < 0 ? 'Over-pacing' : 'Under-pacing') : (intakeDelta > 0 ? 'Over-pacing' : 'Under-pacing')}
+                    </div>
+                    <div className="text-white/60">
+                      Target {phase === 'bulking' ? '+' : ''}{targetSurplusPct}% surplus → {targetMid > 0 ? '+' : ''}{targetMid}% BW/week.
+                      Adjust intake to <strong className="text-white">{recommendedIntake.toLocaleString()} kcal/day</strong> ({deltaSign}{intakeDelta}).
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-3 mt-3 border-t border-white/5 text-[10px] text-white/20">
+                  <span>5500 kcal/kg multiplier</span>
+                  <span>•</span>
+                  <span>updates after each weigh-in</span>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Glucose Monitor — Concept 4: Gradient Fill Chart */}
           {glucose?.current && (() => {

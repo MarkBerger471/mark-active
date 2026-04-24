@@ -1,4 +1,4 @@
-import { TrainingSession, NutritionMeal } from '@/types';
+import { TrainingSession, NutritionMeal, Measurement } from '@/types';
 
 const CARDIO_METS: Record<string, number> = {
   'stairmaster': 9.0,
@@ -191,6 +191,58 @@ export function calcWindowTDEE(
   const source = watchDays > ouraDays ? 'apple-watch' : watchDays > 0 ? 'mixed' : 'oura';
 
   return { total: bmr + dailyActivityAvg, training: dailyTraining, neat: Math.max(0, neat), sessions: rollingSessions, source };
+}
+
+/**
+ * Most reliable TDEE estimate: derive from real intake vs measured weight change.
+ *   surplus_kcal_per_day = (weight_change_kg * KCAL_PER_KG) / days
+ *   tdee = avg_intake - surplus_kcal_per_day
+ *
+ * Uses 5500 kcal/kg as a midpoint between pure fat (7700) and muscle-heavy
+ * gain (~3500). Real ratio depends on training quality and surplus size.
+ */
+export function calcDerivedTDEE(
+  measurements: Measurement[],
+  dailyIntakeKcal: number,
+  windowDays: number = 28,
+): {
+  tdee: number;
+  weightChangeKg: number;
+  daysSpan: number;
+  surplusKcalPerDay: number;
+  ratePerWeekPct: number;
+  measurementCount: number;
+} | null {
+  if (!measurements || measurements.length < 2 || !dailyIntakeKcal) return null;
+
+  const KCAL_PER_KG = 5500;
+  const sorted = [...measurements].filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
+  if (sorted.length < 2) return null;
+
+  // Take measurements within the trailing windowDays
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - windowDays);
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+  const window = sorted.filter(m => m.date >= cutoffStr);
+  if (window.length < 2) return null;
+
+  const start = window[0];
+  const end = window[window.length - 1];
+  const daysSpan = Math.max(1, Math.round((new Date(end.date).getTime() - new Date(start.date).getTime()) / 86400000));
+
+  const weightChangeKg = end.weight - start.weight;
+  const surplusKcalPerDay = Math.round((weightChangeKg * KCAL_PER_KG) / daysSpan);
+  const tdee = dailyIntakeKcal - surplusKcalPerDay;
+  const ratePerWeekPct = (weightChangeKg / start.weight) * 100 * 7 / daysSpan;
+
+  return {
+    tdee: Math.round(tdee),
+    weightChangeKg: Math.round(weightChangeKg * 10) / 10,
+    daysSpan,
+    surplusKcalPerDay,
+    ratePerWeekPct: Math.round(ratePerWeekPct * 100) / 100,
+    measurementCount: window.length,
+  };
 }
 
 const CHEAT_MEAL_KCAL = 1300;
