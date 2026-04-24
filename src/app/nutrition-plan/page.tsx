@@ -540,9 +540,8 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
         {nnu && (
           <button onClick={() => { const next = !showNNU; setShowNNU(next); if (next) computeOptimization(); }}
             className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${nnu.nnu >= 95 ? 'bg-green-500/15 text-green-400' : nnu.nnu >= 80 ? 'bg-yellow-500/15 text-yellow-400' : 'bg-red-500/15 text-red-400'}`}>
-            NNU {nnu.nnu}%{nnuWithEAA !== null && nnuWithEAA !== nnu.nnu && (
-              <span className={nnuWithEAA > nnu.nnu ? (isAfterWO ? ' text-amber-400/70' : ' text-cyan-400/70') : ' text-red-400/70'}> → {nnuWithEAA}%</span>
-            )}
+            NNU {nnu.nnu}%
+            <span className={nnuWithEAA != null && nnuWithEAA > nnu.nnu ? (isAfterWO ? ' text-amber-400/70' : ' text-cyan-400/70') : ' text-white/40'}> → {nnuWithEAA != null ? nnuWithEAA : nnu.nnu}%</span>
           </button>
         )}
       </div>
@@ -1273,12 +1272,19 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     saveSetting('macro_targets', JSON.stringify(next));
   };
 
-  // Actual macros — computed in real-time from all meals + EAA supplement (from localStorage)
+  // Actual macros — computed in real-time from all meals + live EAA supplement
+  // (no localStorage read — derived directly from current plan in the NNU calc above)
   const foodMacros = sumMacros(dayPlan.meals);
-  const eaaG = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('eaa_g_per_day') || '0') : 0;
-  const dailyEAAFromStorage: { aa: string; mg: number }[] = typeof window !== 'undefined'
-    ? (() => { try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; } })()
-    : [];
+  const liveDaily = (() => {
+    const isExcluded = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra') || l.includes('after workout'); };
+    const mains = dayPlan.meals.filter(m => !isExcluded(m.name)).map(m => {
+      const items = m.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
+      return items.map(f => ({ name: f.name, amount: f.amount as string }));
+    }).filter(m => m.length > 0);
+    return mains.length > 0 ? calcDailyEAA(mains, undefined, 2) : null;
+  })();
+  const eaaG = liveDaily ? liveDaily.totalPerDay / 1000 : 0;
+  const dailyEAAFromStorage = liveDaily?.perMeal || [];
   const actualMacros = {
     kcal: foodMacros.kcal + Math.round(eaaG * 4),
     protein: foodMacros.protein + Math.round(eaaG),
