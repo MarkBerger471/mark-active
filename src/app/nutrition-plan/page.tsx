@@ -1096,77 +1096,46 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
 }
 
 function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoods: string[] }) {
-  const [daily, setDaily] = useState<ReturnType<typeof calcDailyEAA>>(() => {
-    if (typeof window === 'undefined') return null;
-    try { const s = localStorage.getItem('eaa_daily_result'); return s ? JSON.parse(s) : null; } catch { return null; }
-  });
-  const [computing, setComputing] = useState(false);
-  const [woSupplement, setWoSupplement] = useState<ReturnType<typeof calcIndividualSupplement>>(() => {
-    if (typeof window === 'undefined') return null;
-    try { return JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null'); } catch { return null; }
-  });
-  const lastKeyRef = useRef('');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
+  // Compute daily EAA + after-workout supplement directly from current plan.
+  // No localStorage caching — calcDailyEAA is fast and trusting cached state
+  // caused the panel to lock onto stale 'no supplement needed' even when the
+  // current plan clearly needed supplements (the cache vs recompute race bug).
+  const mainMeals = plan.current.trainingDay.meals
+    .filter(meal => !meal.name.toLowerCase().includes('during workout') && !meal.name.toLowerCase().includes('intra')
+      && !meal.name.toLowerCase().includes('after workout'))
+    .map(meal => {
+      const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
+      return items.map(f => ({ name: f.name, amount: f.amount as string }));
+    }).filter(m => m.length > 0);
+  const daily = mainMeals.length > 0 ? calcDailyEAA(mainMeals, allowedFoods, 2) : null;
+
+  const woMealItems = (() => {
+    const wo = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
+    if (!wo) return [];
+    return wo.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string }));
+  })();
+  const woSupplement = woMealItems.length > 0 ? calcIndividualSupplement(woMealItems, 96) : null;
+
+  // Mirror to localStorage + Firestore so other surfaces stay in sync (e.g. for
+  // cross-device sync of supplement amounts that user might consume).
+  const persistKey = useRef('');
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
+    const sig = JSON.stringify({ d: daily?.totalPerDay, p: daily?.perMeal, w: woSupplement?.totalMg });
+    if (sig === persistKey.current) return;
+    persistKey.current = sig;
+    try {
+      const eaaGStr = String(daily ? daily.totalPerDay / 1000 : 0);
+      localStorage.setItem('eaa_daily_result', JSON.stringify(daily));
+      localStorage.setItem('eaa_g_per_day', eaaGStr);
+      localStorage.setItem('eaa_per_meal', JSON.stringify(daily ? daily.perMeal : []));
+      localStorage.setItem('eaa_wo_supplement', JSON.stringify(woSupplement));
+      saveSetting('eaa_g_per_day', eaaGStr);
+      saveSetting('eaa_per_meal', JSON.stringify(daily ? daily.perMeal : []));
+      saveSetting('eaa_wo_supplement', JSON.stringify(woSupplement));
+    } catch {}
+  }, [daily, woSupplement]);
 
-  const doCompute = () => {
-    if (!mountedRef.current) return;
-    setComputing(true);
-    timerRef.current = setTimeout(() => {
-      if (!mountedRef.current) return;
-      const mainMeals = plan.current.trainingDay.meals
-        .filter(meal => !meal.name.toLowerCase().includes('during workout') && !meal.name.toLowerCase().includes('intra')
-          && !meal.name.toLowerCase().includes('after workout'))
-        .map(meal => {
-          const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
-          return items.map(f => ({ name: f.name, amount: f.amount }));
-        }).filter(m => m.length > 0);
-      const result = mainMeals.length > 0 ? calcDailyEAA(mainMeals, allowedFoods, 2) : null;
-      if (!mountedRef.current) return;
-      setDaily(result);
-
-      const woMeal = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
-      let woResult = null;
-      if (woMeal) {
-        const woFoods = woMeal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount }));
-        if (woFoods.length > 0) woResult = calcIndividualSupplement(woFoods, 96);
-      }
-      if (!mountedRef.current) return;
-      setWoSupplement(woResult);
-      setComputing(false);
-      try {
-        const eaaGStr = String(result ? result.totalPerDay / 1000 : 0);
-        localStorage.setItem('eaa_daily_result', JSON.stringify(result));
-        localStorage.setItem('eaa_g_per_day', eaaGStr);
-        localStorage.setItem('eaa_per_meal', JSON.stringify(result ? result.perMeal : []));
-        localStorage.setItem('eaa_wo_supplement', JSON.stringify(woResult));
-        // Sync critical EAA data to Firestore for cross-device consistency
-        saveSetting('eaa_g_per_day', eaaGStr);
-        saveSetting('eaa_per_meal', JSON.stringify(result ? result.perMeal : []));
-        saveSetting('eaa_wo_supplement', JSON.stringify(woResult));
-      } catch {}
-    }, 100);
-  };
-
-  // Auto-recompute when plan content changes — proper effect, not in render
-  const planKey = JSON.stringify(plan.current.trainingDay.meals.map(m =>
-    m.items.map(it => typeof it === 'string' ? it : `${it.name}|${it.amount}`)
-  ));
-  useEffect(() => {
-    if (planKey === lastKeyRef.current) return;
-    lastKeyRef.current = planKey;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(doCompute, 300);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planKey]);
+  const computing = false;
 
   return (
     <div className="mb-6 glass-card p-5">
