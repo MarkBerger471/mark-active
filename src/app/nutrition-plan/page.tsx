@@ -1276,6 +1276,27 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   // Track which Recommended-macro info popover is open
   const [expandedRec, setExpandedRec] = useState<string | null>(null);
 
+  // EAA supplement data — kept in state so DayPlanView re-renders when it loads
+  // (vs reading localStorage synchronously, which races with the page-level load)
+  const [eaaPerMeal, setEaaPerMeal] = useState<{ aa: string; mg: number }[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; }
+  });
+  const [eaaWO, setEaaWO] = useState<{ aas?: { aa: string; mg: number }[] } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try { return JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null'); } catch { return null; }
+  });
+  useEffect(() => {
+    getSettingRemote('eaa_per_meal').then(v => {
+      if (!v) return;
+      try { const p = JSON.parse(v); setEaaPerMeal(p); localStorage.setItem('eaa_per_meal', v); } catch {}
+    });
+    getSettingRemote('eaa_wo_supplement').then(v => {
+      if (!v) return;
+      try { const p = JSON.parse(v); setEaaWO(p); localStorage.setItem('eaa_wo_supplement', v); } catch {}
+    });
+  }, []);
+
   // Target macros — editable, stored in localStorage + synced via settings
   const [targets, setTargets] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1428,9 +1449,10 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
             const mealNNUs: { nnu: number; protein: number; withEAA: number }[] = [];
             const isAfterWOMeal = (n: string) => n.toLowerCase().includes('after workout');
 
-            // Read EAA supplements from localStorage
-            const avgEAA: { aa: string; mg: number }[] = (() => { try { return JSON.parse(localStorage.getItem('eaa_per_meal') || '[]'); } catch { return []; } })();
-            const woEAA: { aa: string; mg: number }[] = (() => { try { const w = JSON.parse(localStorage.getItem('eaa_wo_supplement') || 'null'); return w?.aas || []; } catch { return []; } })();
+            // EAA supplements come from React state (loaded synchronously from
+            // localStorage initially, then refreshed from Firestore on mount)
+            const avgEAA = eaaPerMeal;
+            const woEAA = eaaWO?.aas || [];
 
             for (const meal of mainMeals) {
               const foods = meal.items.map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } }).filter(it => it.name.trim() && it.amount);
@@ -1460,6 +1482,35 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
             return (
               <>
+                {/* NNU — Net Nitrogen Utilization, the most important quality signal */}
+                {avgNNUFood !== null && (
+                  <div className="mb-3 p-3 rounded-xl bg-gradient-to-br from-cyan-500/[0.08] to-blue-500/[0.04] border border-cyan-500/20">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-semibold text-cyan-300 uppercase tracking-[0.15em]">NNU</div>
+                      <div className="text-[9px] text-white/30">Net Nitrogen Utilization</div>
+                    </div>
+                    <div className="flex items-baseline gap-3 mt-1">
+                      <div className="flex flex-col">
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-black text-white data-value">{avgNNUFood}</span>
+                          <span className="text-sm text-white/40">%</span>
+                        </div>
+                        <span className="text-[9px] text-white/30 uppercase">food only</span>
+                      </div>
+                      <span className="text-2xl text-white/30">→</span>
+                      <div className="flex flex-col">
+                        <div className="flex items-baseline gap-1">
+                          <span className={`text-3xl font-black data-value ${avgNNUWithEAA != null && avgNNUWithEAA > avgNNUFood ? 'text-cyan-300' : 'text-white/60'}`}>
+                            {avgNNUWithEAA != null ? avgNNUWithEAA : avgNNUFood}
+                          </span>
+                          <span className="text-sm text-white/40">%</span>
+                        </div>
+                        <span className="text-[9px] text-white/30 uppercase">with EAA{avgEAA.length === 0 && eaaWO == null ? ' (none configured)' : ''}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Recommended macros — science-based, computed from weight + TDEE + phase */}
                 {recommendedTargets && (
                   <div className="mb-1">
@@ -1586,14 +1637,6 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                 <div className="mb-1">
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-[9px] text-white/20 uppercase tracking-wider">Target <span className="text-white/10">(tap to edit)</span></div>
-                    {avgNNUFood !== null && (
-                      <span className="text-[10px] text-white/25">
-                        NNU <span className="font-bold text-white/40">{avgNNUFood}%</span>
-                        {avgNNUWithEAA !== null && avgNNUWithEAA !== avgNNUFood && (
-                          <span className={avgNNUWithEAA > avgNNUFood ? ' text-cyan-400/60' : ' text-red-400/60'}> → {avgNNUWithEAA}%</span>
-                        )}
-                      </span>
-                    )}
                   </div>
                   <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
                     <MacroTarget label="Kcal" value={targets.kcal} onChange={v => updateTarget('kcal', v)} unit="" color="#b90a0a" />
