@@ -17,12 +17,29 @@ async function logError(reason: string, payload: unknown) {
 
 // POST: iOS Shortcut sends Apple Health data
 export async function POST(request: Request) {
+  // Read raw text first so we can log/return it on parse failure (debug aid)
+  const rawText = await request.text();
+  const ctype = request.headers.get('content-type') || '';
+
   let body: Record<string, unknown> = {};
   try {
-    body = await request.json();
+    body = rawText ? JSON.parse(rawText) : {};
   } catch {
-    await logError('invalid-json', { raw: 'unparseable' });
-    return NextResponse.json({ error: 'Body must be JSON' }, { status: 400 });
+    await logError('invalid-json', { rawText: rawText.slice(0, 2000), ctype });
+    return NextResponse.json({
+      error: 'Body must be JSON',
+      contentType: ctype,
+      gotBytes: rawText.length,
+      preview: rawText.slice(0, 300),
+    }, { status: 400 });
+  }
+  if (!rawText) {
+    await logError('empty-body', { ctype });
+    return NextResponse.json({
+      error: 'Body is empty',
+      contentType: ctype,
+      hint: 'iOS Shortcut: ensure Method=POST and Request Body=JSON with the dictionary attached',
+    }, { status: 400 });
   }
 
   const { secret, date, activeCalories, steps } = body as {
