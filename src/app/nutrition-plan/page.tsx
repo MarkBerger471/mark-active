@@ -1420,16 +1420,19 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
   return (
     <div className="glass-card overflow-hidden p-5">
-          {/* Compute per-meal weighted average NNU — single source of truth.
-              Recompute live from the current plan via calcDailyEAA so this
-              header agrees with the Daily EAA Supplement panel below. */}
+          {/* Whole-day weighted NNU — protein-weighted across ALL real meals.
+              Mains use the daily-avg EAA supplement; After Workout uses its
+              own individual EAA supplement; both are computed live so this
+              header agrees with the per-meal pills and the Daily EAA panel. */}
           {(() => {
-            const isExcludedFromMain = (n: string) => {
+            const isIntraOrEmpty = (n: string) => {
               const l = n.toLowerCase();
-              return l.includes('during workout') || l.includes('intra') || l.includes('after workout');
+              return l.includes('during workout') || l.includes('intra') || l.includes('empty stomach');
             };
+            const isAfterWO = (n: string) => n.toLowerCase().includes('after workout');
+
             const mainFoodsByMeal = dayPlan.meals
-              .filter(m => !isExcludedFromMain(m.name))
+              .filter(m => !isIntraOrEmpty(m.name) && !isAfterWO(m.name))
               .map(meal => meal.items
                 .map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
                 .filter(it => it.name.trim() && it.amount)
@@ -1438,9 +1441,37 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
               .filter(m => m.length > 0);
 
             const dailyEAAResult = mainFoodsByMeal.length > 0 ? calcDailyEAA(mainFoodsByMeal, undefined, 2) : null;
-            const avgNNUFood = dailyEAAResult ? dailyEAAResult.avgNNUBefore : null;
-            const avgNNUWithEAA = dailyEAAResult ? dailyEAAResult.avgNNUAfter : avgNNUFood;
+            const dailyAvgPerMeal = dailyEAAResult?.perMeal || [];
             const supplementGramsPerMeal = dailyEAAResult ? Math.round(dailyEAAResult.totalPerDay / dailyEAAResult.mealCount / 100) / 10 : 0;
+
+            // Compute per-meal NNU (food-only and with-EAA) across ALL real meals
+            // including After Workout (which uses individual EAA via liveWO).
+            let totalProt = 0, weightedFood = 0, weightedEAA = 0;
+            for (const meal of dayPlan.meals) {
+              if (isIntraOrEmpty(meal.name)) continue;
+              const items = meal.items
+                .map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
+                .filter(it => it.name.trim() && it.amount)
+                .map(f => ({ name: f.name, amount: f.amount as string }));
+              if (items.length === 0) continue;
+              const r = calcNNU(items);
+              if (!r || r.totalProtein <= 0) continue;
+              const eaaToAdd = isAfterWO(meal.name) ? (liveWO?.aas || []) : dailyAvgPerMeal;
+              let withEAA = r.nnu;
+              if (eaaToAdd.length > 0) {
+                const p = { ...r.profile };
+                for (const s of eaaToAdd) { const k = s.aa as keyof typeof p; if (p[k] !== undefined) p[k] += s.mg; }
+                const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
+                let minR = Infinity;
+                for (const aa of EAA_ORDER) { const ratio = (p[aa] / t * 100) / MAP[aa]; if (ratio < minR) minR = ratio; }
+                withEAA = Math.round(minR * 1000) / 10;
+              }
+              totalProt += r.totalProtein;
+              weightedFood += r.nnu * r.totalProtein;
+              weightedEAA += withEAA * r.totalProtein;
+            }
+            const avgNNUFood = totalProt > 0 ? Math.round(weightedFood / totalProt * 10) / 10 : null;
+            const avgNNUWithEAA = totalProt > 0 ? Math.round(weightedEAA / totalProt * 10) / 10 : avgNNUFood;
 
             return (
               <>
