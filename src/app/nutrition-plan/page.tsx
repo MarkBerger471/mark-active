@@ -4,9 +4,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Navigation from '@/components/Navigation';
-import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan, getSetting, getSettingRemote, saveSetting, nutritionPlanExistsRemotely } from '@/utils/storage';
-import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem } from '@/types';
+import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan, getSetting, getSettingRemote, saveSetting, nutritionPlanExistsRemotely, getMeasurements } from '@/utils/storage';
+import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem, Measurement } from '@/types';
 import { calcNNU, optimizeMeal, calcDailyEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult } from '@/utils/eaa';
+import { calcDerivedTDEE, calcWeeklyIntake, calcRecommendedMacros } from '@/utils/calories';
+
+type Phase = 'bulking' | 'cutting';
 
 // Nutrition database: values per 100g
 const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
@@ -1256,7 +1259,7 @@ function MacroTarget({ label, value, onChange, unit, color }: { label: string; v
   );
 }
 
-function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, allowedFoods, onSaveOptimizedMeal }: {
+function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, allowedFoods, onSaveOptimizedMeal, recommendedTargets }: {
   dayPlan: DayPlan;
   title: string;
   color: string;
@@ -1268,6 +1271,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   onCancel: () => void;
   editPlan: DayPlan | null;
   setEditPlan: (p: DayPlan) => void;
+  recommendedTargets?: { kcal: number; protein: number; carbs: number; fat: number } | null;
 }) {
   // Target macros — editable, stored in localStorage + synced via settings
   const [targets, setTargets] = useState(() => {
@@ -1453,6 +1457,43 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
             return (
               <>
+                {/* Recommended macros — science-based, computed from weight + TDEE + phase */}
+                {recommendedTargets && (
+                  <div className="mb-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-[9px] text-cyan-400/40 uppercase tracking-wider">
+                        Recommended <span className="text-white/20 normal-case tracking-normal">— science-based</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-cyan-500/[0.04] border border-cyan-500/10">
+                      {[
+                        { label: 'Kcal', val: recommendedTargets.kcal, current: targets.kcal, unit: '', color: '#b90a0a' },
+                        { label: 'Protein', val: recommendedTargets.protein, current: targets.protein, unit: 'g', color: '#3b82f6' },
+                        { label: 'Carbs', val: recommendedTargets.carbs, current: targets.carbs, unit: 'g', color: '#f59e0b' },
+                        { label: 'Fat', val: recommendedTargets.fat, current: targets.fat, unit: 'g', color: '#10b981' },
+                      ].map(m => {
+                        const delta = m.current - m.val;
+                        const matched = Math.abs(delta) <= (m.label === 'Kcal' ? 50 : 5);
+                        return (
+                          <div key={m.label}>
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                              <span className="text-xs text-white/40">{m.label}</span>
+                              <span className="text-sm font-bold text-white">{m.val}</span>
+                              <span className="text-[10px] text-white/30">{m.unit}</span>
+                            </div>
+                            {!matched && (
+                              <div className={`text-[9px] ml-4 ${delta > 0 ? 'text-green-400/60' : 'text-yellow-400/60'}`}>
+                                target {delta > 0 ? '−' : '+'}{Math.abs(delta)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Target macros — editable */}
                 <div className="mb-1">
                   <div className="flex items-center justify-between mb-1">
@@ -1652,6 +1693,8 @@ export default function NutritionPlanPage() {
   const [editingDay, setEditingDay] = useState<'training' | 'rest' | null>(null);
   const [editPlan, setEditPlan] = useState<DayPlan | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [phase, setPhase] = useState<Phase>('bulking');
   // EAA data read from localStorage (written by DailyEAAPanel, no re-render loop)
   const [showFoodPrefs, setShowFoodPrefs] = useState(false);
   const [allowedFoods, setAllowedFoods] = useState<string[]>(() => {
@@ -1685,6 +1728,10 @@ export default function NutritionPlanPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
+      // Load measurements + phase for recommended-macros calculation
+      getMeasurements().then(setMeasurements);
+      getSetting('phase').then(v => { if (v === 'bulking' || v === 'cutting') setPhase(v); });
+
       // Load EAA data from Firestore if not in localStorage
       if (typeof window !== 'undefined' && !localStorage.getItem('eaa_g_per_day')) {
         getSetting('eaa_g_per_day').then(v => { if (v) localStorage.setItem('eaa_g_per_day', v); });
@@ -1815,6 +1862,13 @@ export default function NutritionPlanPage() {
 
   if (!plan) return null;
 
+  // Science-based recommended macros — same TDEE math as Energy Balance card
+  const latestWeight = measurements.length > 0 ? measurements[measurements.length - 1].weight : null;
+  const dailyPlanKcal = plan.current.trainingDay.macros.kcal;
+  const wkIntake = calcWeeklyIntake(dailyPlanKcal, plan.current.trainingDay.meals).weeklyAvgKcal;
+  const derived = measurements.length >= 2 ? calcDerivedTDEE(measurements, wkIntake, 28) : null;
+  const recommended = (latestWeight && derived) ? calcRecommendedMacros(latestWeight, derived.tdee, phase) : null;
+
   return (
     <div className="min-h-screen">
       <Navigation />
@@ -1836,6 +1890,7 @@ export default function NutritionPlanPage() {
               setEditPlan={setEditPlan}
               allowedFoods={allowedFoods}
               onSaveOptimizedMeal={saveOptimizedMeal}
+              recommendedTargets={recommended}
             />
           </div>
 

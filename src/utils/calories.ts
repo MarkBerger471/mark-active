@@ -300,6 +300,36 @@ export function calcDerivedTDEE(
   };
 }
 
+/**
+ * Science-based macro recommendation given bodyweight, TDEE estimate, and phase.
+ *
+ * Sources:
+ *  - Protein: ISSN position stand, Schoenfeld 2018, Helms (MASS) — 1.6-2.4 g/kg,
+ *    upper end for trained / TRT users. Use 2.25 for bulk, 2.4 for cut.
+ *  - Fat: Lyle McDonald, Andy Galpin — 0.8-1.0 g/kg minimum for hormonal health.
+ *    Express as % of total kcal so it tracks intake (25% bulk, 30% cut).
+ *  - Surplus: Helms MASS, Israetel RP — +10-20% bulk, -15-25% cut.
+ *  - Carbs: remainder. Drives training performance.
+ */
+export function calcRecommendedMacros(
+  bodyWeightKg: number,
+  tdeeKcal: number,
+  phase: 'bulking' | 'cutting',
+): { kcal: number; protein: number; carbs: number; fat: number } {
+  const surplusPct = phase === 'bulking' ? 0.15 : -0.20;
+  const kcal = Math.round((tdeeKcal * (1 + surplusPct)) / 50) * 50; // round to nearest 50
+
+  const proteinPerKg = phase === 'bulking' ? 2.25 : 2.4;
+  const protein = Math.round(bodyWeightKg * proteinPerKg);
+
+  const fatPctOfKcal = phase === 'bulking' ? 0.25 : 0.30;
+  const fat = Math.round((kcal * fatPctOfKcal) / 9);
+
+  const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+
+  return { kcal, protein, carbs, fat };
+}
+
 const CHEAT_MEAL_KCAL = 1300;
 
 // Per-100g kcal for computing last meal calories (subset of FOOD_DB)
