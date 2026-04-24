@@ -2003,7 +2003,24 @@ export default function NutritionPlanPage() {
 
   // Science-based recommended macros — same TDEE math as Energy Balance card
   const latestWeight = measurements.length > 0 ? measurements[measurements.length - 1].weight : null;
-  const dailyPlanKcal = plan.current.trainingDay.macros.kcal;
+  // Compute live intake from items + macro-bearing supplements + daily EAA
+  // (avoids the stored plan.macros header which can go stale between edits).
+  const foodSum = sumMacros(plan.current.trainingDay.meals);
+  const isExcludedFromEAA = (n: string) => {
+    const l = n.toLowerCase();
+    return l.includes('during workout') || l.includes('intra') || l.includes('after workout');
+  };
+  const mainsForEAA = plan.current.trainingDay.meals
+    .filter(m => !isExcludedFromEAA(m.name))
+    .map(meal => meal.items
+      .map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
+      .filter(it => it.name.trim() && it.amount)
+      .map(f => ({ name: f.name, amount: f.amount as string }))
+    )
+    .filter(m => m.length > 0);
+  const liveDailyEAA = mainsForEAA.length > 0 ? calcDailyEAA(mainsForEAA, undefined, 2) : null;
+  const eaaDailyKcal = liveDailyEAA ? Math.round(liveDailyEAA.totalPerDay * 4 / 1000) : 0;
+  const dailyPlanKcal = foodSum.kcal + eaaDailyKcal;
   const wkIntake = calcWeeklyIntake(dailyPlanKcal, plan.current.trainingDay.meals).weeklyAvgKcal;
   const derived = measurements.length >= 2 ? calcDerivedTDEE(measurements, wkIntake, 28) : null;
   const recommended = (latestWeight && derived) ? calcRecommendedMacros(latestWeight, derived.tdee, phase) : null;
