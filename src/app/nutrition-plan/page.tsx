@@ -54,8 +54,9 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'pasta dry': { kcal: 371, protein: 13, carbs: 74, fat: 1.5 },
   'dry pasta': { kcal: 371, protein: 13, carbs: 74, fat: 1.5 },
   'bread': { kcal: 265, protein: 9, carbs: 49, fat: 3.2 },
-  'rye bread': { kcal: 259, protein: 8.5, carbs: 48, fat: 3.3 },
-  'whole rye bread': { kcal: 259, protein: 8.5, carbs: 48, fat: 3.3 },
+  // Mark's homemade whole-grain rye bread — values confirmed by him 2026-04-24
+  'rye bread': { kcal: 200, protein: 2, carbs: 30, fat: 0 },
+  'whole rye bread': { kcal: 200, protein: 2, carbs: 30, fat: 0 },
   'sweet potato': { kcal: 86, protein: 1.6, carbs: 20, fat: 0.1 },
   'potato': { kcal: 77, protein: 2, carbs: 17, fat: 0.1 },
   'broccoli': { kcal: 34, protein: 2.8, carbs: 7, fat: 0.4 },
@@ -83,7 +84,7 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'maltodextrin': { kcal: 380, protein: 0, carbs: 95, fat: 0 },
   'cluster dextrin': { kcal: 380, protein: 0, carbs: 95, fat: 0 },
   // Seeds & nuts (from EAA DB)
-  'pumpkin seeds': { kcal: 559, protein: 30, carbs: 5, fat: 49 },
+  'pumpkin seeds': { kcal: 559, protein: 30, carbs: 11, fat: 49 },
   'sunflower seeds': { kcal: 584, protein: 21, carbs: 20, fat: 51 },
   'hemp seeds': { kcal: 553, protein: 32, carbs: 2.7, fat: 49 },
   'chia seeds': { kcal: 486, protein: 17, carbs: 42, fat: 31 },
