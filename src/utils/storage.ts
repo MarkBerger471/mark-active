@@ -371,11 +371,23 @@ export async function saveTrainingSession(session: TrainingSession) {
   const now = new Date().toISOString();
   const today = now.split('T')[0];
 
+  // Cardio is wallclock-immune: durations are user-entered only (manual edit
+  // via pencil icon). Auto-compute would balloon if the cardio session is
+  // left open in the app. Preserve whatever value is already present.
+  const isCardio = session.workoutName === 'Cardio';
+  // Cap auto-computed wallclock at 4h — catches "left it open overnight".
+  const GYM_DURATION_CAP = 240;
+
   if (existing) {
     // Preserve startedAt (first save time)
     session.startedAt = existing.startedAt || existing.savedAt || now;
 
-    if (session.manualDuration) {
+    if (isCardio) {
+      // Cardio: never auto-compute. Keep existing value unless explicitly set.
+      session.savedAt = session.date < today ? (existing.savedAt || now) : now;
+      if (session.durationMinutes == null) session.durationMinutes = existing.durationMinutes;
+      if (existing.manualDuration) session.manualDuration = true;
+    } else if (session.manualDuration) {
       // User manually set duration — preserve it, only update savedAt for past days
       session.savedAt = session.date < today ? (existing.savedAt || now) : now;
     } else if (existing.manualDuration) {
@@ -391,17 +403,17 @@ export async function saveTrainingSession(session: TrainingSession) {
       // Past day + not yet frozen — freeze now
       session.savedAt = existing.savedAt || now;
       const dur = Math.round((new Date(session.savedAt).getTime() - new Date(session.startedAt).getTime()) / 60000);
-      session.durationMinutes = Math.max(dur, 0);
+      session.durationMinutes = Math.min(Math.max(dur, 0), GYM_DURATION_CAP);
     } else {
       // Same day, still in progress — update savedAt and live duration
       session.savedAt = now;
       const dur = Math.round((new Date(now).getTime() - new Date(session.startedAt).getTime()) / 60000);
-      session.durationMinutes = Math.max(dur, 0);
+      session.durationMinutes = Math.min(Math.max(dur, 0), GYM_DURATION_CAP);
     }
   } else {
     session.startedAt = session.startedAt || now;
     session.savedAt = now;
-    session.durationMinutes = 0;
+    if (!isCardio) session.durationMinutes = 0;
   }
 
   (session as TrainingSession & { lastModified?: number }).lastModified = Date.now();
