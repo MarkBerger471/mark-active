@@ -194,17 +194,17 @@ export function calcWindowTDEE(
 }
 
 /**
- * Most reliable TDEE estimate: derive from real intake vs measured weight change.
+ * TDEE from real intake vs measured weight change.
  *
- *   surplus_kcal = lean_change_kg * 1800 + fat_change_kg * 7700
+ *   surplus_kcal = weight_change_kg * 5500
  *   tdee = avg_intake - surplus_kcal / days
  *
- * When BF% is available at both ends of the window, split weight change into
- * lean/fat and apply the tissue-specific energy cost. Otherwise fall back to
- * a 5500 kcal/kg mixed multiplier.
+ * Uses a fixed 5500 kcal/kg "mixed gain" multiplier. Tried a BF%-personalized
+ * version (lean×1800 + fat×7700) but BIA-scale noise (±0.5pp) inflates lean
+ * change and produces unstable TDEE estimates on short windows. Mixed is the
+ * conservative, coach-standard choice.
  *
- * BIA scales are noisy (±0.5pp), so the start/end BF% are averaged across the
- * nearest 3 readings for robustness.
+ * When BF% is available we still return lean/fat change numbers for display.
  */
 export function calcDerivedTDEE(
   measurements: Measurement[],
@@ -266,11 +266,13 @@ export function calcDerivedTDEE(
   const startBf = avgBfNear(startIdx);
   const endBf = avgBfNear(endIdx);
 
-  let surplusKcal: number;
-  let method: 'personalized' | 'mixed' = 'mixed';
+  // Always use 5500 kcal/kg mixed multiplier for the TDEE number itself.
+  // Personalized BF%-based calc is unreliable on short windows due to BIA noise.
+  const surplusKcal: number = weightChangeKg * KCAL_PER_KG_MIXED;
+  const method: 'personalized' | 'mixed' = 'mixed';
+  // Still compute lean/fat change for display (informational only)
   let leanChangeKg: number | undefined;
   let fatChangeKg: number | undefined;
-
   if (startBf != null && endBf != null) {
     const startFat = start.weight * (startBf / 100);
     const endFat = end.weight * (endBf / 100);
@@ -278,11 +280,8 @@ export function calcDerivedTDEE(
     const endLean = end.weight - endFat;
     leanChangeKg = endLean - startLean;
     fatChangeKg = endFat - startFat;
-    surplusKcal = leanChangeKg * KCAL_PER_KG_LEAN + fatChangeKg * KCAL_PER_KG_FAT;
-    method = 'personalized';
-  } else {
-    surplusKcal = weightChangeKg * KCAL_PER_KG_MIXED;
   }
+  void KCAL_PER_KG_LEAN; void KCAL_PER_KG_FAT; // constants kept for reference
 
   const surplusKcalPerDay = Math.round(surplusKcal / daysSpan);
   const tdee = dailyIntakeKcal - surplusKcalPerDay;
@@ -319,7 +318,11 @@ export function calcRecommendedMacros(
   const surplusPct = phase === 'bulking' ? 0.15 : -0.20;
   const kcal = Math.round((tdeeKcal * (1 + surplusPct)) / 50) * 50; // round to nearest 50
 
-  const proteinPerKg = phase === 'bulking' ? 2.25 : 2.4;
+  // Bulk protein dropped from 2.25 → 2.0 g/kg because Mark's optimized EAA
+  // supplementation puts whole-day NNU at ~92%. Above 1.8-2.0 g/kg with that
+  // quality, additional protein is oxidized — better spent on carbs/fat.
+  // Cut keeps 2.4 g/kg (tighter muscle preservation window).
+  const proteinPerKg = phase === 'bulking' ? 2.0 : 2.4;
   const protein = Math.round(bodyWeightKg * proteinPerKg);
 
   const fatPctOfKcal = phase === 'bulking' ? 0.25 : 0.30;
