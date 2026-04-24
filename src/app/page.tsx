@@ -337,6 +337,12 @@ export default function Dashboard() {
                 activitySource = tdee.source;
                 try { localStorage.setItem('nb_cache', JSON.stringify({ key: nbCacheKey, burn: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat, source: activitySource })); } catch {}
               }
+              // Derived TDEE (intake-based) — same source as Energy Balance card.
+              // Falls back to burn estimate if not enough measurements yet.
+              const wkIntake = calcWeeklyIntake(dailyKcal, nutritionPlan!.current.trainingDay.meals).weeklyAvgKcal;
+              const derived = calcDerivedTDEE(measurements, wkIntake, 28);
+              const tdeeForTarget = derived ? derived.tdee : dailyBurn;
+
               const weekSessions = trainingSessions.filter(s => {
                 const d = new Date(); d.setDate(d.getDate() - 6);
                 return s.date >= d.toISOString().split('T')[0];
@@ -365,7 +371,7 @@ export default function Dashboard() {
               const pGreenEndAngle = ((pGreenHigh - pGaugeMin) / (pGaugeMax - pGaugeMin)) * 270;
               const pGreenArcLen = ((pGreenEndAngle - pGreenStartAngle) / 360) * pGaugeCirc;
 
-              const ratio = intake / dailyBurn;
+              const ratio = intake / tdeeForTarget;
               const targetRatio = phase === 'bulking' ? 1.15 : 0.85; // +15% or -15%
               const diff = ratio - targetRatio;
               const absDiff = Math.abs(diff);
@@ -373,17 +379,17 @@ export default function Dashboard() {
               // Green: within ±2% of target, Yellow: ±2-5%, Red: beyond ±5%
               const zoneColor = absDiff <= 0.05 ? '#22c55e' : absDiff <= 0.10 ? '#f59e0b' : '#ef4444';
               const zoneLabel = absDiff <= 0.05 ? 'On Target' : absDiff <= 0.10 ? 'Slightly Off' : 'Off Target';
-              const surplusDeficit = intake - dailyBurn;
+              const surplusDeficit = intake - tdeeForTarget;
               const surplusPct = Math.round((ratio - 1) * 100);
 
               // Bar heights (normalized)
-              const maxVal = Math.max(intake, dailyBurn);
-              const burnPct = (dailyBurn / maxVal) * 100;
+              const maxVal = Math.max(intake, tdeeForTarget);
+              const burnPct = (tdeeForTarget / maxVal) * 100;
               const intakePct = (intake / maxVal) * 100;
 
               // Gauge: centered on target midpoint
               const targetMid = phase === 'bulking' ? 15 : -15;
-              const targetIntake = Math.round(dailyBurn * (1 + targetMid / 100));
+              const targetIntake = Math.round(tdeeForTarget * (1 + targetMid / 100));
               const distFromTarget = surplusPct - targetMid;
               // Wider range so large deviations show clearly
               const gaugeMin = -20, gaugeMax = 20;
@@ -402,8 +408,8 @@ export default function Dashboard() {
 
               // Bar chart dimensions
               const barH = 80;
-              const calMax = Math.max(intake, dailyBurn, targetIntake) * 1.05;
-              const burnH = (dailyBurn / calMax) * barH;
+              const calMax = Math.max(intake, tdeeForTarget, targetIntake) * 1.05;
+              const burnH = (tdeeForTarget / calMax) * barH;
               const intakeH = (intake / calMax) * barH;
               const targetH = (targetIntake / calMax) * barH;
 
@@ -471,7 +477,7 @@ export default function Dashboard() {
                       <div className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-white/40" style={{ left: `${calTargetMarkerPct}%` }} />
                     </div>
                     <div className="flex justify-between text-[9px] text-white/20 mt-1">
-                      <span>Burn: {dailyBurn}</span>
+                      <span>TDEE: {tdeeForTarget}{derived ? '' : ' (est.)'}</span>
                       <span>{surplusDeficit > 0 ? '+' : ''}{surplusDeficit} surplus</span>
                     </div>
                   </div>
