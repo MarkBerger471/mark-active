@@ -529,6 +529,9 @@ export default function Dashboard() {
             const surplusSign = derived.surplusKcalPerDay > 0 ? '+' : '';
             const rateSign = derived.ratePerWeekPct > 0 ? '+' : '';
             const deltaSign = intakeDelta > 0 ? '+' : '';
+            const targetSurplusKcal = Math.round(derived.tdee * (targetSurplusPct / 100));
+            const tgtSurplusSign = targetSurplusKcal > 0 ? '+' : '';
+            const tgtRateSign = targetMid > 0 ? '+' : '';
 
             return (
               <div className="glass-card p-5 mb-6 fade-up">
@@ -554,16 +557,19 @@ export default function Dashboard() {
                     <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Intake</p>
                     <p className="text-base font-bold text-white data-value">{intake.toLocaleString()}</p>
                     <p className="text-[9px] text-white/20">kcal/day avg</p>
+                    <p className="text-[9px] text-white/30 mt-0.5">target {recommendedIntake.toLocaleString()}</p>
                   </div>
                   <div>
                     <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Surplus</p>
                     <p className="text-base font-bold data-value" style={{ color: statusColor }}>{surplusSign}{derived.surplusKcalPerDay}</p>
                     <p className="text-[9px] text-white/20">kcal/day ({surplusSign}{surplusPct}%)</p>
+                    <p className="text-[9px] text-white/30 mt-0.5">target {tgtSurplusSign}{targetSurplusKcal} ({tgtSurplusSign}{targetSurplusPct}%)</p>
                   </div>
                   <div>
                     <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Pace</p>
                     <p className="text-base font-bold data-value" style={{ color: statusColor }}>{rateSign}{derived.ratePerWeekPct}%</p>
                     <p className="text-[9px] text-white/20">BW/week</p>
+                    <p className="text-[9px] text-white/30 mt-0.5">target {tgtRateSign}{targetMid}%</p>
                   </div>
                 </div>
 
