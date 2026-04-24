@@ -195,11 +195,16 @@ export function calcWindowTDEE(
 
 /**
  * Most reliable TDEE estimate: derive from real intake vs measured weight change.
- *   surplus_kcal_per_day = (weight_change_kg * KCAL_PER_KG) / days
- *   tdee = avg_intake - surplus_kcal_per_day
  *
- * Uses 5500 kcal/kg as a midpoint between pure fat (7700) and muscle-heavy
- * gain (~3500). Real ratio depends on training quality and surplus size.
+ *   surplus_kcal = lean_change_kg * 1800 + fat_change_kg * 7700
+ *   tdee = avg_intake - surplus_kcal / days
+ *
+ * When BF% is available at both ends of the window, split weight change into
+ * lean/fat and apply the tissue-specific energy cost. Otherwise fall back to
+ * a 5500 kcal/kg mixed multiplier.
+ *
+ * BIA scales are noisy (±0.5pp), so the start/end BF% are averaged across the
+ * nearest 3 readings for robustness.
  */
 export function calcDerivedTDEE(
   measurements: Measurement[],
@@ -212,14 +217,20 @@ export function calcDerivedTDEE(
   surplusKcalPerDay: number;
   ratePerWeekPct: number;
   measurementCount: number;
+  leanChangeKg?: number;
+  fatChangeKg?: number;
+  method: 'personalized' | 'mixed';
 } | null {
   if (!measurements || measurements.length < 2 || !dailyIntakeKcal) return null;
 
-  const KCAL_PER_KG = 5500;
+  const KCAL_PER_KG_MIXED = 5500;
+  const KCAL_PER_KG_LEAN = 1800;
+  const KCAL_PER_KG_FAT = 7700;
+
   const sorted = [...measurements].filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
   if (sorted.length < 2) return null;
 
-  // Take measurements within the trailing windowDays
+  // Trailing window
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - windowDays);
   const cutoffStr = cutoff.toISOString().split('T')[0];
@@ -229,11 +240,52 @@ export function calcDerivedTDEE(
   const start = window[0];
   const end = window[window.length - 1];
   const daysSpan = Math.max(1, Math.round((new Date(end.date).getTime() - new Date(start.date).getTime()) / 86400000));
-
   const weightChangeKg = end.weight - start.weight;
-  const surplusKcalPerDay = Math.round((weightChangeKg * KCAL_PER_KG) / daysSpan);
-  const tdee = dailyIntakeKcal - surplusKcalPerDay;
   const ratePerWeekPct = (weightChangeKg / start.weight) * 100 * 7 / daysSpan;
+
+  // Smoothed BF% at each window end: average the nearest 3 measurements.
+  // Looks in the full sorted list, not just the window, so the smoothing
+  // window can reach back before the cutoff when data is sparse.
+  const avgBfNear = (index: number): number | null => {
+    const nearby: number[] = [];
+    // Walk outward from the target index, collect up to 3 BF% readings
+    for (let offset = 0; offset < sorted.length && nearby.length < 3; offset++) {
+      for (const i of offset === 0 ? [index] : [index - offset, index + offset]) {
+        if (i < 0 || i >= sorted.length) continue;
+        const bf = sorted[i].bodyFat;
+        if (bf != null && bf > 0) nearby.push(bf);
+        if (nearby.length >= 3) break;
+      }
+    }
+    if (nearby.length === 0) return null;
+    return nearby.reduce((s, v) => s + v, 0) / nearby.length;
+  };
+
+  const startIdx = sorted.findIndex(m => m.date === start.date);
+  const endIdx = sorted.findIndex(m => m.date === end.date);
+  const startBf = avgBfNear(startIdx);
+  const endBf = avgBfNear(endIdx);
+
+  let surplusKcal: number;
+  let method: 'personalized' | 'mixed' = 'mixed';
+  let leanChangeKg: number | undefined;
+  let fatChangeKg: number | undefined;
+
+  if (startBf != null && endBf != null) {
+    const startFat = start.weight * (startBf / 100);
+    const endFat = end.weight * (endBf / 100);
+    const startLean = start.weight - startFat;
+    const endLean = end.weight - endFat;
+    leanChangeKg = endLean - startLean;
+    fatChangeKg = endFat - startFat;
+    surplusKcal = leanChangeKg * KCAL_PER_KG_LEAN + fatChangeKg * KCAL_PER_KG_FAT;
+    method = 'personalized';
+  } else {
+    surplusKcal = weightChangeKg * KCAL_PER_KG_MIXED;
+  }
+
+  const surplusKcalPerDay = Math.round(surplusKcal / daysSpan);
+  const tdee = dailyIntakeKcal - surplusKcalPerDay;
 
   return {
     tdee: Math.round(tdee),
@@ -242,6 +294,9 @@ export function calcDerivedTDEE(
     surplusKcalPerDay,
     ratePerWeekPct: Math.round(ratePerWeekPct * 100) / 100,
     measurementCount: window.length,
+    leanChangeKg: leanChangeKg != null ? Math.round(leanChangeKg * 10) / 10 : undefined,
+    fatChangeKg: fatChangeKg != null ? Math.round(fatChangeKg * 10) / 10 : undefined,
+    method,
   };
 }
 

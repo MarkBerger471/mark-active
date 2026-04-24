@@ -376,9 +376,9 @@ export default function Dashboard() {
               const diff = ratio - targetRatio;
               const absDiff = Math.abs(diff);
 
-              // Green: within ±2% of target, Yellow: ±2-5%, Red: beyond ±5%
-              const zoneColor = absDiff <= 0.05 ? '#22c55e' : absDiff <= 0.10 ? '#f59e0b' : '#ef4444';
-              const zoneLabel = absDiff <= 0.05 ? 'On Target' : absDiff <= 0.10 ? 'Slightly Off' : 'Off Target';
+              // Green: within ±2pp of target, Yellow: ±2-5pp, Red: beyond ±5pp
+              const zoneColor = absDiff <= 0.02 ? '#22c55e' : absDiff <= 0.05 ? '#f59e0b' : '#ef4444';
+              const zoneLabel = absDiff <= 0.02 ? 'On Target' : absDiff <= 0.05 ? 'Slightly Off' : 'Off Target';
               const surplusDeficit = intake - tdeeForTarget;
               const surplusPct = Math.round((ratio - 1) * 100);
 
@@ -595,7 +595,13 @@ export default function Dashboard() {
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-3 mt-3 border-t border-white/5 text-[10px] text-white/20">
                   <span>plan {dailyPlanKcal.toLocaleString()} + Sun cheat {cheatDiff > 0 ? '+' : ''}{cheatDiff} = {intake.toLocaleString()}/day</span>
                   <span>•</span>
-                  <span>5500 kcal/kg</span>
+                  {derived.method === 'personalized' && derived.leanChangeKg != null && derived.fatChangeKg != null ? (
+                    <span>
+                      lean {derived.leanChangeKg > 0 ? '+' : ''}{derived.leanChangeKg}kg / fat {derived.fatChangeKg > 0 ? '+' : ''}{derived.fatChangeKg}kg
+                    </span>
+                  ) : (
+                    <span>5500 kcal/kg</span>
+                  )}
                   <span>•</span>
                   <span>updates after each weigh-in</span>
                 </div>

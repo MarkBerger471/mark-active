@@ -667,7 +667,16 @@ export default function TrainingPlanPage() {
                               } else {
                                 const sets = doneExercises.reduce((n, ex) => n + ex.sets.length, 0);
                                 const exCount = doneExercises.length;
-                                if (sets > 0) return <span className="text-xs text-blue-400/40 ml-2">~{Math.round(sets * 3.2 + exCount * 3)} min</span>;
+                                if (sets > 0) {
+                                  const estimate = Math.round(sets * 3.2 + exCount * 3);
+                                  return (
+                                    <span
+                                      className="text-xs text-blue-400/40 ml-2 cursor-pointer hover:text-blue-400 transition-colors"
+                                      onClick={e => { e.stopPropagation(); setEditingDuration(s.id); setDurationInput(String(estimate)); }}
+                                      title="Click to edit duration"
+                                    >~{estimate} min</span>
+                                  );
+                                }
                               }
                               return null;
                             })()}
