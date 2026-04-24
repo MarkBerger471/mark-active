@@ -1520,6 +1520,16 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                             <div className="mb-2">
                               <strong className="text-white">{recommendedTargets.protein} g/day</strong> = bodyweight × 2.25 g/kg. Range 1.6–2.4 g/kg covers nearly all muscle-building outcomes; upper-end favoured for trained lifters and TRT users (slightly elevated MPS resistance). Distributed evenly across 4–5 meals at ~0.4 g/kg each maximizes the MPS pulse.
                             </div>
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <div className="rounded p-2 bg-yellow-500/10 border border-yellow-500/20">
+                                <div className="text-[10px] font-semibold text-yellow-400 mb-0.5">Under-eating ⤓</div>
+                                <div className="text-[10px] text-white/60">Reduced MPS, slower recovery, real muscle loss in a deficit, blunted training adaptation, lower satiety leading to overeating other macros.</div>
+                              </div>
+                              <div className="rounded p-2 bg-orange-500/10 border border-orange-500/20">
+                                <div className="text-[10px] font-semibold text-orange-400 mb-0.5">Over-eating ⤒</div>
+                                <div className="text-[10px] text-white/60">Largely harmless for healthy kidneys, but crowds out carbs (performance) and fat (hormones). Wasted protein gets oxidized — it&apos;s just expensive calories.</div>
+                              </div>
+                            </div>
                             <div className="text-white/40 text-[10px]">
                               <strong className="text-white/60">Sources:</strong> Jäger et al. <em>ISSN Position Stand: Protein and exercise</em> (J Int Soc Sports Nutr, 2017) · Schoenfeld & Aragon, <em>How much protein can the body use in a single meal</em> (J Int Soc Sports Nutr, 2018) · Morton et al. meta-analysis (Br J Sports Med, 2018).
                             </div>
@@ -1531,6 +1541,16 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                             <div className="mb-2">
                               <strong className="text-white">{recommendedTargets.carbs} g/day</strong> = (kcal − protein·4 − fat·9) / 4. No fixed g/kg needed once protein and fat floors are met. Higher carbs drive training performance, glycogen replenishment, and insulin/IGF-1 response — all anabolic signals during a bulk.
                             </div>
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <div className="rounded p-2 bg-yellow-500/10 border border-yellow-500/20">
+                                <div className="text-[10px] font-semibold text-yellow-400 mb-0.5">Under-eating ⤓</div>
+                                <div className="text-[10px] text-white/60">Depleted glycogen → weak training, reduced power output, elevated cortisol, blunted IGF-1/mTOR signaling. Sleep can suffer at very low intakes. Thyroid output drops if chronic.</div>
+                              </div>
+                              <div className="rounded p-2 bg-orange-500/10 border border-orange-500/20">
+                                <div className="text-[10px] font-semibold text-orange-400 mb-0.5">Over-eating ⤒</div>
+                                <div className="text-[10px] text-white/60">Surplus carbs in excess of glycogen capacity get converted to fat (slowly, but it adds up). Glucose excursions stress the CGM / pancreas. Can crowd out fat → hormonal cost.</div>
+                              </div>
+                            </div>
                             <div className="text-white/40 text-[10px]">
                               <strong className="text-white/60">Sources:</strong> Burke et al. <em>Carbohydrates for training and competition</em> (J Sports Sci, 2011) · Vandenbogaerde & Hopkins meta-analysis on CHO and endurance/strength performance (Sports Med, 2011) · Helms (MASS).
                             </div>
@@ -1541,6 +1561,16 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                             <div className="font-semibold text-cyan-300 mb-1">Fat — 25% of total kcal</div>
                             <div className="mb-2">
                               <strong className="text-white">{recommendedTargets.fat} g/day</strong> = 25% of total kcal ÷ 9. Floor is 0.8–1.0 g/kg bodyweight to keep testosterone, recovery, and absorption of fat-soluble vitamins (A, D, E, K) intact. Going below this floor consistently degrades hormonal markers.
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <div className="rounded p-2 bg-yellow-500/10 border border-yellow-500/20">
+                                <div className="text-[10px] font-semibold text-yellow-400 mb-0.5">Under-eating ⤓</div>
+                                <div className="text-[10px] text-white/60">Testosterone drops 10–15% (relevant even on TRT — affects free T metabolism). Poor absorption of vitamins A/D/E/K. Dry skin, joint stiffness, lower satiety, longer post-workout recovery.</div>
+                              </div>
+                              <div className="rounded p-2 bg-orange-500/10 border border-orange-500/20">
+                                <div className="text-[10px] font-semibold text-orange-400 mb-0.5">Over-eating ⤒</div>
+                                <div className="text-[10px] text-white/60">No acute harm — fat is the most calorie-dense macro so easy to over-shoot kcal. Crowds out carbs (performance) and protein (recovery). High-saturated diets long-term can shift lipid profile.</div>
+                              </div>
                             </div>
                             <div className="text-white/40 text-[10px]">
                               <strong className="text-white/60">Sources:</strong> Volek et al. <em>Testosterone and cortisol response to dietary fat</em> (J Appl Physiol, 1997) · Lyle McDonald, <em>The Stubborn Fat Solution</em> + <em>Body Recomposition</em> · Andy Galpin lectures on hormonal effects of low-fat diets.
