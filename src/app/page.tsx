@@ -609,6 +609,126 @@ export default function Dashboard() {
             );
           })()}
 
+          {/* Bulk Health — bulking-phase KPIs (sits with Nutrition + Energy Balance) */}
+          {phase === 'bulking' && measurements.length >= 3 && (() => {
+            const now = Date.now();
+            const fourWeeksAgo = now - 28 * 86400000;
+            const recentMeasurements = measurements.filter(m => new Date(m.date).getTime() >= fourWeeksAgo);
+            const windowData = recentMeasurements.length >= 2 ? recentMeasurements : measurements.slice(-8);
+
+            if (windowData.length < 2) return null;
+
+            const first = windowData[0];
+            const last = windowData[windowData.length - 1];
+            const days = Math.max(7, (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86400000);
+
+            const weightDelta = last.weight - first.weight;
+            const weeks = days / 7;
+            const weeklyRatePct = (weightDelta / first.weight / weeks) * 100;
+            const weightRateStatus = weeklyRatePct >= 0.25 && weeklyRatePct <= 0.50 ? 'good'
+              : weeklyRatePct >= 0.15 && weeklyRatePct <= 0.65 ? 'ok' : 'off';
+
+            const waistDelta = last.waist - first.waist;
+            const waistPerKg = weightDelta > 0.5 ? waistDelta / weightDelta : null;
+            const waistStatus = waistPerKg == null ? 'ok'
+              : waistPerKg <= 0.35 ? 'good'
+              : waistPerKg <= 0.50 ? 'ok' : 'off';
+
+            const firstBF = first.bodyFat;
+            const lastBF = last.bodyFat;
+            const bfDelta = firstBF != null && lastBF != null ? lastBF - firstBF : null;
+            const bfStatus = bfDelta == null ? 'ok'
+              : Math.abs(bfDelta) <= 1.0 ? 'good'
+              : Math.abs(bfDelta) <= 1.5 ? 'ok' : 'off';
+
+            const armDelta = last.arms - first.arms;
+            const armPerKg = weightDelta > 0.5 ? armDelta / weightDelta : null;
+            const armStatus = armPerKg == null ? 'ok'
+              : armPerKg >= 0.25 ? 'good'
+              : armPerKg >= 0.15 ? 'ok' : 'off';
+
+            const statuses = [weightRateStatus, waistStatus, bfStatus, armStatus];
+            const goodCount = statuses.filter(s => s === 'good').length;
+            const offCount = statuses.filter(s => s === 'off').length;
+            const overall = offCount >= 2 ? 'off' : goodCount >= 3 ? 'good' : 'ok';
+            const overallLabel = overall === 'good' ? 'ON TARGET' : overall === 'ok' ? 'WATCH' : 'OFF TRACK';
+            const overallColor = overall === 'good' ? '#22c55e' : overall === 'ok' ? '#f59e0b' : '#ef4444';
+
+            const alerts: string[] = [];
+            const fourteenDaysAgo = now - 14 * 86400000;
+            const twoWeekMeasurements = measurements.filter(m => new Date(m.date).getTime() >= fourteenDaysAgo);
+            if (twoWeekMeasurements.length >= 2) {
+              const w1 = twoWeekMeasurements[0].weight;
+              const w2 = twoWeekMeasurements[twoWeekMeasurements.length - 1].weight;
+              const deltaPctIn14d = ((w2 - w1) / w1) * 100;
+              if (deltaPctIn14d < 0.2) {
+                const kcalBump = deltaPctIn14d < 0 ? 250 : 150;
+                alerts.push(`Weight stalled 14d — consider +${kcalBump} kcal/day`);
+              }
+            }
+            if (waistPerKg != null && waistPerKg > 0.5) {
+              alerts.push(`Waist +${waistDelta.toFixed(1)}cm vs +${weightDelta.toFixed(1)}kg — reduce surplus ~150 kcal`);
+            }
+            if (bfDelta != null && bfDelta > 1.5) {
+              alerts.push(`BF up ${bfDelta.toFixed(1)}% in ${Math.round(days)}d — slow the bulk`);
+            }
+
+            const sigColor = (s: string) => s === 'good' ? '#22c55e' : s === 'ok' ? '#f59e0b' : '#ef4444';
+
+            return (
+              <div className="glass-card p-3 mb-6 fade-up" style={{ fontFeatureSettings: '"tnum"' }}>
+                <div className="flex items-center gap-3 mb-2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ color: overallColor }}>
+                    <path d="M3 17l6-6 4 4 8-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M14 7h7v7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="text-[10px] text-white/40 uppercase tracking-[0.15em]">Bulk Health</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider ml-auto" style={{ color: overallColor }}>{overallLabel}</span>
+                  <span className="text-[9px] text-white/25 font-mono">{Math.round(days)}d</span>
+                </div>
+
+                <div className="flex items-stretch divide-x divide-white/5 border border-white/5 rounded-md overflow-hidden">
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Rate</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(weightRateStatus) }}>
+                      {weeklyRatePct > 0 ? '+' : ''}{weeklyRatePct.toFixed(2)}<span className="text-[9px] font-normal text-white/40 ml-0.5">%/wk</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">tgt 0.25-0.50</div>
+                  </div>
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Waist/kg</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(waistStatus) }}>
+                      {waistPerKg != null ? `${waistPerKg.toFixed(2)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">cm/kg</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">ideal ~0.3</div>
+                  </div>
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">BF</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(bfStatus) }}>
+                      {bfDelta != null ? `${bfDelta > 0 ? '+' : ''}${bfDelta.toFixed(1)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">%</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">keep &lt;±1.5</div>
+                  </div>
+                  <div className="flex-1 px-2 py-1.5 text-center">
+                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Arm/kg</div>
+                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(armStatus) }}>
+                      {armPerKg != null ? `${armPerKg.toFixed(2)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">cm/kg</span>
+                    </div>
+                    <div className="text-[8px] text-white/25 font-mono leading-tight">tgt ≥0.20</div>
+                  </div>
+                </div>
+
+                {alerts.length > 0 && (
+                  <div className="mt-1.5 space-y-0.5">
+                    {alerts.map((a, i) => (
+                      <div key={i} className="text-[9px] text-amber-400/70 font-mono">⚠ {a}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Glucose Monitor — Concept 4: Gradient Fill Chart */}
           {glucose?.current && (() => {
             const { current, history, stats } = glucose;
@@ -1106,142 +1226,6 @@ export default function Dashboard() {
                           })}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Bulk Health — bulking-phase KPIs */}
-          {phase === 'bulking' && measurements.length >= 3 && (() => {
-            const bw = measurements[measurements.length - 1].weight;
-
-            // Last 4 weeks of measurements (or all if fewer)
-            const now = Date.now();
-            const fourWeeksAgo = now - 28 * 86400000;
-            const recentMeasurements = measurements.filter(m => new Date(m.date).getTime() >= fourWeeksAgo);
-            const windowData = recentMeasurements.length >= 2 ? recentMeasurements : measurements.slice(-8);
-
-            if (windowData.length < 2) return null;
-
-            const first = windowData[0];
-            const last = windowData[windowData.length - 1];
-            const days = Math.max(7, (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86400000);
-
-            // KPI 1: Weekly weight rate (% of bodyweight per week)
-            const weightDelta = last.weight - first.weight;
-            const weeks = days / 7;
-            const weeklyRatePct = (weightDelta / first.weight / weeks) * 100;
-            const weightRateOk = weeklyRatePct >= 0.25 && weeklyRatePct <= 0.50;
-            const weightRateStatus = weeklyRatePct >= 0.25 && weeklyRatePct <= 0.50 ? 'good'
-              : weeklyRatePct >= 0.15 && weeklyRatePct <= 0.65 ? 'ok' : 'off';
-
-            // KPI 2: Waist/kg ratio — waist growth per kg of weight gain
-            const waistDelta = last.waist - first.waist;
-            const waistPerKg = weightDelta > 0.5 ? waistDelta / weightDelta : null;
-            const waistStatus = waistPerKg == null ? 'ok'
-              : waistPerKg <= 0.35 ? 'good'
-              : waistPerKg <= 0.50 ? 'ok' : 'off';
-
-            // KPI 3: Body fat trend — change in BF% during window
-            const firstBF = first.bodyFat;
-            const lastBF = last.bodyFat;
-            const bfDelta = firstBF != null && lastBF != null ? lastBF - firstBF : null;
-            const bfStatus = bfDelta == null ? 'ok'
-              : Math.abs(bfDelta) <= 1.0 ? 'good'
-              : Math.abs(bfDelta) <= 1.5 ? 'ok' : 'off';
-
-            // KPI 4: Arm/kg growth ratio
-            const armDelta = last.arms - first.arms;
-            const armPerKg = weightDelta > 0.5 ? armDelta / weightDelta : null;
-            const armStatus = armPerKg == null ? 'ok'
-              : armPerKg >= 0.25 ? 'good'
-              : armPerKg >= 0.15 ? 'ok' : 'off';
-
-            // Overall status (count good/ok/off)
-            const statuses = [weightRateStatus, waistStatus, bfStatus, armStatus];
-            const goodCount = statuses.filter(s => s === 'good').length;
-            const offCount = statuses.filter(s => s === 'off').length;
-            const overall = offCount >= 2 ? 'off' : goodCount >= 3 ? 'good' : 'ok';
-            const overallLabel = overall === 'good' ? 'ON TARGET' : overall === 'ok' ? 'WATCH' : 'OFF TRACK';
-            const overallColor = overall === 'good' ? '#22c55e' : overall === 'ok' ? '#f59e0b' : '#ef4444';
-
-            // Plateau alerts
-            const alerts: string[] = [];
-            // Weight flat 14+ days during bulk
-            const fourteenDaysAgo = now - 14 * 86400000;
-            const twoWeekMeasurements = measurements.filter(m => new Date(m.date).getTime() >= fourteenDaysAgo);
-            if (twoWeekMeasurements.length >= 2) {
-              const w1 = twoWeekMeasurements[0].weight;
-              const w2 = twoWeekMeasurements[twoWeekMeasurements.length - 1].weight;
-              const deltaPctIn14d = ((w2 - w1) / w1) * 100;
-              if (deltaPctIn14d < 0.2) {
-                const kcalBump = deltaPctIn14d < 0 ? 250 : 150;
-                alerts.push(`Weight stalled 14d — consider +${kcalBump} kcal/day`);
-              }
-            }
-            // Waist growing faster than weight (>0.5 cm/kg)
-            if (waistPerKg != null && waistPerKg > 0.5) {
-              alerts.push(`Waist +${waistDelta.toFixed(1)}cm vs +${weightDelta.toFixed(1)}kg — reduce surplus ~150 kcal`);
-            }
-            // BF rising too fast
-            if (bfDelta != null && bfDelta > 1.5) {
-              alerts.push(`BF up ${bfDelta.toFixed(1)}% in ${Math.round(days)}d — slow the bulk`);
-            }
-
-            const sigColor = (s: string) => s === 'good' ? '#22c55e' : s === 'ok' ? '#f59e0b' : '#ef4444';
-
-            return (
-              <div className="glass-card p-3 mb-6 fade-up" style={{ fontFeatureSettings: '"tnum"' }}>
-                {/* Top bar */}
-                <div className="flex items-center gap-3 mb-2">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ color: overallColor }}>
-                    <path d="M3 17l6-6 4 4 8-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M14 7h7v7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  <span className="text-[10px] text-white/40 uppercase tracking-[0.15em]">Bulk Health</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider ml-auto" style={{ color: overallColor }}>{overallLabel}</span>
-                  <span className="text-[9px] text-white/25 font-mono">{Math.round(days)}d</span>
-                </div>
-
-                {/* 4 KPI strip */}
-                <div className="flex items-stretch divide-x divide-white/5 border border-white/5 rounded-md overflow-hidden">
-                  <div className="flex-1 px-2 py-1.5 text-center">
-                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Rate</div>
-                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(weightRateStatus) }}>
-                      {weeklyRatePct > 0 ? '+' : ''}{weeklyRatePct.toFixed(2)}<span className="text-[9px] font-normal text-white/40 ml-0.5">%/wk</span>
-                    </div>
-                    <div className="text-[8px] text-white/25 font-mono leading-tight">tgt 0.25-0.50</div>
-                  </div>
-                  <div className="flex-1 px-2 py-1.5 text-center">
-                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Waist/kg</div>
-                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(waistStatus) }}>
-                      {waistPerKg != null ? `${waistPerKg.toFixed(2)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">cm/kg</span>
-                    </div>
-                    <div className="text-[8px] text-white/25 font-mono leading-tight">ideal ~0.3</div>
-                  </div>
-                  <div className="flex-1 px-2 py-1.5 text-center">
-                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">BF</div>
-                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(bfStatus) }}>
-                      {bfDelta != null ? `${bfDelta > 0 ? '+' : ''}${bfDelta.toFixed(1)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">%</span>
-                    </div>
-                    <div className="text-[8px] text-white/25 font-mono leading-tight">keep &lt;±1.5</div>
-                  </div>
-                  <div className="flex-1 px-2 py-1.5 text-center">
-                    <div className="text-[8px] text-white/30 uppercase tracking-[0.15em] font-mono">Arm/kg</div>
-                    <div className="text-xs font-bold tabular-nums leading-tight" style={{ color: sigColor(armStatus) }}>
-                      {armPerKg != null ? `${armPerKg.toFixed(2)}` : '—'}<span className="text-[9px] font-normal text-white/40 ml-0.5">cm/kg</span>
-                    </div>
-                    <div className="text-[8px] text-white/25 font-mono leading-tight">tgt ≥0.20</div>
-                  </div>
-                </div>
-
-                {/* Plateau alerts */}
-                {alerts.length > 0 && (
-                  <div className="mt-1.5 space-y-0.5">
-                    {alerts.map((a, i) => (
-                      <div key={i} className="text-[9px] text-amber-400/70 font-mono">⚠ {a}</div>
                     ))}
                   </div>
                 )}
