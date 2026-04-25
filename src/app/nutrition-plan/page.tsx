@@ -1234,20 +1234,29 @@ function MacroTarget({ label, value, onChange, unit, color }: { label: string; v
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState(String(value));
   return editing ? (
-    <div className="flex items-center gap-1">
-      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      <input type="number" className="glass-input w-16 text-sm font-bold text-white text-center py-0.5 px-1"
-        value={input} onChange={e => setInput(e.target.value)} autoFocus
-        onBlur={() => { onChange(parseInt(input) || value); setEditing(false); }}
-        onKeyDown={e => { if (e.key === 'Enter') { onChange(parseInt(input) || value); setEditing(false); } }} />
-      <span className="text-[10px] text-white/30">{unit}</span>
+    <div className="p-1.5 min-w-0">
+      <div className="flex items-center gap-1 mb-0.5">
+        <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+        <span className="text-[10px] text-white/40 truncate">{label}</span>
+      </div>
+      <div className="flex items-baseline gap-0.5">
+        <input type="number" className="glass-input w-full text-base font-bold text-white py-0.5 px-1 tabular-nums min-w-0"
+          value={input} onChange={e => setInput(e.target.value)} autoFocus
+          onBlur={() => { onChange(parseInt(input) || value); setEditing(false); }}
+          onKeyDown={e => { if (e.key === 'Enter') { onChange(parseInt(input) || value); setEditing(false); } }} />
+        {unit && <span className="text-[9px] text-white/30">{unit}</span>}
+      </div>
     </div>
   ) : (
-    <button onClick={() => { setInput(String(value)); setEditing(true); }} className="flex items-center gap-1.5 hover:bg-white/5 rounded-lg px-1 py-0.5 transition-all">
-      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      <span className="text-xs text-white/40">{label}</span>
-      <span className="text-sm font-bold text-white">{value}</span>
-      <span className="text-[10px] text-white/30">{unit}</span>
+    <button onClick={() => { setInput(String(value)); setEditing(true); }} className="text-left p-1.5 min-w-0 hover:bg-white/5 rounded transition-all">
+      <div className="flex items-center gap-1 mb-0.5">
+        <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+        <span className="text-[10px] text-white/40 truncate">{label}</span>
+      </div>
+      <div className="flex items-baseline gap-0.5">
+        <span className="text-base font-bold text-white tabular-nums">{value}</span>
+        {unit && <span className="text-[9px] text-white/30">{unit}</span>}
+      </div>
     </button>
   );
 }
@@ -1527,7 +1536,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                         ? Math.round(recommendedTargets.protein * refNNU / avgNNUWithEAA / 5) * 5
                         : null;
                       return (
-                        <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-cyan-500/[0.04] border border-cyan-500/10">
+                        <div className="grid grid-cols-4 gap-1.5 p-2 rounded-xl bg-cyan-500/[0.04] border border-cyan-500/10">
                           {[
                             { label: 'Kcal', val: recommendedTargets.kcal, current: targets.kcal, unit: '', color: '#b90a0a' },
                             { label: 'Protein', val: recommendedTargets.protein, current: targets.protein, unit: 'g', color: '#3b82f6', adj: nnuAdjProtein },
@@ -1542,23 +1551,25 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                                 key={m.label}
                                 type="button"
                                 onClick={() => setExpandedRec(isOpen ? null : m.label)}
-                                className={`text-left rounded p-1 -m-1 transition-colors ${isOpen ? 'bg-cyan-500/10' : 'hover:bg-white/[0.03]'}`}
+                                className={`text-left rounded p-1.5 transition-colors min-w-0 ${isOpen ? 'bg-cyan-500/10' : 'hover:bg-white/[0.03]'}`}
                               >
-                                <div className="flex items-center gap-1.5">
-                                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                                  <span className="text-xs text-white/40">{m.label}</span>
-                                  <span className="text-sm font-bold text-white">{m.val}</span>
-                                  <span className="text-[10px] text-white/30">{m.unit}</span>
-                                  <span className="text-[9px] text-cyan-400/40 ml-auto">{isOpen ? '×' : 'ⓘ'}</span>
+                                <div className="flex items-center gap-1 mb-0.5">
+                                  <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                                  <span className="text-[10px] text-white/40 truncate">{m.label}</span>
+                                  <span className="text-[9px] text-cyan-400/40 ml-auto shrink-0">{isOpen ? '×' : 'ⓘ'}</span>
+                                </div>
+                                <div className="flex items-baseline gap-0.5">
+                                  <span className="text-base font-bold text-white tabular-nums">{m.val}</span>
+                                  {m.unit && <span className="text-[9px] text-white/30">{m.unit}</span>}
                                 </div>
                                 {'adj' in m && m.adj != null && (
-                                  <div className="text-[9px] ml-4 text-cyan-400/60">
-                                    NNU-adj: {m.adj}g
+                                  <div className="text-[9px] text-cyan-400/60 truncate">
+                                    NNU {m.adj}g
                                   </div>
                                 )}
                                 {!matched && (
-                                  <div className={`text-[9px] ml-4 ${delta > 0 ? 'text-green-400/60' : 'text-yellow-400/60'}`}>
-                                    target {delta > 0 ? '−' : '+'}{Math.abs(delta)}
+                                  <div className={`text-[9px] truncate ${delta > 0 ? 'text-green-400/60' : 'text-yellow-400/60'}`}>
+                                    {delta > 0 ? '−' : '+'}{Math.abs(delta)}
                                   </div>
                                 )}
                               </button>
@@ -1665,7 +1676,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-[9px] text-white/20 uppercase tracking-wider">Target <span className="text-white/10">(tap to edit)</span></div>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
+                  <div className="grid grid-cols-4 gap-1.5 p-2 rounded-xl bg-white/5">
                     <MacroTarget label="Kcal" value={targets.kcal} onChange={v => updateTarget('kcal', v)} unit="" color="#b90a0a" />
                     <MacroTarget label="Protein" value={targets.protein} onChange={v => updateTarget('protein', v)} unit="g" color="#3b82f6" />
                     <MacroTarget label="Carbs" value={targets.carbs} onChange={v => updateTarget('carbs', v)} unit="g" color="#f59e0b" />
@@ -1676,7 +1687,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                 {/* Actual macros — computed from meals */}
                 <div className="mb-3">
                   <div className="text-[9px] text-white/20 uppercase tracking-wider mb-1">Actual</div>
-                  <div className="grid grid-cols-4 gap-2 p-2 rounded-xl bg-white/5">
+                  <div className="grid grid-cols-4 gap-1.5 p-2 rounded-xl bg-white/5">
                     {[
                       { label: 'Kcal', actual: actualMacros.kcal, target: targets.kcal, unit: '', color: '#b90a0a' },
                       { label: 'Protein', actual: actualMacros.protein, target: targets.protein, unit: 'g', color: '#3b82f6' },
@@ -1686,15 +1697,17 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                       const pct = m.target > 0 ? Math.round((m.actual / m.target - 1) * 100) : 0;
                       const statusColor = Math.abs(pct) <= 5 ? 'text-green-400' : pct < -5 ? 'text-yellow-400' : 'text-red-400';
                       return (
-                        <div key={m.label}>
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                            <span className="text-xs text-white/40">{m.label}</span>
-                            <span className={`text-sm font-bold ${statusColor}`}>{m.actual}</span>
-                            <span className="text-[10px] text-white/30">{m.unit}</span>
+                        <div key={m.label} className="p-1.5 min-w-0">
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                            <span className="text-[10px] text-white/40 truncate">{m.label}</span>
+                          </div>
+                          <div className="flex items-baseline gap-0.5">
+                            <span className={`text-base font-bold tabular-nums ${statusColor}`}>{m.actual}</span>
+                            {m.unit && <span className="text-[9px] text-white/30">{m.unit}</span>}
                           </div>
                           {pct !== 0 && (
-                            <div className={`text-[9px] ml-4 ${statusColor}`}>{pct > 0 ? '+' : ''}{pct}%</div>
+                            <div className={`text-[9px] truncate ${statusColor}`}>{pct > 0 ? '+' : ''}{pct}%</div>
                           )}
                         </div>
                       );

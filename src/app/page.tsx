@@ -1726,6 +1726,21 @@ export default function Dashboard() {
             </div>
           )}
 
+          {/* User Manual link */}
+          <div className="mt-12 pt-6 border-t border-white/5 flex justify-center">
+            <a
+              href="/manual"
+              className="inline-flex items-center gap-2 text-xs text-white/40 hover:text-cyan-300 transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 4h12a4 4 0 014 4v12H8a4 4 0 01-4-4V4z" />
+                <path d="M4 4v12a4 4 0 004 4" />
+                <path d="M8 8h8M8 12h8" strokeLinecap="round" />
+              </svg>
+              User Manual — how the calorie & nutrition logic works
+            </a>
+          </div>
+
         </div>
       </main>
     </div>
