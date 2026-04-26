@@ -8,6 +8,7 @@ import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTr
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, parseDurationMinutes } from '@/utils/calories';
+import { shareSessionToWhatsApp } from '@/utils/whatsappShare';
 import { getEffectiveReps } from '@/utils/training';
 import { hapticLight } from '@/utils/haptics';
 
@@ -687,6 +688,13 @@ export default function TrainingPlanPage() {
                           </div>
                           <div className="flex gap-2 ml-2 shrink-0">
                             <button
+                              onClick={(e) => { e.stopPropagation(); shareSessionToWhatsApp(s, latestWeight); }}
+                              className="text-xs text-white/30 hover:text-green-400 px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
+                              title="Share to WhatsApp"
+                            >
+                              Share
+                            </button>
+                            <button
                               onClick={(e) => { e.stopPropagation(); editSession(s); }}
                               className="text-xs text-white/30 hover:text-white/70 px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
                             >
@@ -842,6 +850,7 @@ export default function TrainingPlanPage() {
               <div className="flex gap-2">
                 {saveStatus === 'saving' && <span className="text-xs text-white/30 self-center">Saving...</span>}
                 {saveStatus === 'saved' && <span className="text-xs text-green-400/60 self-center">Saved ✓</span>}
+                <button onClick={saveWorkout} className="btn-secondary text-sm px-3 py-2">Save</button>
                 <button onClick={finishWorkout} className="btn-primary text-sm px-4 py-2">Finish</button>
               </div>
             </div>

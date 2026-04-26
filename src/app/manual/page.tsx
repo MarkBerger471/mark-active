@@ -10,6 +10,15 @@ import Navigation from '@/components/Navigation';
 const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   {
     date: '2026-04-26',
+    title: 'Training: WhatsApp share + cardio Save button',
+    items: [
+      'Added "Share" button on every saved session card — opens WhatsApp with a pre-filled summary (date, duration, sets, volume, kcal, top sets) addressed to a friend',
+      'First share prompts for an international phone number once; stored locally and reused thereafter',
+      'Cardio screen now has a "Save" button alongside Finish (mirrors the lifting screen) — Save persists without exiting the cardio view',
+    ],
+  },
+  {
+    date: '2026-04-26',
     title: 'Nutrition Balance: honour manual macro targets',
     items: [
       'Dashboard Nutrition Balance card now uses your manually-set Target row from the Nutrition page (kcal + protein) instead of TDEE × 1.15 and bodyweight × 2.25',
