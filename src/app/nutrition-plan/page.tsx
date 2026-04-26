@@ -57,9 +57,10 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
   'pasta dry': { kcal: 371, protein: 13, carbs: 74, fat: 1.5 },
   'dry pasta': { kcal: 371, protein: 13, carbs: 74, fat: 1.5 },
   'bread': { kcal: 265, protein: 9, carbs: 49, fat: 3.2 },
-  // Mark's homemade whole-grain rye bread — values confirmed by him 2026-04-24
-  'rye bread': { kcal: 200, protein: 2, carbs: 30, fat: 0 },
-  'whole rye bread': { kcal: 200, protein: 2, carbs: 30, fat: 0 },
+  // Mark's homemade whole-grain rye bread — values confirmed by him 2026-04-26
+  // Carbs are net (fiber excluded) per Mark's recipe spec.
+  'rye bread': { kcal: 170, protein: 5.6, carbs: 25, fat: 1.2 },
+  'whole rye bread': { kcal: 170, protein: 5.6, carbs: 25, fat: 1.2 },
   'sweet potato': { kcal: 86, protein: 1.6, carbs: 20, fat: 0.1 },
   'potato': { kcal: 77, protein: 2, carbs: 17, fat: 0.1 },
   'broccoli': { kcal: 34, protein: 2.8, carbs: 7, fat: 0.4 },

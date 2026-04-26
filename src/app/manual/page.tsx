@@ -9,6 +9,33 @@ import Navigation from '@/components/Navigation';
 // change ships (formula change, food DB correction, UX change, etc).
 const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   {
+    date: '2026-04-26',
+    title: 'Nutrition Balance: honour manual macro targets',
+    items: [
+      'Dashboard Nutrition Balance card now uses your manually-set Target row from the Nutrition page (kcal + protein) instead of TDEE × 1.15 and bodyweight × 2.25',
+      'Surplus % gauge re-centres on whatever your manual target implies (e.g. 3,250 kcal vs 3,240 TDEE → +0.3% surplus, not +15%)',
+      'Subline annotates "(manual)" / "target manual" when the user override is active so you can tell at a glance',
+    ],
+  },
+  {
+    date: '2026-04-26',
+    title: 'TDEE smoothing: linear regression',
+    items: [
+      'calcDerivedTDEE now uses a least-squares slope through all weigh-ins in the 28-day window, not endpoint − start',
+      'Single noisy weigh-ins (water, glycogen, BIA error) no longer yank the TDEE number around — ~50% less per-measurement variance',
+      'Window stays 28 days so the new 3,250 kcal target still surfaces in ~2 weeks',
+      'Lean/fat change in the footer now uses the regression-fit endpoints for consistency',
+    ],
+  },
+  {
+    date: '2026-04-26',
+    title: 'Whole rye bread re-measured',
+    items: [
+      'Whole rye bread: 200/2/30/0 → 170/5.6/25/1.2 per 100g (Mark\u2019s updated homemade recipe; carbs are net — fiber excluded)',
+      'Updated everywhere: nutrition plan food DB, calories util, EAA per-100g lookups (kcal/protein/carbs/fat)',
+    ],
+  },
+  {
     date: '2026-04-25',
     title: 'Manual launched',
     items: [
@@ -178,9 +205,11 @@ export default function ManualPage() {
                 <p><strong className="text-white">TDEE = Total Daily Energy Expenditure</strong>. The number of kcal you burn per day across BMR + activity + thermic effect of food.</p>
                 <p>The Energy Balance card on the dashboard derives TDEE directly from your <em>real intake vs measured weight change</em> over the trailing 28 days. This is the most reliable method — far better than BMR equations × activity multipliers, which are typically off by 300-500 kcal.</p>
                 <p className="font-mono text-[12px] text-white/80 bg-white/[0.04] p-3 rounded my-2">
+                  weight_change_kg = slope_per_day × window_days  <span className="text-white/40">// from linear regression of all weigh-ins</span><br/>
                   surplus_kcal_per_day = (weight_change_kg × 5500) / days<br/>
                   TDEE = avg_intake_kcal − surplus_kcal_per_day
                 </p>
+                <p>The weight change isn&apos;t just <em>last weigh-in − first weigh-in</em>. It&apos;s the slope of a least-squares line fit through every weigh-in in the window, multiplied by the window length. This damps single-day noise (water, glycogen, sodium, BIA error) without slowing reactivity to a real intake change — important during active phase tuning.</p>
                 <p>The 5500 kcal/kg multiplier represents the average energy cost per kg of mixed lean+fat tissue gain. We tried a personalized version that splits the gain into lean (×1800 kcal/kg) and fat (×7700) using BF% measurements, but BIA-scale noise (±0.5pp swings between weigh-ins) made the result unstable. Mixed is the conservative, coach-standard choice.</p>
                 <Box tone="info">
                   <strong>Sunday cheat meal handling:</strong> The weekly average intake includes a one-time +(1,300 − Dinner kcal) bump on Sunday. So your weekly average kcal is higher than your daily plan kcal by ~60-90 kcal/day.

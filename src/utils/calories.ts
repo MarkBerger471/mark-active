@@ -199,12 +199,18 @@ export function calcWindowTDEE(
  *   surplus_kcal = weight_change_kg * 5500
  *   tdee = avg_intake - surplus_kcal / days
  *
+ * Weight change comes from a **linear regression** of weight vs. day across
+ * all weigh-ins in the window — not endpoint-minus-start. This damps single
+ * weigh-in noise (water, glycogen, BIA) without slowing reactivity to a real
+ * intake change, which is what we want during active phase tuning.
+ *
  * Uses a fixed 5500 kcal/kg "mixed gain" multiplier. Tried a BF%-personalized
  * version (lean×1800 + fat×7700) but BIA-scale noise (±0.5pp) inflates lean
  * change and produces unstable TDEE estimates on short windows. Mixed is the
  * conservative, coach-standard choice.
  *
- * When BF% is available we still return lean/fat change numbers for display.
+ * When BF% is available we still return lean/fat change numbers for display
+ * (computed against the regression-fit endpoints, not raw weigh-ins).
  */
 export function calcDerivedTDEE(
   measurements: Measurement[],
@@ -240,8 +246,27 @@ export function calcDerivedTDEE(
   const start = window[0];
   const end = window[window.length - 1];
   const daysSpan = Math.max(1, Math.round((new Date(end.date).getTime() - new Date(start.date).getTime()) / 86400000));
-  const weightChangeKg = end.weight - start.weight;
-  const ratePerWeekPct = (weightChangeKg / start.weight) * 100 * 7 / daysSpan;
+
+  // Linear regression: weight ~ days-since-window-start
+  const t0 = new Date(start.date).getTime();
+  const pts = window.map(m => ({
+    x: (new Date(m.date).getTime() - t0) / 86400000,
+    y: m.weight,
+  }));
+  const n = pts.length;
+  const meanX = pts.reduce((s, p) => s + p.x, 0) / n;
+  const meanY = pts.reduce((s, p) => s + p.y, 0) / n;
+  let num = 0, den = 0;
+  for (const p of pts) { num += (p.x - meanX) * (p.y - meanY); den += (p.x - meanX) ** 2; }
+  // Fall back to endpoint diff if all weigh-ins land on the same day (no x-spread)
+  const slopePerDay = den > 0 ? num / den : (end.weight - start.weight) / daysSpan;
+  const intercept = meanY - slopePerDay * meanX;
+  const fittedStartWeight = intercept;
+  const fittedEndWeight = intercept + slopePerDay * daysSpan;
+  const weightChangeKg = slopePerDay * daysSpan;
+  const ratePerWeekPct = fittedStartWeight > 0
+    ? (slopePerDay * 7 / fittedStartWeight) * 100
+    : 0;
 
   // Smoothed BF% at each window end: average the nearest 3 measurements.
   // Looks in the full sorted list, not just the window, so the smoothing
@@ -274,10 +299,10 @@ export function calcDerivedTDEE(
   let leanChangeKg: number | undefined;
   let fatChangeKg: number | undefined;
   if (startBf != null && endBf != null) {
-    const startFat = start.weight * (startBf / 100);
-    const endFat = end.weight * (endBf / 100);
-    const startLean = start.weight - startFat;
-    const endLean = end.weight - endFat;
+    const startFat = fittedStartWeight * (startBf / 100);
+    const endFat = fittedEndWeight * (endBf / 100);
+    const startLean = fittedStartWeight - startFat;
+    const endLean = fittedEndWeight - endFat;
     leanChangeKg = endLean - startLean;
     fatChangeKg = endFat - startFat;
   }
@@ -338,7 +363,7 @@ const CHEAT_MEAL_KCAL = 1300;
 // Per-100g kcal for computing last meal calories (subset of FOOD_DB)
 const KCAL_PER_100G: Record<string, number> = {
   'egg white': 52, 'egg whites': 52, 'egg': 143, 'eggs': 143, 'whey': 400,
-  'bread': 265, 'rye bread': 259, 'whole rye bread': 259, 'chicken': 165,
+  'bread': 265, 'rye bread': 170, 'whole rye bread': 170, 'chicken': 165,
   'chicken breast': 165, 'fish': 120, 'beef': 254, 'ground beef': 254,
   'salmon': 208, 'tuna': 132, 'rice': 130, 'brown rice': 112,
   'greek yogurt': 59, 'oatmeal': 389, 'cheese': 403, 'feta': 264,

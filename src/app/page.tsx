@@ -83,6 +83,22 @@ export default function Dashboard() {
 
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
+  // User-set macro targets from the Nutrition plan (Target row). Falls back to
+  // computed defaults below when null (first-load before Firestore returns).
+  const [userTargets, setUserTargets] = useState<{ kcal: number; protein: number; carbs: number; fat: number } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try { const s = localStorage.getItem('macro_targets'); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  useEffect(() => {
+    getSettingRemote('macro_targets').then(v => {
+      if (!v) return;
+      try {
+        const parsed = JSON.parse(v);
+        setUserTargets(parsed);
+        localStorage.setItem('macro_targets', v);
+      } catch {}
+    }).catch(() => {});
+  }, []);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number; source?: string }>>({});
   const [glucose, setGlucose] = useState<{
     current: { value: number; valueMmol: number; trend: string; timestamp: string; isHigh: boolean; isLow: boolean } | null;
@@ -347,8 +363,9 @@ export default function Dashboard() {
                 const d = new Date(); d.setDate(d.getDate() - 6);
                 return s.date >= d.toISOString().split('T')[0];
               });
-              // Protein: target = weight × 2.25 ±0.25
-              const proteinTarget = Math.round(bodyWeight * 2.25);
+              // Protein target: use user-set override if available (Target row on
+              // Nutrition page), else fall back to bodyweight × 2.25
+              const proteinTarget = userTargets?.protein ?? Math.round(bodyWeight * 2.25);
               const proteinLow = Math.round(bodyWeight * 2.0);
               const proteinHigh = Math.round(bodyWeight * 2.5);
               const proteinDiff = trainingDayProtein - proteinTarget;
@@ -387,9 +404,14 @@ export default function Dashboard() {
               const burnPct = (tdeeForTarget / maxVal) * 100;
               const intakePct = (intake / maxVal) * 100;
 
-              // Gauge: centered on target midpoint
-              const targetMid = phase === 'bulking' ? 15 : -15;
-              const targetIntake = Math.round(tdeeForTarget * (1 + targetMid / 100));
+              // Gauge: centered on target midpoint.
+              // Calorie target: prefer user-set override (Target row on Nutrition
+              // page) and back-compute the implied surplus%; else use TDEE × phase%.
+              const phaseSurplusPct = phase === 'bulking' ? 15 : -15;
+              const targetIntake = userTargets?.kcal ?? Math.round(tdeeForTarget * (1 + phaseSurplusPct / 100));
+              const targetMid = userTargets?.kcal
+                ? Math.round((userTargets.kcal / tdeeForTarget - 1) * 100)
+                : phaseSurplusPct;
               const distFromTarget = surplusPct - targetMid;
               // Wider range so large deviations show clearly
               const gaugeMin = -20, gaugeMax = 20;
@@ -477,7 +499,7 @@ export default function Dashboard() {
                       <div className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-white/40" style={{ left: `${calTargetMarkerPct}%` }} />
                     </div>
                     <div className="flex justify-between text-[9px] text-white/20 mt-1">
-                      <span>TDEE: {tdeeForTarget}{derived ? '' : ' (est.)'}</span>
+                      <span>TDEE: {tdeeForTarget}{derived ? '' : ' (est.)'}{userTargets?.kcal ? ' · target manual' : ''}</span>
                       <span>{surplusDeficit > 0 ? '+' : ''}{surplusDeficit} surplus</span>
                     </div>
                   </div>
@@ -493,7 +515,7 @@ export default function Dashboard() {
                       <div className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-white/40" style={{ left: `${protTargetMarkerPct}%` }} />
                     </div>
                     <div className="flex justify-between text-[9px] text-white/20 mt-1">
-                      <span>Target: {(bodyWeight * 2.25).toFixed(1)}g/kg</span>
+                      <span>Target: {(proteinTarget / bodyWeight).toFixed(2)}g/kg{userTargets?.protein ? ' (manual)' : ''}</span>
                       <span>{proteinDiff > 0 ? '+' : ''}{proteinDiff}g {proteinDiff > 0 ? 'over' : 'under'}</span>
                     </div>
                   </div>
