@@ -759,17 +759,25 @@ export default function TrainingPlanPage() {
                       else if (pctDelta < -0.02) direction = 'down';
                       else direction = 'flat';
                     }
-                    const cardGlow =
-                      direction === 'up' ? { boxShadow: '0 0 12px rgba(34,197,94,0.18), inset 0 0 1px rgba(34,197,94,0.35)' } :
-                      direction === 'down' ? { boxShadow: '0 0 12px rgba(239,68,68,0.18), inset 0 0 1px rgba(239,68,68,0.35)' } :
-                      {};
+                    // Inline style overrides the .glass-card `background:` shorthand
+                    // so the colour wash actually paints on the card. Tuned to match
+                    // the body-metric card subtlety (~0.08 wash).
+                    const cardStyle: React.CSSProperties =
+                      direction === 'up' ? {
+                        background: 'linear-gradient(135deg, rgba(34,197,94,0.10) 0%, rgba(34,197,94,0.03) 60%, rgba(255,255,255,0.02) 100%)',
+                        borderColor: 'rgba(34,197,94,0.20)',
+                      } :
+                      direction === 'down' ? {
+                        background: 'linear-gradient(135deg, rgba(239,68,68,0.10) 0%, rgba(239,68,68,0.03) 60%, rgba(255,255,255,0.02) 100%)',
+                        borderColor: 'rgba(239,68,68,0.20)',
+                      } : {};
                     const kgToneClass =
-                      direction === 'up' ? 'text-green-400/90' :
-                      direction === 'down' ? 'text-red-400/90' :
+                      direction === 'up' ? 'text-green-400' :
+                      direction === 'down' ? 'text-red-400' :
                       'text-purple-400/70';
 
                     elements.push(
-                      <div key={s.id} className="glass-card overflow-hidden" style={cardGlow}>
+                      <div key={s.id} className="glass-card overflow-hidden" style={cardStyle}>
                         <div
                           className="p-4 flex items-center justify-between cursor-pointer"
                           onClick={() => setExpandedSession(isExpanded ? null : s.id)}
