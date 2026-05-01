@@ -9,6 +9,15 @@ import Navigation from '@/components/Navigation';
 // change ships (formula change, food DB correction, UX change, etc).
 const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   {
+    date: '2026-04-29',
+    title: 'Training: edit exercises during a session',
+    items: [
+      'Each exercise card has up/down arrows to reorder, plus an X to delete (with confirmation)',
+      'New "+ Add Exercise" button at the bottom — typeahead suggests names from your past sessions; new exercises start with 3 working sets at 8-10 reps',
+      'Edits auto-save to the current session and propagate to future sessions of the same workout (because startWorkout inherits from the most recent session)',
+    ],
+  },
+  {
     date: '2026-04-26',
     title: 'Training: WhatsApp share + cardio Save button',
     items: [

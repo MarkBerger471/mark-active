@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import Navigation from '@/components/Navigation';
 import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, updateSessionDuration, getMeasurements } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
@@ -184,6 +184,8 @@ export default function TrainingPlanPage() {
   const [latestWeight, setLatestWeight] = useState<number>(80);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { steps: number; activeCalories: number; source?: string }>>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [addingExercise, setAddingExercise] = useState(false);
+  const [addExerciseInput, setAddExerciseInput] = useState('');
   const exercisesRef = useRef(exercises);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef(sessionId);
@@ -252,6 +254,47 @@ export default function TrainingPlanPage() {
       }
     };
   }, []);
+
+  // Reorder + add/delete exercises during a live session.
+  // Edits propagate to future sessions automatically because startWorkout()
+  // re-loads from getLastSessionForWorkout(), which uses the just-saved exercises.
+  const moveExercise = (idx: number, dir: -1 | 1) => {
+    setExercises(prev => {
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+    setExpandedExercise(null); // collapse to avoid stale-index confusion
+    triggerAutoSave();
+  };
+
+  const deleteExercise = (idx: number) => {
+    const ex = exercisesRef.current[idx];
+    if (!ex) return;
+    if (!confirm(`Delete "${ex.name}"?\n\nThis removes it from this session and future sessions of "${activeWorkoutRef.current}".`)) return;
+    setExercises(prev => prev.filter((_, i) => i !== idx));
+    setExpandedExercise(null);
+    triggerAutoSave();
+  };
+
+  const addExercise = (rawName: string) => {
+    const name = rawName.trim();
+    if (!name) return;
+    setExercises(prev => [...prev, {
+      name,
+      targetReps: '8-10',
+      sets: [
+        { weight: 0, isWarmup: false, done: false },
+        { weight: 0, isWarmup: false, done: false },
+        { weight: 0, isWarmup: false, done: false },
+      ],
+    }]);
+    setAddingExercise(false);
+    setAddExerciseInput('');
+    triggerAutoSave();
+  };
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -325,6 +368,29 @@ export default function TrainingPlanPage() {
     // workouts is stable (set once from getPresetWorkouts), view doesn't need refetch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
+
+  // Typeahead source: every unique exercise name from past lifting sessions.
+  // Used by the "Add Exercise" sheet to autocomplete known names.
+  // Declared above the auth-gate early return so hook order stays stable.
+  const exerciseHistory = useMemo(() => {
+    const seen = new Map<string, string>(); // lowercase key → original casing
+    for (const s of sessions) {
+      if (s.workoutName === 'Cardio') continue;
+      for (const ex of s.exercises) {
+        const key = ex.name.toLowerCase().trim();
+        if (key && !seen.has(key)) seen.set(key, ex.name);
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [sessions]);
+
+  const filteredHistory = useMemo(() => {
+    const q = addExerciseInput.toLowerCase().trim();
+    const currentNames = new Set(exercises.map(e => e.name.toLowerCase().trim()));
+    const pool = exerciseHistory.filter(n => !currentNames.has(n.toLowerCase().trim()));
+    if (!q) return pool.slice(0, 8);
+    return pool.filter(n => n.toLowerCase().includes(q)).slice(0, 8);
+  }, [exerciseHistory, addExerciseInput, exercises]);
 
   if (isLoading || !isAuthenticated) {
     return (
@@ -470,6 +536,38 @@ export default function TrainingPlanPage() {
     triggerAutoSave();
   };
 
+  // Add a warmup set in front of the first working set. New warmup defaults to
+  // the weight of the last existing warmup (or 0).
+  const addWarmup = (exIdx: number) => {
+    setExercises(prev => {
+      const updated = [...prev];
+      const ex = { ...updated[exIdx] };
+      const lastWarmup = [...ex.sets].reverse().find(s => s.isWarmup);
+      const newWarmup = { weight: lastWarmup?.weight ?? 0, isWarmup: true, done: false };
+      const firstWorkingIdx = ex.sets.findIndex(s => !s.isWarmup);
+      const insertAt = firstWorkingIdx === -1 ? ex.sets.length : firstWorkingIdx;
+      ex.sets = [...ex.sets.slice(0, insertAt), newWarmup, ...ex.sets.slice(insertAt)];
+      updated[exIdx] = ex;
+      return updated;
+    });
+    triggerAutoSave();
+  };
+
+  // Remove the LAST warmup set (closest to the working sets).
+  const removeLastWarmup = (exIdx: number) => {
+    setExercises(prev => {
+      const updated = [...prev];
+      const ex = { ...updated[exIdx] };
+      const warmupIndices = ex.sets.map((s, i) => s.isWarmup ? i : -1).filter(i => i !== -1);
+      if (warmupIndices.length === 0) return prev;
+      const removeIdx = warmupIndices[warmupIndices.length - 1];
+      ex.sets = ex.sets.filter((_, i) => i !== removeIdx);
+      updated[exIdx] = ex;
+      return updated;
+    });
+    triggerAutoSave();
+  };
+
   const saveWorkout = async () => {
     await flushSave();
     setSaveStatus('saved');
@@ -596,6 +694,38 @@ export default function TrainingPlanPage() {
                     const sorted = [...sessions].sort((a, b) => sessionTs(b).localeCompare(sessionTs(a))).slice(0, 20);
                     const elements: React.ReactNode[] = [];
 
+                    // Total working-set volume (kg × reps) for a session.
+                    // Done flag honoured if any set has it; otherwise all sets count.
+                    const sessionVolumeKg = (sess: TrainingSession): number => {
+                      const hasFlags = sess.exercises.some(e => e.sets.some(set => set.done));
+                      let total = 0;
+                      for (const ex of sess.exercises) {
+                        if (ex.skipped) continue;
+                        for (const set of ex.sets) {
+                          if (set.isWarmup) continue;
+                          if (hasFlags && !set.done) continue;
+                          const w = typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0;
+                          if (w <= 0) continue;
+                          total += w * getEffectiveReps(set, ex.targetReps);
+                        }
+                      }
+                      return total;
+                    };
+
+                    // Find the most recent session of the same workout that is older than s.
+                    const findPrevSameWorkout = (s: TrainingSession): TrainingSession | null => {
+                      const sCmp = sessionTs(s);
+                      let best: TrainingSession | null = null;
+                      let bestTs = '';
+                      for (const x of sessions) {
+                        if (x.id === s.id || x.workoutName !== s.workoutName) continue;
+                        const ts = sessionTs(x);
+                        if (ts >= sCmp) continue;
+                        if (!best || ts > bestTs) { best = x; bestTs = ts; }
+                      }
+                      return best;
+                    };
+
                     // Only show measurement dividers within the range of recorded sessions
                     const oldestSessionDate = sorted.length > 0 ? sorted[sorted.length - 1].date : '';
 
@@ -615,8 +745,31 @@ export default function TrainingPlanPage() {
                     const prevSessions = isExpanded ? getPreviousSessions(s) : [];
                     const hasDoneFlags = s.exercises.some(e => e.sets.some(set => set.done));
                     const doneExercises = s.exercises.filter(e => !e.skipped && (hasDoneFlags ? e.sets.some(set => set.done) : true));
+
+                    // Compare to previous session of same workout name — lifting only.
+                    // Cardio rows stay neutral (no comparison glow / kg colour).
+                    const isCardioRow = s.workoutName === 'Cardio';
+                    const prevSession = isCardioRow ? null : findPrevSameWorkout(s);
+                    const currentMetric = isCardioRow ? 0 : sessionVolumeKg(s);
+                    const prevMetric = prevSession ? sessionVolumeKg(prevSession) : null;
+                    let direction: 'up' | 'down' | 'flat' | 'none' = 'none';
+                    if (!isCardioRow && prevMetric != null && currentMetric > 0 && prevMetric > 0) {
+                      const pctDelta = (currentMetric - prevMetric) / prevMetric;
+                      if (pctDelta > 0.02) direction = 'up';
+                      else if (pctDelta < -0.02) direction = 'down';
+                      else direction = 'flat';
+                    }
+                    const cardGlow =
+                      direction === 'up' ? { boxShadow: '0 0 12px rgba(34,197,94,0.18), inset 0 0 1px rgba(34,197,94,0.35)' } :
+                      direction === 'down' ? { boxShadow: '0 0 12px rgba(239,68,68,0.18), inset 0 0 1px rgba(239,68,68,0.35)' } :
+                      {};
+                    const kgToneClass =
+                      direction === 'up' ? 'text-green-400/90' :
+                      direction === 'down' ? 'text-red-400/90' :
+                      'text-purple-400/70';
+
                     elements.push(
-                      <div key={s.id} className="glass-card overflow-hidden">
+                      <div key={s.id} className="glass-card overflow-hidden" style={cardGlow}>
                         <div
                           className="p-4 flex items-center justify-between cursor-pointer"
                           onClick={() => setExpandedSession(isExpanded ? null : s.id)}
@@ -684,6 +837,16 @@ export default function TrainingPlanPage() {
                             <span className="text-[10px] text-orange-400/80 ml-1">
                               {calcSessionCalories(s, latestWeight)} kcal
                             </span>
+                            {!isCardioRow && currentMetric > 0 && (
+                              <span className={`text-[10px] ml-1 ${kgToneClass}`}>
+                                {Math.round(currentMetric).toLocaleString('en-US')} kg
+                                {direction !== 'none' && prevMetric != null && (() => {
+                                  const delta = Math.round(currentMetric - prevMetric);
+                                  const sign = delta > 0 ? '+' : '';
+                                  return <span className="ml-0.5 opacity-80">({sign}{delta.toLocaleString('en-US')})</span>;
+                                })()}
+                              </span>
+                            )}
                             </div>
                           </div>
                           <div className="flex gap-2 ml-2 shrink-0">
@@ -1020,9 +1183,11 @@ export default function TrainingPlanPage() {
                   style={{ ...cardGlow, animationDelay: `${exIdx * 50}ms` }}
                 >
                   {/* Exercise header - tap to expand */}
-                  <button
+                  <div
                     onClick={() => setExpandedExercise(isExpanded ? null : exIdx)}
-                    className="w-full p-4 flex items-center justify-between text-left"
+                    role="button"
+                    tabIndex={0}
+                    className="w-full p-4 flex items-center justify-between text-left cursor-pointer"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2.5">
@@ -1041,11 +1206,29 @@ export default function TrainingPlanPage() {
                         {ex.notes && ` · ${ex.notes}`}
                       </p>
                     </div>
-                    <div className="flex items-center gap-3 ml-2">
-                      <span className="text-xs text-white/30">{doneWorkingSets}/{workingSets.length}{warmupSets.length > 0 ? ` +${warmupSets.length}WU` : ''}</span>
+                    <div className="flex items-center gap-1 ml-2">
+                      {/* Reorder + delete actions */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); moveExercise(exIdx, -1); }}
+                        disabled={exIdx === 0}
+                        className="w-7 h-7 flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/5 rounded transition-all disabled:opacity-20 disabled:cursor-not-allowed text-sm"
+                        title="Move up"
+                      >&#9650;</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); moveExercise(exIdx, 1); }}
+                        disabled={exIdx === exercises.length - 1}
+                        className="w-7 h-7 flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/5 rounded transition-all disabled:opacity-20 disabled:cursor-not-allowed text-sm"
+                        title="Move down"
+                      >&#9660;</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteExercise(exIdx); }}
+                        className="w-7 h-7 flex items-center justify-center text-white/30 hover:text-red-400 hover:bg-white/5 rounded transition-all text-sm"
+                        title="Delete exercise"
+                      >&times;</button>
+                      <span className="text-xs text-white/30 ml-1">{doneWorkingSets}/{workingSets.length}{warmupSets.length > 0 ? ` +${warmupSets.length}WU` : ''}</span>
                       <span className={`text-white/20 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
                     </div>
-                  </button>
+                  </div>
 
                   {/* Expanded: sets detail */}
                   {isExpanded && (
@@ -1108,7 +1291,7 @@ export default function TrainingPlanPage() {
                             })}
                           </div>
 
-                          <div className="flex gap-3 pt-1">
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
                             <button
                               onClick={(e) => { e.stopPropagation(); addSet(exIdx); }}
                               className="text-xs text-va-red hover:text-va-red-light py-2"
@@ -1123,6 +1306,20 @@ export default function TrainingPlanPage() {
                             >
                               − Remove Set
                             </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); addWarmup(exIdx); }}
+                              className="text-xs text-amber-400/80 hover:text-amber-300 py-2"
+                            >
+                              + Add WU
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); removeLastWarmup(exIdx); }}
+                              className="text-xs text-white/30 hover:text-red-400 py-2"
+                              disabled={warmupSets.length === 0}
+                              style={{ opacity: warmupSets.length === 0 ? 0.3 : 1 }}
+                            >
+                              − Remove WU
+                            </button>
                           </div>
                         </>
                       )}
@@ -1131,6 +1328,58 @@ export default function TrainingPlanPage() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Add exercise */}
+          <div className="mt-4">
+            {!addingExercise ? (
+              <button
+                onClick={() => { setAddingExercise(true); setAddExerciseInput(''); }}
+                className="w-full py-3 rounded-xl border border-dashed border-white/15 text-white/40 hover:text-white/70 hover:border-white/30 hover:bg-white/[0.03] transition-all text-sm"
+              >
+                + Add Exercise
+              </button>
+            ) : (
+              <div className="glass-card p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-white/40 uppercase tracking-widest">New exercise</label>
+                  <button
+                    onClick={() => { setAddingExercise(false); setAddExerciseInput(''); }}
+                    className="text-xs text-white/30 hover:text-white/60"
+                  >Cancel</button>
+                </div>
+                <input
+                  type="text"
+                  value={addExerciseInput}
+                  onChange={e => setAddExerciseInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addExercise(addExerciseInput); }}
+                  placeholder="Exercise name (e.g. Cable Curl)"
+                  autoFocus
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white placeholder:text-white/20 focus:outline-none focus:border-va-red/50"
+                />
+                {filteredHistory.length > 0 && (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    <p className="text-[9px] text-white/25 uppercase tracking-widest">From history</p>
+                    {filteredHistory.map(name => (
+                      <button
+                        key={name}
+                        onClick={() => addExercise(name)}
+                        className="w-full text-left text-sm text-white/70 hover:text-white hover:bg-white/5 px-2 py-1.5 rounded transition-all"
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => addExercise(addExerciseInput)}
+                  disabled={!addExerciseInput.trim()}
+                  className="w-full py-2 rounded-lg btn-primary text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Add &quot;{addExerciseInput.trim() || '...'}&quot; (3 sets &times; 8-10)
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Bottom finish button */}
