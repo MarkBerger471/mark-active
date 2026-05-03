@@ -1092,15 +1092,23 @@ export default function Dashboard() {
 
             // Muscle-group-aware recovery: find NEXT scheduled group in rotation,
             // measure hours since THAT group was last trained (cardio excluded).
-            // Rotation: Shoulders+Abs → Legs → Chest+Triceps → Back+Biceps → (repeat)
-            const ROTATION = ['Shoulders + Abs', 'Legs', 'Chest + Triceps', 'Back + Biceps'];
-            const weightSessions = trainingSessions.filter(s => s.workoutName !== 'Cardio' && ROTATION.includes(s.workoutName));
+            // Rotation per Mark: Shoulders+Abs → Back+Biceps → Chest+Triceps → Legs → (repeat).
+            // Cardio days fall between lifting days but don't shift the rotation.
+            const ROTATION = ['Shoulders + Abs', 'Back + Biceps', 'Chest + Triceps', 'Legs'];
+            const sessionTs = (s: TrainingSession) => new Date(s.savedAt || s.startedAt || s.date + 'T23:59:59').getTime();
+            const weightSessions = trainingSessions
+              .filter(s => s.workoutName !== 'Cardio' && ROTATION.includes(s.workoutName))
+              .sort((a, b) => sessionTs(a) - sessionTs(b)); // ascending: oldest → newest
             const lastWeightSession = weightSessions[weightSessions.length - 1];
             const lastIdx = lastWeightSession ? ROTATION.indexOf(lastWeightSession.workoutName) : -1;
             const nextGroup = lastIdx === -1 ? ROTATION[0] : ROTATION[(lastIdx + 1) % ROTATION.length];
-            const lastOfNextGroup = [...weightSessions].reverse().find(s => s.workoutName === nextGroup);
+            // Most recent prior session of the next-up group
+            let lastOfNextGroup: TrainingSession | undefined;
+            for (let i = weightSessions.length - 1; i >= 0; i--) {
+              if (weightSessions[i].workoutName === nextGroup) { lastOfNextGroup = weightSessions[i]; break; }
+            }
 
-            const lastWorkoutTs = lastOfNextGroup ? new Date(lastOfNextGroup.savedAt || lastOfNextGroup.startedAt || lastOfNextGroup.date).getTime() : null;
+            const lastWorkoutTs = lastOfNextGroup ? sessionTs(lastOfNextGroup) : null;
             const hoursSinceWorkout = lastWorkoutTs ? Math.floor((Date.now() - lastWorkoutTs) / 3600000) : 240;
             const daysSinceWorkout = Math.floor(hoursSinceWorkout / 24);
             const recoveryLabel = hoursSinceWorkout < 24 ? `${hoursSinceWorkout}h`

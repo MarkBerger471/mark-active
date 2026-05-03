@@ -9,6 +9,22 @@ import Navigation from '@/components/Navigation';
 // change ships (formula change, food DB correction, UX change, etc).
 const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   {
+    date: '2026-05-03',
+    title: 'Training: volume comparison glow now robust to un-tapped working sets',
+    items: [
+      'Sessions logged with weights but without tapping "done" on working sets were getting volume = 0 (warmup-only done flags triggered the done filter). Now the filter only kicks in when at least one *working* set is tap-confirmed, so green/red comparison highlight shows on these sessions',
+    ],
+  },
+  {
+    date: '2026-05-01',
+    title: 'Bug fixes: oil dosage + REC rotation',
+    items: [
+      'Oil supplements (Krill / Omega 3 / Fish oil) now scale by their mg dosage. "Omega 3 2000mg" → 2g fat / 18 kcal (was 1g / 9 kcal regardless of dose)',
+      'Readiness REC pill rotation order corrected to Mark’s actual sequence: Shoulders+Abs → Back+Biceps → Chest+Triceps → Legs (was Sh→Legs→Chest→Back). Cardio days slot in between but don’t shift the rotation',
+      'Sessions are now sorted by timestamp before computing "next group", so the REC time always reflects the correct prior session',
+    ],
+  },
+  {
     date: '2026-04-29',
     title: 'Training: edit exercises during a session',
     items: [

@@ -695,15 +695,19 @@ export default function TrainingPlanPage() {
                     const elements: React.ReactNode[] = [];
 
                     // Total working-set volume (kg × reps) for a session.
-                    // Done flag honoured if any set has it; otherwise all sets count.
+                    // Only filter by done flag if at least one *working* set is marked done —
+                    // otherwise warmup-only done flags would zero out sessions that were
+                    // logged with weights but never tap-confirmed.
                     const sessionVolumeKg = (sess: TrainingSession): number => {
-                      const hasFlags = sess.exercises.some(e => e.sets.some(set => set.done));
+                      const hasWorkingDoneFlags = sess.exercises.some(e =>
+                        e.sets.some(set => !set.isWarmup && set.done)
+                      );
                       let total = 0;
                       for (const ex of sess.exercises) {
                         if (ex.skipped) continue;
                         for (const set of ex.sets) {
                           if (set.isWarmup) continue;
-                          if (hasFlags && !set.done) continue;
+                          if (hasWorkingDoneFlags && !set.done) continue;
                           const w = typeof set.weight === 'number' ? set.weight : parseFloat(set.weight as string) || 0;
                           if (w <= 0) continue;
                           total += w * getEffectiveReps(set, ex.targetReps);

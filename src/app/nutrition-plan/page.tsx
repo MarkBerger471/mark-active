@@ -188,8 +188,10 @@ const FOOD_DB: Record<string, { kcal: number; protein: number; carbs: number; fa
 };
 
 // Supplements: fixed macros per serving (not per 100g)
+// Oils (krill / omega-3 / fish oil) are PER-GRAM values — they scale with the
+// dosage parsed from the item string. e.g. "Omega 3 2000mg" → 2g fat / 18 kcal.
 const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: number; fat: number }> = {
-  'krill oil': { kcal: 5, protein: 0, carbs: 0, fat: 0.5 },
+  'krill oil': { kcal: 9, protein: 0, carbs: 0, fat: 1 },
   'omega 3': { kcal: 9, protein: 0, carbs: 0, fat: 1 },
   'omega3': { kcal: 9, protein: 0, carbs: 0, fat: 1 },
   'fish oil': { kcal: 9, protein: 0, carbs: 0, fat: 1 },
@@ -343,10 +345,12 @@ function calcItemMacros(item: FoodItem): FoodItem {
   return item;
 }
 
-// Supplements where macros scale with grams (DB values are per 1g)
+// Supplements where macros scale with the parsed amount (DB values are per 1g).
+// Oils are mostly fat — 9 kcal/g, 1g fat per gram of oil.
 const SUPPLEMENT_PER_GRAM = new Set([
   'maltodextrin', 'dextrose', 'cluster dextrin',
   'bcaa', 'eaa', 'glutamine', 'collagen',
+  'krill oil', 'omega 3', 'omega3', 'fish oil',
 ]);
 
 function lookupSupplement(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
@@ -364,19 +368,23 @@ function lookupSupplement(name: string): { kcal: number; protein: number; carbs:
   }
   if (!macros || !matchedKey) return null;
 
-  // For per-gram supplements, scale by the parsed gram amount
+  // For per-gram supplements, scale by the parsed amount.
+  // Accept both `g` (grams) and `mg` (milligrams, divided by 1000).
+  // Check `mg` first — `g`-pattern won't match "500mg" (m before g) but order
+  // is the safe choice.
   if (SUPPLEMENT_PER_GRAM.has(matchedKey)) {
-    const gMatch = key.match(/(\d[\d.]*)\s*g(?:r|ram)?s?\b/i);
-    if (gMatch) {
-      const grams = parseFloat(gMatch[1]);
-      if (isFinite(grams) && grams > 0) {
-        return {
-          kcal: Math.round(macros.kcal * grams),
-          protein: Math.round(macros.protein * grams * 10) / 10,
-          carbs: Math.round(macros.carbs * grams * 10) / 10,
-          fat: Math.round(macros.fat * grams * 10) / 10,
-        };
-      }
+    const mgMatch = key.match(/(\d[\d.]*)\s*mg\b/i);
+    const gMatch = !mgMatch ? key.match(/(\d[\d.]*)\s*g(?:r|ram)?s?\b/i) : null;
+    let grams = 0;
+    if (mgMatch) grams = parseFloat(mgMatch[1]) / 1000;
+    else if (gMatch) grams = parseFloat(gMatch[1]);
+    if (isFinite(grams) && grams > 0) {
+      return {
+        kcal: Math.round(macros.kcal * grams),
+        protein: Math.round(macros.protein * grams * 10) / 10,
+        carbs: Math.round(macros.carbs * grams * 10) / 10,
+        fat: Math.round(macros.fat * grams * 10) / 10,
+      };
     }
   }
   return macros;
