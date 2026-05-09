@@ -242,6 +242,57 @@ const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: numb
   'thongkat ali': { kcal: 0, protein: 0, carbs: 0, fat: 0 },
 };
 
+// Shared style/label for the Print buttons (EAA panel + meal plan card)
+const PRINT_BTN_CLASS = "text-[10px] uppercase tracking-wider text-cyan-400/70 hover:text-cyan-300 transition-colors px-2.5 py-1 rounded border border-cyan-400/25 hover:border-cyan-400/50 hover:bg-cyan-400/5";
+
+// Build an A4 print document that auto-shrinks content to fit a single page.
+function buildA4PrintDoc(opts: { title: string; bodyHtml: string; extraCss?: string }): string {
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${opts.title}</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page { width: 210mm; height: 297mm; padding: 12mm 14mm; overflow: hidden; position: relative; }
+  .page-content { transform-origin: top left; width: 100%; }
+  ${opts.extraCss || ''}
+</style></head>
+<body>
+  <div class="page"><div class="page-content">${opts.bodyHtml}</div></div>
+  <script>
+    window.addEventListener('load', function () {
+      var page = document.querySelector('.page');
+      var content = document.querySelector('.page-content');
+      // Available area inside .page padding (12mm top/bottom, 14mm left/right)
+      var pxPerMm = 96 / 25.4;
+      var availH = page.clientHeight - 24 * pxPerMm;
+      var availW = page.clientWidth - 28 * pxPerMm;
+      // Iteratively scale because scaling can change wrapping slightly
+      var scale = 1;
+      for (var i = 0; i < 4; i++) {
+        var ch = content.scrollHeight;
+        var cw = content.scrollWidth;
+        if (ch <= availH && cw <= availW) break;
+        var s = Math.min(availH / ch, availW / cw);
+        scale = scale * s * 0.995; // tiny safety margin to avoid edge clipping
+        content.style.transform = 'scale(' + scale + ')';
+        content.style.width = (100 / scale) + '%';
+      }
+      setTimeout(function () { window.print(); }, 200);
+    });
+  <\/script>
+</body></html>`;
+}
+
+function openPrintWindow(html: string) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('Please allow popups to print.'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
 function lookupFood(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
   const key = name.toLowerCase().trim();
   // Check custom foods first
@@ -1170,11 +1221,79 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
 
   const computing = false;
 
+  const handlePrint = () => {
+    if (!daily) return;
+    const date = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+    const fmt = (mg: number) => `${(mg / 1000).toFixed(2)} g`;
+
+    const perMealMap = new Map(daily.perMeal.map(p => [p.aa, p.mg]));
+    const mainRows = daily.perDay.map(p => {
+      const perMealMg = perMealMap.get(p.aa) ?? (p.mg / daily.mealCount);
+      return `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td><td>${fmt(p.mg * 3)}</td><td>${fmt(p.mg * 7)}</td></tr>`;
+    }).join('');
+    const totalDaily = daily.totalPerDay;
+    const totalPerMeal = totalDaily / daily.mealCount;
+    const mainTotalRow = `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td><td>${fmt(totalDaily * 3)}</td><td>${fmt(totalDaily * 7)}</td></tr>`;
+    const perServingG = (totalPerMeal / 1000).toFixed(2);
+
+    let woSection = '';
+    if (woSupplement) {
+      const woRows = woSupplement.aas.map(s =>
+        `<tr><td>${EAA_NAMES[s.aa as keyof typeof EAA_NAMES] || s.aa}</td><td>${fmt(s.mg)}</td><td>${fmt(s.mg * 3)}</td><td>${fmt(s.mg * 7)}</td></tr>`
+      ).join('');
+      const woTotal = `<tr class="total"><td>TOTAL</td><td>${fmt(woSupplement.totalMg)}</td><td>${fmt(woSupplement.totalMg * 3)}</td><td>${fmt(woSupplement.totalMg * 7)}</td></tr>`;
+      woSection = `
+        <h2>After Workout <span class="hint">single serving · ${(woSupplement.totalMg / 1000).toFixed(2)} g per meal</span></h2>
+        <table>
+          <thead><tr><th>Amino Acid</th><th>1 Meal</th><th>3 Meals</th><th>7 Meals</th></tr></thead>
+          <tbody>${woRows}${woTotal}</tbody>
+        </table>`;
+    }
+
+    const bodyHtml = `
+  <h1>EAA Supplement Mix</h1>
+  <div class="meta">Generated ${date} &middot; <span class="nnu">NNU ${daily.avgNNUBefore}% &rarr; ${daily.avgNNUAfter}%</span> &middot; ${daily.mealCount} meals/day</div>
+  <h2>Main Mix <span class="hint">${daily.mealCount} meals/day &middot; ~${perServingG} g per meal</span></h2>
+  <table>
+    <thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th><th>3 Days</th><th>1 Week</th></tr></thead>
+    <tbody>${mainRows}${mainTotalRow}</tbody>
+  </table>
+  ${woSection}
+  <div class="note">
+    <strong>How to mix:</strong> weigh each amino acid (precision scale &ge; 0.01 g) and combine in a single jar. Take ~${perServingG} g with each meal.
+    ${woSupplement ? `Mix the After-Workout blend separately; take ${(woSupplement.totalMg / 1000).toFixed(2)} g after each meal.` : ''}
+  </div>
+  <div class="footer">bodybuilding &middot; ${date}</div>`;
+
+    const css = `
+  h1 { font-size: 22pt; margin: 0 0 2pt 0; letter-spacing: -0.4pt; font-weight: 700; }
+  h2 { font-size: 11pt; margin: 18pt 0 6pt 0; padding-bottom: 4pt; border-bottom: 1.5px solid #111; letter-spacing: 0.5pt; text-transform: uppercase; font-weight: 700; }
+  .hint { font-weight: 400; color: #666; font-size: 9pt; text-transform: none; letter-spacing: 0; margin-left: 6pt; }
+  .meta { color: #555; font-size: 9.5pt; margin-bottom: 4pt; }
+  .nnu { color: #0a7c8c; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
+  th { text-align: left; padding: 5pt 10pt; background: #f0f0f0; border-bottom: 1px solid #aaa; font-weight: 600; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.5pt; }
+  th:not(:first-child), td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+  td { padding: 5pt 10pt; border-bottom: 1px solid #eee; }
+  tr.total td { border-top: 1.5px solid #222; border-bottom: none; padding-top: 7pt; font-weight: 700; }
+  .note { margin-top: 14pt; font-size: 9pt; color: #555; line-height: 1.5; }
+  .footer { margin-top: 18pt; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 6pt; }`;
+
+    openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css }));
+  };
+
   return (
     <div className="mb-6 glass-card p-5">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-white">Daily EAA Supplement</h3>
-        {computing && <span className="text-[10px] text-cyan-400/40">Computing...</span>}
+        <div className="flex items-center gap-2">
+          {computing && <span className="text-[10px] text-cyan-400/40">Computing...</span>}
+          {daily && (
+            <button onClick={handlePrint} className={PRINT_BTN_CLASS} title="Print as PDF — daily, 3-day, weekly amounts">
+              Print
+            </button>
+          )}
+        </div>
       </div>
       {computing ? (
         <div className="text-xs text-white/30">Computing optimal supplements...</div>
@@ -1439,6 +1558,58 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
 
   const plan = editing && editPlan ? editPlan : dayPlan;
   const computedMacros = sumMacros(plan.meals);
+
+  const handlePrintPlan = () => {
+    const date = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+    // Macros from food items only (no supplements)
+    const itemOnlyMeals = plan.meals.map(m => ({ ...m, supplements: [] }));
+    const totalMacros = sumMacros(itemOnlyMeals);
+
+    const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
+    const mealSections = plan.meals.map(meal => {
+      const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim());
+      if (items.length === 0) return '';
+      const mealMacros = sumMacros([{ ...meal, items, supplements: [] }]);
+      const itemRows = items.map(it => {
+        const amt = it.amount ? escapeHtml(it.amount) : '&mdash;';
+        const m = calcItemMacros(it);
+        const macroBits = (m.kcal || m.protein || m.carbs || m.fat)
+          ? `<span class="m">${Math.round(m.kcal || 0)} kcal &middot; ${Math.round(m.protein || 0)}P &middot; ${Math.round(m.carbs || 0)}C &middot; ${Math.round(m.fat || 0)}F</span>`
+          : '';
+        return `<tr><td>${escapeHtml(it.name)}</td><td class="amt">${amt}</td><td class="macro">${macroBits}</td></tr>`;
+      }).join('');
+      const subtitle = meal.subtitle ? `<span class="hint">${escapeHtml(meal.subtitle)}</span>` : '';
+      return `
+        <section class="meal">
+          <h2>${escapeHtml(meal.name)} ${subtitle}<span class="meal-kcal">${mealMacros.kcal} kcal &middot; ${mealMacros.protein}P / ${mealMacros.carbs}C / ${mealMacros.fat}F</span></h2>
+          <table><tbody>${itemRows}</tbody></table>
+        </section>`;
+    }).filter(Boolean).join('');
+
+    const bodyHtml = `
+  <h1>${escapeHtml(title)} Meal Plan</h1>
+  <div class="meta">Generated ${date} &middot; <strong>${totalMacros.kcal} kcal</strong> &middot; ${totalMacros.protein} g protein &middot; ${totalMacros.carbs} g carbs &middot; ${totalMacros.fat} g fat &middot; food only (no supplements)</div>
+  ${mealSections}
+  <div class="footer">bodybuilding &middot; ${date}</div>`;
+
+    const css = `
+  h1 { font-size: 22pt; margin: 0 0 2pt 0; letter-spacing: -0.4pt; font-weight: 700; }
+  .meta { color: #555; font-size: 9.5pt; margin-bottom: 10pt; padding-bottom: 8pt; border-bottom: 1.5px solid #111; }
+  section.meal { margin-bottom: 10pt; page-break-inside: avoid; }
+  h2 { font-size: 10.5pt; margin: 0 0 3pt 0; padding-bottom: 3pt; border-bottom: 1px solid #ccc; letter-spacing: 0.4pt; text-transform: uppercase; font-weight: 700; display: flex; align-items: baseline; gap: 8pt; }
+  .hint { font-weight: 400; color: #666; font-size: 8.5pt; text-transform: none; letter-spacing: 0; }
+  .meal-kcal { margin-left: auto; font-weight: 600; color: #333; font-size: 9pt; letter-spacing: 0.2pt; text-transform: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+  td { padding: 2pt 6pt; border-bottom: 1px solid #f1f1f1; vertical-align: baseline; }
+  td:first-child { padding-left: 0; }
+  td:last-child { padding-right: 0; }
+  td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: #222; font-weight: 600; width: 60pt; }
+  td.macro { text-align: right; color: #888; font-size: 8pt; font-variant-numeric: tabular-nums; white-space: nowrap; width: 130pt; }
+  .footer { margin-top: 12pt; padding-top: 6pt; border-top: 1px solid #eee; font-size: 8pt; color: #999; text-align: center; }`;
+
+    openPrintWindow(buildA4PrintDoc({ title: `${title} Meal Plan`, bodyHtml, extraCss: css }));
+  };
 
   return (
     <div className="glass-card overflow-hidden p-5">
@@ -1762,7 +1933,10 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                     onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
                 ));
               })()}
-              <div className="flex justify-end mt-3">
+              <div className="flex justify-end mt-3 gap-3 items-center">
+                <button onClick={(e) => { e.stopPropagation(); handlePrintPlan(); }} className={PRINT_BTN_CLASS} title="Print meal plan as PDF">
+                  Print
+                </button>
                 <button onClick={(e) => { e.stopPropagation(); onStartEdit(); }} className="text-xs text-white/40 hover:text-white/60 uppercase tracking-wider">
                   Edit Plan
                 </button>
