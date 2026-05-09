@@ -758,18 +758,73 @@ export async function getSettingRemote(key: string): Promise<string | null> {
   }
 }
 
-// Blood tests — stored as JSON in settings
+// Blood tests — stored as a slim list in settings/bloodTests, with each
+// test's analysis HTML in its own settings/bloodtest_analysis_<id> doc.
+// Keeping analyses in their own docs avoids the 1 MiB Firestore document
+// limit blowing up when reports accumulate or grow.
+const BLOOD_ANALYSIS_KEY_PREFIX = 'bloodtest_analysis_';
+const bloodAnalysisKey = (id: string) => `${BLOOD_ANALYSIS_KEY_PREFIX}${id}`;
+
 export async function getBloodTests(): Promise<import('@/types').BloodTest[]> {
+  type T = import('@/types').BloodTest;
   try {
     const json = await getSetting('bloodTests');
-    return json ? JSON.parse(json) : [];
+    const slim: T[] = json ? JSON.parse(json) : [];
+    let needsMigration = false;
+    const merged = await Promise.all(slim.map(async (t) => {
+      // Prefer per-test analysis doc; fall back to inline (legacy data
+      // pre-split). Pull from Firestore directly if local IDB has nothing
+      // yet — first PWA load after migration would otherwise show no
+      // report until the background refresh lands.
+      let html = await getSetting(bloodAnalysisKey(t.id));
+      if (!html && typeof navigator !== 'undefined' && navigator.onLine) {
+        html = await getSettingRemote(bloodAnalysisKey(t.id));
+      }
+      if (!html && t.analysis) { html = t.analysis; needsMigration = true; }
+      return html ? { ...t, analysis: html } : { ...t, analysis: undefined };
+    }));
+    if (needsMigration) {
+      // Legacy inline analyses found — split them into per-test docs in the
+      // background so they reach Firestore (the inline form may have failed
+      // the 1 MiB doc limit).
+      saveBloodTests(merged).catch(e => console.warn('Blood test migration failed:', e));
+    }
+    return merged;
   } catch {
     return [];
   }
 }
 
 export async function saveBloodTests(tests: import('@/types').BloodTest[]) {
-  await saveSetting('bloodTests', JSON.stringify(tests));
+  type T = import('@/types').BloodTest;
+  // Strip analysis HTML out of each test before serializing the slim list.
+  const slim: T[] = tests.map(t => {
+    const copy = { ...t };
+    delete copy.analysis;
+    return copy;
+  });
+
+  // Reconcile per-test analysis docs against the previous slim list so we
+  // delete analyses for tests that were removed or had their report cleared.
+  let prev: T[] = [];
+  try {
+    const prevJson = await getSetting('bloodTests');
+    if (prevJson) prev = JSON.parse(prevJson);
+  } catch {}
+  const newById = new Map(tests.map(t => [t.id, t]));
+
+  for (const t of tests) {
+    if (t.analysis) await saveSetting(bloodAnalysisKey(t.id), t.analysis);
+  }
+  for (const p of prev) {
+    const next = newById.get(p.id);
+    if (!next || !next.analysis) {
+      // Test was deleted, or its report was cleared via Del Report.
+      await saveSetting(bloodAnalysisKey(p.id), null);
+    }
+  }
+
+  await saveSetting('bloodTests', JSON.stringify(slim));
 }
 
 // File to base64 (client-side utility)

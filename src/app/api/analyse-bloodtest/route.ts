@@ -86,23 +86,32 @@ Do NOT include any <html>, <head>, <body>, or <DOCTYPE> tags. Just output the in
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 8192,
+        model: 'claude-sonnet-4-6',
+        max_tokens: 32000,
+        stream: true,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
 
-    if (!response.ok) {
+    if (!response.ok || !response.body) {
       const err = await response.text();
       console.error('Claude API error:', err);
-      return NextResponse.json({ error: 'Failed to generate analysis' }, { status: 502 });
+      return NextResponse.json({ error: `Claude API ${response.status}: ${err.slice(0, 200)}` }, { status: 502 });
     }
 
-    const data = await response.json();
-    const html = data.content?.[0]?.text || '';
-    return NextResponse.json({ html });
+    // Pass the SSE stream straight through to the client.
+    // Streaming keeps the connection alive past Netlify's 60s function timeout
+    // and avoids Node's 5-minute fetch headers timeout for long generations.
+    return new Response(response.body, {
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      },
+    });
   } catch (e) {
     console.error('Analyse blood test error:', e);
-    return NextResponse.json({ error: 'Failed to generate analysis' }, { status: 500 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to generate analysis' }, { status: 500 });
   }
 }

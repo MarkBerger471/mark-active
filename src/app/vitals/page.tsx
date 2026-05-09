@@ -953,15 +953,44 @@ export default function VitalsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ values: test.values, lifestyle: getLifestyleContext(), previousTests }),
       });
-      const json = await res.json();
-      if (json.html) {
-        const updated = tests.map(t => t.id === test.id ? { ...t, analysis: json.html } : t);
-        setTests(updated);
-        await saveBloodTests(updated);
-        setViewingAnalysis(test.id);
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => '');
+        let msg = `HTTP ${res.status}`;
+        try { msg = (JSON.parse(errText)?.error) || msg; } catch {}
+        throw new Error(msg);
       }
+      // Parse the SSE stream from the API route. Anthropic sends content_block_delta
+      // events; we accumulate the .delta.text fragments into the final HTML.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let html = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(payload);
+            if (evt.type === 'content_block_delta' && evt.delta?.text) {
+              html += evt.delta.text;
+            }
+          } catch {/* ignore malformed lines */}
+        }
+      }
+      if (!html) throw new Error('Empty response from analysis');
+      const updated = tests.map(t => t.id === test.id ? { ...t, analysis: html } : t);
+      setTests(updated);
+      await saveBloodTests(updated);
+      setViewingAnalysis(test.id);
     } catch (e) {
       console.error('Analysis failed:', e);
+      alert(`Analysis failed: ${e instanceof Error ? e.message : 'network error'}`);
     }
     setAnalysing(null);
   };
