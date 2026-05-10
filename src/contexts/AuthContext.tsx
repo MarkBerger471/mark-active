@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import {
   isSessionValid,
   setSession,
@@ -19,19 +19,40 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// useLayoutEffect on the client, useEffect on the server (avoids SSR warning).
+const useIsoLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    if (isSessionValid()) {
-      setIsAuthenticated(true);
-      seedInitialData().catch(() => {});
-      // Load custom foods from Firestore (was never called before)
-      import('@/utils/eaa').then(({ loadCustomFoodsFromFirestore }) => loadCustomFoodsFromFirestore()).catch(() => {});
-    }
+  // Resolve session synchronously after hydration so the auth-gated render
+  // happens before the browser paints — eliminates the visible "Loading…"
+  // flash on cold launch.
+  useIsoLayoutEffect(() => {
+    const valid = isSessionValid();
+    if (valid) setIsAuthenticated(true);
     setIsLoading(false);
   }, []);
+
+  // Heavy work (Firestore seed, dynamic imports) deferred to a normal effect
+  // so it never blocks paint.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    seedInitialData().catch(() => {});
+    import('@/utils/eaa').then(({ loadCustomFoodsFromFirestore }) => loadCustomFoodsFromFirestore()).catch(() => {});
+  }, [isAuthenticated]);
+
+  // Fade the server-rendered boot splash once auth has resolved.
+  useEffect(() => {
+    if (isLoading) return;
+    document.body.dataset.hydrated = 'true';
+    const t = setTimeout(() => {
+      const el = document.querySelector('.boot-splash');
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [isLoading]);
 
   const login = useCallback((name: string, password: string): boolean => {
     if (!name || password !== MASTER_PASSWORD) return false;

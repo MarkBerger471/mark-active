@@ -26,12 +26,46 @@
   }
 }
 
+html {
+  background: #0f0f1a;
+}
+
 body {
   background: #0f0f1a;
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   min-height: 100vh;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* Server-rendered splash shown until React hydrates + auth resolves.
+   Lives outside the React tree so it paints immediately from the SW-cached
+   HTML on PWA launch — no white flash before JS runs. */
+.boot-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f0f1a;
+  pointer-events: none;
+  transition: opacity 250ms ease-out;
+}
+.boot-splash-mark {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: rgba(185, 10, 10, 0.15);
+  border: 1px solid rgba(185, 10, 10, 0.25);
+  box-shadow: 0 0 30px rgba(185, 10, 10, 0.35), 0 0 60px rgba(185, 10, 10, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b90a0a;
+}
+body[data-hydrated="true"] .boot-splash {
+  opacity: 0;
 }
 
 /* Tabular figures for all data numbers */
