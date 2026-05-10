@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 
 import { getMeasurements, getSetting, getSettingRemote, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
-import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE, calcWeeklyIntake } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE, calcWeeklyIntake, calcTdeeSeries } from '@/utils/calories';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import Sparkline from '@/components/Sparkline';
@@ -330,7 +330,10 @@ export default function Dashboard() {
               const dailyKcal = nutritionPlan?.current.trainingDay.macros.kcal;
               const trainingDayProtein = nutritionPlan?.current.trainingDay.macros.protein || 0;
               if (!bmr || !dailyKcal || trainingSessions.length === 0) return null;
-              const intake = dailyKcal;
+              // Weekly-avg intake: plan + Sunday cheat swap + daily extras.
+              // Same source as Energy Balance card so both stay in sync.
+              const wkIntakeFull = calcWeeklyIntake(dailyKcal, nutritionPlan!.current.trainingDay.meals);
+              const intake = wkIntakeFull.weeklyAvgKcal;
 
               // Cache TDEE once per day — only recompute if date or plan changes
               // Include sum of activeCalories + bodyWeight + bmr in cache key to avoid stale TDEE
@@ -355,8 +358,7 @@ export default function Dashboard() {
               }
               // Derived TDEE (intake-based) — same source as Energy Balance card.
               // Falls back to burn estimate if not enough measurements yet.
-              const wkIntake = calcWeeklyIntake(dailyKcal, nutritionPlan!.current.trainingDay.meals).weeklyAvgKcal;
-              const derived = calcDerivedTDEE(measurements, wkIntake, 28);
+              const derived = calcDerivedTDEE(measurements, intake, 28);
               const tdeeForTarget = derived ? derived.tdee : dailyBurn;
 
               const weekSessions = trainingSessions.filter(s => {
@@ -404,14 +406,13 @@ export default function Dashboard() {
               const burnPct = (tdeeForTarget / maxVal) * 100;
               const intakePct = (intake / maxVal) * 100;
 
-              // Gauge: centered on target midpoint.
-              // Calorie target: prefer user-set override (Target row on Nutrition
-              // page) and back-compute the implied surplus%; else use TDEE × phase%.
-              const phaseSurplusPct = phase === 'bulking' ? 15 : -15;
+              // Gauge target = phase surplus % (always). Decoupled from the
+              // manual calorie override so the gauge reflects the *direction*
+              // of the current phase, not a stale kcal number from a prior
+              // phase. The calorie bar below still honours the manual target.
+              const phaseSurplusPct = phase === 'bulking' ? 10 : -10;
               const targetIntake = userTargets?.kcal ?? Math.round(tdeeForTarget * (1 + phaseSurplusPct / 100));
-              const targetMid = userTargets?.kcal
-                ? Math.round((userTargets.kcal / tdeeForTarget - 1) * 100)
-                : phaseSurplusPct;
+              const targetMid = phaseSurplusPct;
               const distFromTarget = surplusPct - targetMid;
               // Wider range so large deviations show clearly
               const gaugeMin = -20, gaugeMax = 20;
@@ -440,13 +441,22 @@ export default function Dashboard() {
               const pTargetBarH = (proteinTarget / pMax) * barH;
               const pIntakeBarH = (trainingDayProtein / pMax) * barH;
 
-              // Fuel gauge position: map surplus% from range to 0-100%
-              // Range: -20% (deficit) to +30% (surplus), so 0% = maintenance at 40%
-              const fuelMin = -20, fuelMax = 30;
+              // Fuel gauge: symmetric range so 0% maintenance lands at the
+              // bar's center and the "Maintenance" label aligns with reality.
+              // 1pp surplus = 2% bar width with this 50pp range.
+              const fuelMin = -25, fuelMax = 25;
               const fuelPos = Math.max(0, Math.min(100, ((surplusPct - fuelMin) / (fuelMax - fuelMin)) * 100));
-              // Target zone position
-              const fuelTargetPos = ((targetMid - fuelMin) / (fuelMax - fuelMin)) * 100;
-              const fuelTargetWidth = 8; // ±4% zone
+              const fuelTargetPos = Math.max(0, Math.min(100, ((targetMid - fuelMin) / (fuelMax - fuelMin)) * 100));
+              const fuelTargetWidth = 12; // ±3pp target zone (1pp = 2%)
+              // Phase-aware gradient: green centered on the target, fading
+              // through yellow to red at both extremes. Same gradient logic
+              // for cutting and bulking — just shifts with the target.
+              const fuelGradient = `linear-gradient(90deg,
+                rgba(239,68,68,0.55) 0%,
+                rgba(245,158,11,0.45) ${Math.max(0, fuelTargetPos - 16)}%,
+                rgba(34,197,94,0.6) ${fuelTargetPos}%,
+                rgba(245,158,11,0.45) ${Math.min(100, fuelTargetPos + 16)}%,
+                rgba(239,68,68,0.55) 100%)`;
 
               // Calorie bar widths
               const calBarMax = Math.max(intake, targetIntake) * 1.05;
@@ -471,19 +481,19 @@ export default function Dashboard() {
                       <span>Deficit</span><span>Maintenance</span><span>Surplus</span>
                     </div>
                     <div className="relative h-8 bg-white/[0.04] rounded-2xl overflow-hidden">
-                      {/* Background gradient */}
-                      <div className="absolute inset-0 rounded-2xl opacity-15" style={{ background: 'linear-gradient(90deg, #ef4444 0%, #f59e0b 35%, #22c55e 50%, #22c55e 65%, #3b82f6 100%)' }} />
-                      {/* Fill to current */}
-                      <div className="absolute left-0 top-0 bottom-0 rounded-2xl opacity-25" style={{ width: `${fuelPos}%`, background: `linear-gradient(90deg, transparent 60%, ${zoneColor})` }} />
+                      {/* Phase-aware gradient: green centered on target */}
+                      <div className="absolute inset-0 rounded-2xl opacity-30" style={{ background: fuelGradient }} />
+                      {/* Maintenance tick (always at 50%) */}
+                      <div className="absolute top-1 bottom-1 w-px bg-white/15" style={{ left: '50%' }} />
                       {/* Target zone */}
-                      <div className="absolute top-0 bottom-0 rounded" style={{ left: `${fuelTargetPos - fuelTargetWidth / 2}%`, width: `${fuelTargetWidth}%`, background: 'rgba(34,197,94,0.2)', border: '1px dashed rgba(34,197,94,0.3)' }} />
+                      <div className="absolute top-0 bottom-0 rounded" style={{ left: `${fuelTargetPos - fuelTargetWidth / 2}%`, width: `${fuelTargetWidth}%`, background: 'rgba(34,197,94,0.2)', border: '1px dashed rgba(34,197,94,0.4)' }} />
                       {/* Needle */}
                       <div className="absolute -top-1 -bottom-1 w-[3px] rounded-sm" style={{ left: `${fuelPos}%`, transform: 'translateX(-50%)', background: zoneColor, boxShadow: `0 0 10px ${zoneColor}80` }} />
-                      {/* Center label */}
-                      <div className="absolute inset-0 flex items-center justify-center gap-3">
-                        <span className="text-lg font-extrabold text-white" style={{ textShadow: '0 0 10px rgba(0,0,0,0.5)' }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
-                        <span className="text-[10px] text-white/50">target {targetMid > 0 ? '+' : ''}{targetMid}%</span>
-                      </div>
+                    </div>
+                    {/* Readout below the bar — no longer overlaps the markers */}
+                    <div className="flex justify-center items-baseline gap-2 mt-2 text-[11px]">
+                      <span className="text-base font-bold" style={{ color: zoneColor }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
+                      <span className="text-white/40">target {targetMid > 0 ? '+' : ''}{targetMid}%</span>
                     </div>
                   </div>
 
@@ -538,13 +548,38 @@ export default function Dashboard() {
             const wk = calcWeeklyIntake(dailyPlanKcal, nutritionPlan.current.trainingDay.meals);
             const intake = wk.weeklyAvgKcal;
             const cheatDiff = wk.cheatMealKcal - wk.lastMealKcal;
-            const derived = calcDerivedTDEE(measurements, intake, 28);
+
+            // Anchored start date: when Mark started doing it properly. Window
+            // grows day by day from this anchor; once it exceeds 12 weeks the
+            // anchor effectively rolls forward (older data drops off).
+            const TDEE_ANCHOR = '2026-04-12';
+            const today = new Date();
+            const rollCap = new Date(today); rollCap.setDate(rollCap.getDate() - 84);
+            const rollCapStr = rollCap.toISOString().split('T')[0];
+            const effectiveStart = TDEE_ANCHOR > rollCapStr ? TDEE_ANCHOR : rollCapStr;
+
+            const derived = calcDerivedTDEE(measurements, intake, 28, undefined, effectiveStart);
             if (!derived) return null;
 
+            // Weekly TDEE samples — each uses the same anchored start, just a
+            // different end date. Earlier samples have less data → noisier.
+            // The line "settling" toward today's value visualises convergence.
+            const sampleDates: string[] = [];
+            for (let w = 4; w >= 0; w--) {
+              const d = new Date(today);
+              d.setDate(d.getDate() - w * 7);
+              sampleDates.push(d.toISOString().split('T')[0]);
+            }
+            const series = sampleDates.map(date => {
+              const r = calcDerivedTDEE(measurements, intake, 28, date, effectiveStart);
+              return { date, tdee: r ? r.tdee : null };
+            });
+
             const surplusPct = Math.round((derived.surplusKcalPerDay / derived.tdee) * 100);
-            // Phase-aware target ranges: bulk +0.25..+0.5%/wk, cut -0.5..-0.75%/wk
-            const targetMid = phase === 'bulking' ? 0.4 : -0.6;
-            const targetSurplusPct = phase === 'bulking' ? 15 : -15;
+            // Phase-aware target ranges (10% surplus / 10% deficit):
+            // bulk ~+0.25%/wk, cut ~-0.4%/wk.
+            const targetMid = phase === 'bulking' ? 0.25 : -0.4;
+            const targetSurplusPct = phase === 'bulking' ? 10 : -10;
             const recommendedIntake = Math.round(derived.tdee * (1 + targetSurplusPct / 100));
             const intakeDelta = recommendedIntake - intake;
 
@@ -568,15 +603,72 @@ export default function Dashboard() {
                   <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: statusColor }}>{statusLabel}</span>
                 </div>
 
-                {/* Headline TDEE */}
-                <div className="mb-4">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-black gradient-text data-value">{derived.tdee.toLocaleString()}</span>
-                    <span className="text-xs text-white/40">kcal/day TDEE</span>
+                {/* Headline TDEE + 5-week timeline */}
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-4xl font-black gradient-text data-value">{derived.tdee.toLocaleString()}</span>
+                      <span className="text-xs text-white/40">kcal/day TDEE</span>
+                    </div>
+                    <p className="text-[10px] text-white/30 mt-1">
+                      derived from {derived.measurementCount} weigh-ins over {derived.daysSpan}d ({derived.weightChangeKg > 0 ? '+' : ''}{derived.weightChangeKg} kg)
+                    </p>
                   </div>
-                  <p className="text-[10px] text-white/30 mt-1">
-                    derived from {derived.measurementCount} weigh-ins over {derived.daysSpan}d ({derived.weightChangeKg > 0 ? '+' : ''}{derived.weightChangeKg} kg)
-                  </p>
+                  {(() => {
+                    const valid = series.filter(s => s.tdee != null) as { date: string; tdee: number }[];
+                    if (valid.length < 2) return null;
+                    // Today's value is the reference — it uses the most data
+                    // and is the best current TDEE estimate.
+                    const referenceTdee = derived.tdee;
+                    const tdeeVals = [...valid.map(s => s.tdee), referenceTdee];
+                    const minY = Math.min(...tdeeVals) - 50;
+                    const maxY = Math.max(...tdeeVals) + 50;
+                    const w = 160, h = 56, padX = 8, padY = 10;
+                    const xFor = (i: number) => padX + (i / (series.length - 1)) * (w - padX * 2);
+                    const yFor = (v: number) => padY + (1 - (v - minY) / (maxY - minY)) * (h - padY * 2);
+                    // Build polylines that skip null gaps
+                    const linePts = series.map((s, i) => s.tdee != null ? `${xFor(i).toFixed(1)},${yFor(s.tdee).toFixed(1)}` : null);
+                    const segments: string[] = [];
+                    let cur: string[] = [];
+                    for (const p of linePts) {
+                      if (p) cur.push(p);
+                      else if (cur.length > 1) { segments.push(cur.join(' ')); cur = []; }
+                      else cur = [];
+                    }
+                    if (cur.length > 1) segments.push(cur.join(' '));
+                    const refY = yFor(referenceTdee);
+                    // Trend label: only meaningful with ≥8 weeks of clean data.
+                    // For now we have ~4 weeks → "stabilizing".
+                    const startDate = new Date(effectiveStart + 'T00:00:00');
+                    const weeksSinceStart = Math.floor((Date.now() - startDate.getTime()) / (86400000 * 7));
+                    let trendLabel = 'stabilizing';
+                    if (weeksSinceStart >= 8 && valid.length >= 4) {
+                      // Compare first half vs second half of the visible samples
+                      const half = Math.floor(valid.length / 2);
+                      const earlyAvg = valid.slice(0, half).reduce((s, v) => s + v.tdee, 0) / half;
+                      const lateAvg = valid.slice(-half).reduce((s, v) => s + v.tdee, 0) / half;
+                      const slope = (lateAvg - earlyAvg) / (valid.length - half);
+                      if (Math.abs(slope) < 30) trendLabel = 'stable';
+                      else trendLabel = slope > 0 ? `trending up ${Math.round(slope)} kcal/wk` : `trending down ${Math.round(-slope)} kcal/wk`;
+                    }
+                    return (
+                      <div className="flex flex-col items-end">
+                        <svg width={w} height={h} className="overflow-visible">
+                          {/* Reference line at today's TDEE — the value the dots converge to */}
+                          <line x1={padX} y1={refY} x2={w - padX} y2={refY} stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.45" />
+                          {segments.map((seg, i) => (
+                            <polyline key={i} points={seg} fill="none" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
+                          ))}
+                          {series.map((s, i) => {
+                            if (s.tdee == null) return null;
+                            const isLast = i === series.length - 1;
+                            return <circle key={i} cx={xFor(i)} cy={yFor(s.tdee)} r={isLast ? 3 : 2} fill="#22c55e" />;
+                          })}
+                        </svg>
+                        <div className="text-[9px] text-white/30 mt-1">TDEE estimate · {trendLabel}</div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* 3-column stat row */}
@@ -615,7 +707,7 @@ export default function Dashboard() {
                 )}
 
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-3 mt-3 border-t border-white/5 text-[10px] text-white/20">
-                  <span>plan {dailyPlanKcal.toLocaleString()} + Sun cheat {cheatDiff > 0 ? '+' : ''}{cheatDiff} = {intake.toLocaleString()}/day</span>
+                  <span>plan {dailyPlanKcal.toLocaleString()} + extras +{wk.extrasKcal} + Sun cheat {cheatDiff > 0 ? '+' : ''}{cheatDiff} = {intake.toLocaleString()}/day</span>
                   <span>•</span>
                   {derived.method === 'personalized' && derived.leanChangeKg != null && derived.fatChangeKg != null ? (
                     <span>
@@ -1094,7 +1186,8 @@ export default function Dashboard() {
             // measure hours since THAT group was last trained (cardio excluded).
             // Rotation per Mark: Shoulders+Abs → Back+Biceps → Chest+Triceps → Legs → (repeat).
             // Cardio days fall between lifting days but don't shift the rotation.
-            const ROTATION = ['Shoulders + Abs', 'Back + Biceps', 'Chest + Triceps', 'Legs'];
+            // Matches the preset order on the Training plan page.
+            const ROTATION = ['Shoulders + Abs', 'Legs', 'Chest + Triceps', 'Back + Biceps'];
             const sessionTs = (s: TrainingSession) => new Date(s.savedAt || s.startedAt || s.date + 'T23:59:59').getTime();
             const weightSessions = trainingSessions
               .filter(s => s.workoutName !== 'Cardio' && ROTATION.includes(s.workoutName))
@@ -1614,10 +1707,11 @@ export default function Dashboard() {
                 const cLabelStep = Math.max(1, Math.floor(allChartDates.length / 6));
 
                 const renderCompositionPill = (
-                  data: { week: number; val: number; date: string }[],
+                  data: { week: number; val: number; date: string; newScale?: boolean }[],
                   color: string,
                   label: string,
                   unit: string,
+                  xRange?: { min: number; max: number },
                 ) => {
                   if (data.length < 2) return null;
                   const vals = data.map(d => d.val);
@@ -1625,19 +1719,32 @@ export default function Dashboard() {
                   const mx = Math.max(...vals) + 0.5;
                   const rng = mx - mn || 1;
                   const sparkW = 120, sparkH = 32, sparkPad = 4;
-                  const wkMin = data[0].week;
-                  const wkMax = data[data.length - 1].week;
+                  // Anchor X-axis to the configured time window (e.g. "20 weeks
+                  // ago → today") so sparse data plots at its real position
+                  // instead of stretching to fill width.
+                  const wkMin = xRange ? xRange.min : data[0].week;
+                  const wkMax = xRange ? xRange.max : data[data.length - 1].week;
                   const wkRng = wkMax - wkMin || 1;
                   const pts = data.map((d) => ({
                     x: sparkPad + ((d.week - wkMin) / wkRng) * (sparkW - sparkPad * 2),
                     y: sparkPad + (1 - (d.val - mn) / rng) * (sparkH - sparkPad * 2),
                     val: d.val,
+                    newScale: !!d.newScale,
                   }));
                   const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
                   const area = `${line} L ${sparkW} ${sparkH} L 0 ${sparkH} Z`;
                   const gradId = `compPill-${label.replace(/\s/g, '')}`;
 
-                  const totalChange = Math.round((pts[pts.length - 1].val - pts[0].val) * 10) / 10;
+                  // Anchor the change to the latest scale break: a delta
+                  // across the break would mix two scales' algorithms and
+                  // mean nothing. If only one point exists on the new scale,
+                  // no change is shown at all.
+                  let lastBreakIdx = -1;
+                  for (let i = pts.length - 1; i >= 0; i--) { if (pts[i].newScale) { lastBreakIdx = i; break; } }
+                  const startIdx = lastBreakIdx >= 0 ? lastBreakIdx : 0;
+                  const totalChange = pts.length - 1 > startIdx
+                    ? Math.round((pts[pts.length - 1].val - pts[startIdx].val) * 10) / 10
+                    : 0;
                   const changeColor = label === 'Body Fat' ? (totalChange < 0 ? '#22c55e' : '#ef4444') : (totalChange > 0 ? '#22c55e' : '#ef4444');
                   const changeArrow = totalChange > 0 ? '↗' : totalChange < 0 ? '↘' : '→';
                   const last = pts[pts.length - 1];
@@ -1647,31 +1754,64 @@ export default function Dashboard() {
                       <div className="flex-shrink-0">
                         <div className="text-[9px] text-white/30 uppercase tracking-wider">{label}</div>
                         <div className="text-[22px] font-extrabold leading-none mt-0.5" style={{ color }}>{last.val}{unit}</div>
-                        {totalChange !== 0 && <div className="text-[9px] font-semibold mt-1" style={{ color: changeColor }}>{changeArrow} {totalChange > 0 ? '+' : ''}{totalChange}{unit}</div>}
+                        {totalChange !== 0 && (
+                          <div className="text-[9px] font-semibold mt-1" style={{ color: changeColor }}>{changeArrow} {totalChange > 0 ? '+' : ''}{totalChange}{unit}</div>
+                        )}
                       </div>
-                      <svg viewBox={`0 0 ${sparkW} ${sparkH}`} className="flex-1 h-8" preserveAspectRatio="none">
-                        <defs>
-                          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={color} stopOpacity="0.15" />
-                            <stop offset="100%" stopColor={color} stopOpacity="0" />
-                          </linearGradient>
-                        </defs>
-                        <path d={area} fill={`url(#${gradId})`} />
-                        <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
-                        <circle cx={last.x} cy={last.y} r="2.5" fill={color} />
-                      </svg>
+                      <div className="relative flex-1 h-8">
+                        <svg viewBox={`0 0 ${sparkW} ${sparkH}`} className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+                          <defs>
+                            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={color} stopOpacity="0.15" />
+                              <stop offset="100%" stopColor={color} stopOpacity="0" />
+                            </linearGradient>
+                          </defs>
+                          <path d={area} fill={`url(#${gradId})`} />
+                          <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+                          {pts.map((p, i) => {
+                            if (!p.newScale) return null;
+                            const x = i === 0 ? p.x : (pts[i - 1].x + p.x) / 2;
+                            return <line key={`s-${i}`} x1={x} y1={0} x2={x} y2={sparkH} stroke="#f59e0b" strokeWidth="1" strokeDasharray="2 2" opacity="0.8" />;
+                          })}
+                        </svg>
+                        {/* Dot rendered as HTML overlay so it stays circular
+                            regardless of the SVG's horizontal stretch. */}
+                        <span
+                          className="absolute w-1 h-1 rounded-full"
+                          style={{
+                            left: `${(last.x / sparkW) * 100}%`,
+                            top: `${(last.y / sparkH) * 100}%`,
+                            backgroundColor: color,
+                            transform: 'translate(-50%, -50%)',
+                          }}
+                        />
+                      </div>
                     </div>
                   );
                 };
 
-                const bfData = measurements.map((m, i) => m.bodyFat != null ? { week: weeks[i], val: m.bodyFat, date: m.date } : null).filter((d): d is { week: number; val: number; date: string } => d !== null);
-                const mmData = measurements.map((m, i) => m.muscleMass != null ? { week: weeks[i], val: m.muscleMass, date: m.date } : null).filter((d): d is { week: number; val: number; date: string } => d !== null);
+                // Limit composition curves to the last 20 weeks — older data
+                // is rarely actionable and just compresses the recent trend.
+                const WINDOW_WEEKS = 20;
+                const cutoffMs = Date.now() - WINDOW_WEEKS * 7 * 86400000;
+                const bfData = measurements.map((m, i) => m.bodyFat != null && new Date(m.date).getTime() >= cutoffMs ? { week: weeks[i], val: m.bodyFat, date: m.date, newScale: !!m.newScale } : null).filter((d): d is { week: number; val: number; date: string; newScale: boolean } => d !== null);
+                const mmData = measurements.map((m, i) => m.muscleMass != null && new Date(m.date).getTime() >= cutoffMs ? { week: weeks[i], val: m.muscleMass, date: m.date, newScale: !!m.newScale } : null).filter((d): d is { week: number; val: number; date: string; newScale: boolean } => d !== null);
 
                 if (bfData.length < 2 && mmData.length < 2) return null;
+                // Anchor right edge to today, left edge to the oldest visible
+                // reading (or 20 weeks back, whichever is more recent). Avoids
+                // dead space when data is sparse, while still honouring the
+                // 20-week cap for older histories.
+                const todayWk = weeks[weeks.length - 1];
+                const oldestVisibleWk = Math.min(
+                  ...(bfData.length ? [bfData[0].week] : [todayWk]),
+                  ...(mmData.length ? [mmData[0].week] : [todayWk]),
+                );
+                const xRange = { min: Math.max(oldestVisibleWk, todayWk - WINDOW_WEEKS), max: todayWk };
                 return (
                   <div className="grid grid-cols-2 gap-3 mt-3">
-                    {renderCompositionPill(bfData, '#ef4444', 'Body Fat', '%')}
-                    {renderCompositionPill(mmData, '#3b82f6', 'Muscle Mass', 'kg')}
+                    {renderCompositionPill(bfData, '#ef4444', 'Body Fat', '%', xRange)}
+                    {renderCompositionPill(mmData, '#3b82f6', 'Muscle Mass', 'kg', xRange)}
                   </div>
                 );
               })()}

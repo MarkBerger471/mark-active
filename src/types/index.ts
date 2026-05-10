@@ -10,6 +10,7 @@ export interface Measurement {
   muscleMass?: number;
   bmr?: number;           // Basal Metabolic Rate (kcal)
   recommendedCalories?: number; // Recommended Calorie Intake (kcal)
+  newScale?: boolean;    // First reading on a different scale — BF%/MM/BMR baselines reset here
   energy?: string;
   hunger?: string;
   tiredness?: string;

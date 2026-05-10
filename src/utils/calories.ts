@@ -1,4 +1,4 @@
-import { TrainingSession, NutritionMeal, Measurement } from '@/types';
+import { TrainingSession, NutritionMeal, Measurement, NutritionPlan, NutritionPlanVersion } from '@/types';
 
 const CARDIO_METS: Record<string, number> = {
   'stairmaster': 9.0,
@@ -216,6 +216,8 @@ export function calcDerivedTDEE(
   measurements: Measurement[],
   dailyIntakeKcal: number,
   windowDays: number = 28,
+  asOfDate?: string,
+  startDate?: string,
 ): {
   tdee: number;
   weightChangeKg: number;
@@ -236,11 +238,20 @@ export function calcDerivedTDEE(
   const sorted = [...measurements].filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
   if (sorted.length < 2) return null;
 
-  // Trailing window
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - windowDays);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
-  const window = sorted.filter(m => m.date >= cutoffStr);
+  // Window ending at asOfDate (default today). If startDate is supplied
+  // it anchors the lower bound (window grows as time passes); otherwise
+  // we use a trailing windowDays span.
+  const endRef = asOfDate ? new Date(asOfDate + 'T00:00:00') : new Date();
+  let cutoffStr: string;
+  if (startDate) {
+    cutoffStr = startDate;
+  } else {
+    const cutoff = new Date(endRef);
+    cutoff.setDate(cutoff.getDate() - windowDays);
+    cutoffStr = cutoff.toISOString().split('T')[0];
+  }
+  const endStr = endRef.toISOString().split('T')[0];
+  const window = sorted.filter(m => m.date >= cutoffStr && m.date <= endStr);
   if (window.length < 2) return null;
 
   const start = window[0];
@@ -359,6 +370,10 @@ export function calcRecommendedMacros(
 }
 
 const CHEAT_MEAL_KCAL = 1300;
+// Average daily extras not in the logged meal plan: coffee with milk + small
+// snacks throughout the day. Folded into intake so derived TDEE / surplus
+// calculations reflect what's actually being eaten.
+const DAILY_EXTRAS_KCAL = 100;
 
 // Per-100g kcal for computing last meal calories (subset of FOOD_DB)
 const KCAL_PER_100G: Record<string, number> = {
@@ -406,13 +421,51 @@ function calcMealKcal(meal: NutritionMeal): number {
 export function calcWeeklyIntake(
   dailyKcal: number,
   meals: NutritionMeal[],
-): { weeklyAvgKcal: number; lastMealKcal: number; cheatMealKcal: number } {
+): { weeklyAvgKcal: number; lastMealKcal: number; cheatMealKcal: number; extrasKcal: number } {
   let lastMealKcal = 0;
   if (meals.length > 0) {
     lastMealKcal = calcMealKcal(meals[meals.length - 1]);
   }
   if (lastMealKcal === 0 && meals.length > 0) lastMealKcal = Math.round(dailyKcal / meals.length);
   const sundayDiff = CHEAT_MEAL_KCAL - lastMealKcal;
-  const weeklyAvgKcal = Math.round((dailyKcal * 7 + sundayDiff) / 7);
-  return { weeklyAvgKcal, lastMealKcal, cheatMealKcal: CHEAT_MEAL_KCAL };
+  const weeklyAvgKcal = Math.round((dailyKcal * 7 + sundayDiff + DAILY_EXTRAS_KCAL * 7) / 7);
+  return { weeklyAvgKcal, lastMealKcal, cheatMealKcal: CHEAT_MEAL_KCAL, extrasKcal: DAILY_EXTRAS_KCAL };
+}
+
+/**
+ * Find which nutrition plan version was active on a given date.
+ * Falls back to current if no version covers that date.
+ */
+export function getPlanForDate(plan: NutritionPlan, dateStr: string): NutritionPlanVersion {
+  const cur = plan.current;
+  if (cur && cur.startDate <= dateStr && (!cur.endDate || cur.endDate >= dateStr)) return cur;
+  for (const v of plan.history || []) {
+    if (v.startDate <= dateStr && (!v.endDate || v.endDate >= dateStr)) return v;
+  }
+  return cur;
+}
+
+/**
+ * Compute a TDEE timeline using the actual plan that was active at each
+ * sample date, plus a longer-window baseline. The 28d series should
+ * oscillate around the baseline if lifestyle is stable.
+ */
+export function calcTdeeSeries(
+  measurements: Measurement[],
+  plan: NutritionPlan,
+  sampleDates: string[],
+  windowDays: number = 28,
+): { date: string; tdee: number | null; planChanged: boolean }[] {
+  return sampleDates.map((date) => {
+    const planAtEnd = getPlanForDate(plan, date);
+    const wkIntake = calcWeeklyIntake(planAtEnd.trainingDay.macros.kcal, planAtEnd.trainingDay.meals).weeklyAvgKcal;
+    const result = calcDerivedTDEE(measurements, wkIntake, windowDays, date);
+    // Flag if the plan changed mid-window — that sample mixes intakes
+    const cutoff = new Date(date + 'T00:00:00');
+    cutoff.setDate(cutoff.getDate() - windowDays);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const planAtStart = getPlanForDate(plan, cutoffStr);
+    const planChanged = planAtStart.id !== planAtEnd.id;
+    return { date, tdee: result ? result.tdee : null, planChanged };
+  });
 }

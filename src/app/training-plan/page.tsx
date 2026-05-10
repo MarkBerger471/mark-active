@@ -186,6 +186,9 @@ export default function TrainingPlanPage() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [addingExercise, setAddingExercise] = useState(false);
   const [addExerciseInput, setAddExerciseInput] = useState('');
+  // Tap-to-confirm exercise delete (iOS PWA swallows window.confirm,
+  // so the X button now uses an inline two-step confirmation).
+  const [pendingDeleteIdx, setPendingDeleteIdx] = useState<number | null>(null);
   const exercisesRef = useRef(exercises);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef(sessionId);
@@ -273,10 +276,23 @@ export default function TrainingPlanPage() {
   const deleteExercise = (idx: number) => {
     const ex = exercisesRef.current[idx];
     if (!ex) return;
-    if (!confirm(`Delete "${ex.name}"?\n\nThis removes it from this session and future sessions of "${activeWorkoutRef.current}".`)) return;
     setExercises(prev => prev.filter((_, i) => i !== idx));
     setExpandedExercise(null);
+    setPendingDeleteIdx(null);
     triggerAutoSave();
+  };
+
+  // Two-step delete: first tap arms (idx becomes pending), second tap deletes.
+  // Auto-disarms after 3s so an accidental tap doesn't linger.
+  const handleDeleteTap = (idx: number) => {
+    if (pendingDeleteIdx === idx) {
+      deleteExercise(idx);
+      return;
+    }
+    setPendingDeleteIdx(idx);
+    setTimeout(() => {
+      setPendingDeleteIdx(prev => prev === idx ? null : prev);
+    }, 3000);
   };
 
   const addExercise = (rawName: string) => {
@@ -1233,10 +1249,14 @@ export default function TrainingPlanPage() {
                         title="Move down"
                       >&#9660;</button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); deleteExercise(exIdx); }}
-                        className="w-7 h-7 flex items-center justify-center text-white/30 hover:text-red-400 hover:bg-white/5 rounded transition-all text-sm"
-                        title="Delete exercise"
-                      >&times;</button>
+                        onClick={(e) => { e.stopPropagation(); handleDeleteTap(exIdx); }}
+                        className={`flex items-center justify-center rounded transition-all text-sm h-7 ${
+                          pendingDeleteIdx === exIdx
+                            ? 'px-2 bg-red-500/20 border border-red-400/40 text-red-300 font-semibold'
+                            : 'w-7 text-white/30 hover:text-red-400 hover:bg-white/5'
+                        }`}
+                        title={pendingDeleteIdx === exIdx ? 'Tap again to confirm' : 'Delete exercise'}
+                      >{pendingDeleteIdx === exIdx ? 'Delete?' : '×'}</button>
                       <span className="text-xs text-white/30 ml-1">{doneWorkingSets}/{workingSets.length}{warmupSets.length > 0 ? ` +${warmupSets.length}WU` : ''}</span>
                       <span className={`text-white/20 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
                     </div>

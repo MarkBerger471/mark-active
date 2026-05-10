@@ -28,6 +28,7 @@ export default function BodyMetrix() {
   const [muscleMass, setMuscleMass] = useState('');
   const [bmr, setBmr] = useState('');
   const [recommendedCalories, setRecommendedCalories] = useState('');
+  const [newScale, setNewScale] = useState(false);
   const [energy, setEnergy] = useState('');
   const [hunger, setHunger] = useState('');
   const [tiredness, setTiredness] = useState('');
@@ -149,6 +150,7 @@ export default function BodyMetrix() {
     setMuscleMass(last?.muscleMass != null ? String(last.muscleMass) : '');
     setBmr(last?.bmr != null ? String(last.bmr) : '');
     setRecommendedCalories(last?.recommendedCalories != null ? String(last.recommendedCalories) : '');
+    setNewScale(false); // Always reset — only mark explicitly when actually switching scales
     setHunger(last?.hunger || '');
     setDigestion(last?.digestion || '');
     // Count training sessions since last measurement
@@ -232,6 +234,7 @@ export default function BodyMetrix() {
       muscleMass: muscleMass ? parseFloat(muscleMass) : undefined,
       bmr: bmr ? parseFloat(bmr) : undefined,
       recommendedCalories: recommendedCalories ? parseFloat(recommendedCalories) : undefined,
+      newScale: newScale || undefined,
       energy: energy || undefined,
       hunger: hunger || undefined,
       tiredness: tiredness || undefined,
@@ -276,6 +279,7 @@ export default function BodyMetrix() {
     setMuscleMass(m.muscleMass != null ? String(m.muscleMass) : '');
     setBmr(m.bmr != null ? String(m.bmr) : '');
     setRecommendedCalories(m.recommendedCalories != null ? String(m.recommendedCalories) : '');
+    setNewScale(!!m.newScale);
     setArms(String(m.arms));
     setChest(String(m.chest));
     setWaist(String(m.waist));
@@ -318,9 +322,13 @@ export default function BodyMetrix() {
   // Reverse chronological for timeline
   const sortedMeasurements = [...measurements].reverse();
 
-  // SVG Chart for any measurement field
-  const renderChart = (field: 'weight' | 'arms' | 'chest' | 'waist' | 'legs', label: string, unit: string, color: string, gradientId: string) => {
-    if (measurements.length < 2) return null;
+  // SVG Chart for any measurement field. Optional fields (bodyFat,
+  // muscleMass, bmr, recommendedCalories) are filtered to readings that
+  // actually have the value. New-scale readings are flagged with a vertical
+  // amber marker line.
+  const renderChart = (field: 'weight' | 'arms' | 'chest' | 'waist' | 'legs' | 'bodyFat' | 'muscleMass' | 'bmr' | 'recommendedCalories', label: string, unit: string, color: string, gradientId: string) => {
+    const filtered = measurements.filter(m => (m[field] as number | undefined) != null);
+    if (filtered.length < 2) return null;
 
     const chartWidth = 600;
     const chartHeight = 180;
@@ -328,15 +336,15 @@ export default function BodyMetrix() {
     const innerWidth = chartWidth - padding.left - padding.right;
     const innerHeight = chartHeight - padding.top - padding.bottom;
 
-    const values = measurements.map(m => m[field]);
+    const values = filtered.map(m => m[field] as number);
     const minVal = Math.min(...values) - 1;
     const maxVal = Math.max(...values) + 1;
     const range = maxVal - minVal || 1;
 
-    const points = measurements.map((m, i) => {
-      const x = padding.left + (measurements.length === 1 ? innerWidth / 2 : (i / (measurements.length - 1)) * innerWidth);
-      const y = padding.top + innerHeight - ((m[field] - minVal) / range) * innerHeight;
-      return { x, y, val: m[field], date: m.date };
+    const points = filtered.map((m, i) => {
+      const x = padding.left + (filtered.length === 1 ? innerWidth / 2 : (i / (filtered.length - 1)) * innerWidth);
+      const y = padding.top + innerHeight - (((m[field] as number) - minVal) / range) * innerHeight;
+      return { x, y, val: m[field] as number, date: m.date, newScale: !!m.newScale };
     });
 
     const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
@@ -378,11 +386,24 @@ export default function BodyMetrix() {
             </defs>
             <path d={areaPath} fill={`url(#${gradientId})`} />
             <path d={linePath} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {/* New-scale marker — vertical amber dash drawn BETWEEN the
+                last old-scale reading and the new-scale one (so visually
+                "everything left = old scale, right = new scale"). */}
+            {points.map((p, i) => {
+              if (!p.newScale) return null;
+              const x = i === 0 ? p.x : (points[i - 1].x + p.x) / 2;
+              return (
+                <g key={`scale-${i}`}>
+                  <line x1={x} y1={padding.top} x2={x} y2={padding.top + innerHeight} stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.7" />
+                  <text x={x} y={padding.top - 6} textAnchor="middle" fill="#f59e0b" fontSize="9" opacity="0.85">new scale</text>
+                </g>
+              );
+            })}
             {points.map((p, i) => (
               <g key={i}>
                 <circle cx={p.x} cy={p.y} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />
                 <text x={p.x} y={p.y - 10} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="9">{p.val}</text>
-                {(i === 0 || i === points.length - 1 || measurements.length <= 8 || i % Math.ceil(measurements.length / 6) === 0) && (
+                {(i === 0 || i === points.length - 1 || filtered.length <= 8 || i % Math.ceil(filtered.length / 6) === 0) && (
                   <text x={p.x} y={chartHeight - 6} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="9" transform={`rotate(-30, ${p.x}, ${chartHeight - 6})`}>
                     {new Date(p.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                   </text>
@@ -444,6 +465,22 @@ export default function BodyMetrix() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* New-scale flag — marks the discontinuity for BF%/MM/BMR/RecCal */}
+      <div className="mb-6">
+        <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-white/70">
+          <input
+            type="checkbox"
+            checked={newScale}
+            onChange={e => setNewScale(e.target.checked)}
+            className="w-4 h-4 accent-amber-400"
+          />
+          <span>This reading is from a different / new scale</span>
+        </label>
+        <p className="text-[11px] text-white/30 mt-1 ml-6">
+          BIA scales use proprietary formulas — switching scales causes a step change in body fat, muscle mass, BMR and rec. calories that isn&apos;t real. Marking it draws a line on the chart so you don&apos;t mistake it for a trend.
+        </p>
       </div>
 
       {/* Text status fields */}
@@ -550,10 +587,6 @@ export default function BodyMetrix() {
               </div>
             ) : (
               <div className="relative">
-                {/* Timeline connector line */}
-                {sortedMeasurements.length > 1 && (
-                  <div className="absolute left-[19px] top-8 bottom-8 w-0.5 bg-gradient-to-b from-va-red/30 via-va-red/10 to-transparent hidden sm:block" />
-                )}
                 <div className="space-y-4">
                 {sortedMeasurements.map((m, mIdx) => {
                   // Find previous measurement (chronologically before this one)
@@ -571,9 +604,7 @@ export default function BodyMetrix() {
                   }
 
                   return (
-                  <div key={m.date} id={`measurement-${m.date}`} className="glass-card p-6 card-animate sm:pl-12 relative" style={{ animationDelay: `${mIdx * 60}ms` }}>
-                    {/* Timeline dot */}
-                    <div className={`absolute left-3.5 top-7 w-3 h-3 rounded-full border-2 hidden sm:block ${mIdx === 0 ? 'bg-va-red border-va-red shadow-[0_0_8px_rgba(185,10,10,0.5)]' : 'bg-white/10 border-white/20'}`} />
+                  <div key={m.date} id={`measurement-${m.date}`} className="glass-card p-6 card-animate relative" style={{ animationDelay: `${mIdx * 60}ms` }}>
                     <div
                       className="flex items-center justify-between mb-4 cursor-pointer"
                       onClick={() => setExpandedEntry(isExpanded ? null : m.date)}
@@ -600,8 +631,13 @@ export default function BodyMetrix() {
 
                     {/* Measurement Values */}
                     {(() => {
+                      // Suppress diff for BIA-derived fields when this entry
+                      // came from a different scale — the delta would just
+                      // measure algorithm difference, not real change.
+                      const BIA_FIELDS = new Set(['bodyFat', 'muscleMass', 'bmr', 'recommendedCalories']);
                       const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'bmr' | 'recommendedCalories' | 'arms' | 'chest' | 'waist' | 'legs'; unit: string; lowerIsBetter?: boolean }) => {
-                        const change = getChange(m, previous, stat.field);
+                        const suppressDiff = !!m.newScale && BIA_FIELDS.has(stat.field);
+                        const change = suppressDiff ? undefined : getChange(m, previous, stat.field);
                         const isGood = change !== undefined && change !== 0 && (stat.lowerIsBetter ? change < 0 : change > 0);
                         const isBad = change !== undefined && change !== 0 && !isGood;
                         const tint = isGood ? 'from-green-500/8 to-transparent' : isBad ? 'from-red-500/8 to-transparent' : '';
@@ -609,13 +645,13 @@ export default function BodyMetrix() {
                           <div key={stat.label} className={`bg-white/5 rounded-xl p-3 bg-gradient-to-br ${tint}`}>
                             <p className="text-[10px] text-white/40 uppercase tracking-wider">{stat.label}</p>
                             <p className="text-lg font-bold gradient-text data-value">{stat.value}</p>
-                            {change !== undefined && change !== 0 && (
+                            {suppressDiff ? (
+                              <p className="text-[10px] text-amber-400/70 mt-1">new scale</p>
+                            ) : change !== undefined && change !== 0 ? (
                               <div className="mt-1">{formatChange(change, stat.lowerIsBetter)}</div>
-                            )}
-                            {change === 0 && (
+                            ) : change === 0 ? (
                               <p className="text-xs text-white/20 mt-1">→ 0</p>
-                            )}
-                            {change === undefined && (
+                            ) : (
                               <p className="text-xs text-white/20 mt-1">—</p>
                             )}
                           </div>
@@ -703,6 +739,10 @@ export default function BodyMetrix() {
                         <h4 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-4">Progression Charts</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {renderChart('weight', 'Weight', 'kg', '#b90a0a', 'grad-weight')}
+                          {renderChart('bodyFat', 'Body Fat', '%', '#ef4444', 'grad-bf')}
+                          {renderChart('muscleMass', 'Muscle Mass', 'kg', '#10b981', 'grad-mm')}
+                          {renderChart('bmr', 'BMR', 'kcal', '#06b6d4', 'grad-bmr')}
+                          {renderChart('recommendedCalories', 'Rec. Calories', 'kcal', '#a855f7', 'grad-rc')}
                           {renderChart('arms', 'Arms', 'cm', '#3b82f6', 'grad-arms')}
                           {renderChart('chest', 'Chest', 'cm', '#8b5cf6', 'grad-chest')}
                           {renderChart('waist', 'Waist', 'cm', '#f59e0b', 'grad-waist')}
