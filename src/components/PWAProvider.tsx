@@ -11,14 +11,9 @@ export default function PWAProvider() {
           regs.forEach(r => r.unregister())
         );
       } else {
-        // Auto-reload once when a new SW takes control (delivers fresh code after deploy)
-        let refreshing = false;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (refreshing) return;
-          refreshing = true;
-          window.location.reload();
-        });
-
+        // No mid-session reload on controllerchange — the new SW takes over
+        // on the next cold launch. Forcing a reload while the cache is mid-
+        // rotation has caused iOS PWA "This page couldn't load" failures.
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(reg => {
           // Check for updates on every mount + on focus (PWA resume)
           reg.update().catch(() => {});
