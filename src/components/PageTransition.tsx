@@ -10,14 +10,12 @@ export default function PageTransition({ children }: { children: React.ReactNode
 
   useEffect(() => {
     if (prevPath.current === pathname) return;
-    setAnimClass('page-fade-out');
-    let inner: ReturnType<typeof setTimeout> | null = null;
-    const timer = setTimeout(() => {
-      setAnimClass('page-fade-in');
-      inner = setTimeout(() => setAnimClass(''), 200);
-    }, 100);
+    // Skip the fade-out entirely — it just delays the new content from
+    // showing. Fade-in only, kept short so navigation feels instant.
+    setAnimClass('page-fade-in');
+    const timer = setTimeout(() => setAnimClass(''), 90);
     prevPath.current = pathname;
-    return () => { clearTimeout(timer); if (inner) clearTimeout(inner); };
+    return () => { clearTimeout(timer); };
   }, [pathname]);
 
   return (
