@@ -365,11 +365,20 @@ export async function getTrainingSessions(): Promise<TrainingSession[]> {
   }
 }
 
+// Local-date YYYY-MM-DD (not UTC). Avoids "session saved before UTC midnight
+// shows as yesterday" bug for users east of UTC.
+export function localDateStr(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export async function saveTrainingSession(session: TrainingSession) {
   const allLocal = await idbGetSessions();
   const existing = allLocal.find(s => s.id === session.id);
   const now = new Date().toISOString();
-  const today = now.split('T')[0];
+  const today = localDateStr();
 
   // Cardio is wallclock-immune: durations are user-entered only (manual edit
   // via pencil icon). Auto-compute would balloon if the cardio session is

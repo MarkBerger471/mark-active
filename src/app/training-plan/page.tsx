@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import Navigation from '@/components/Navigation';
-import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, updateSessionDuration, getMeasurements } from '@/utils/storage';
+import { getPresetWorkouts, getLastSessionForWorkout, saveTrainingSession, getTrainingSessions, deleteTrainingSession, updateSessionDuration, getMeasurements, localDateStr } from '@/utils/storage';
 import { Workout, TrainingExercise, TrainingSession, TrainingSet, Measurement } from '@/types';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import { calcSessionCalories, parseDurationMinutes } from '@/utils/calories';
@@ -218,7 +218,7 @@ export default function TrainingPlanPage() {
     const session: TrainingSession = {
       ...(existing || {}),
       id: sessionIdRef.current,
-      date: sessionDateRef.current || new Date().toISOString().split('T')[0],
+      date: sessionDateRef.current || localDateStr(),
       workoutName: activeWorkoutRef.current,
       exercises: exercisesRef.current,
     };
@@ -249,7 +249,7 @@ export default function TrainingPlanPage() {
         if (id && workout) {
           saveTrainingSession({
             id,
-            date: sessionDateRef.current || new Date().toISOString().split('T')[0],
+            date: sessionDateRef.current || localDateStr(),
             workoutName: workout,
             exercises: exs,
           });
@@ -441,7 +441,7 @@ export default function TrainingPlanPage() {
         }));
 
     const newId = Date.now().toString();
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr();
     setExercises(exerciseData);
     setActiveWorkout(workoutName);
     setSessionId(newId);
