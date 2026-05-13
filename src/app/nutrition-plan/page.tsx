@@ -1179,6 +1179,218 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
   );
 }
 
+// Per-meal EAA overview: for each meal in the plan, shows the EAA profile
+// from food (mg + % of meal's EAA total) and the resulting NNU. Aggregates
+// all meals' EAA contributions into a daily total row at the bottom. Toggle
+// switches between "food only" and "food + prescribed EAA supplement" so
+// you can see the per-meal supplement actually closes the iso gap.
+function EAAOverviewPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoods: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [withSupplement, setWithSupplement] = useState(false);
+
+  // Compute supplement amounts the same way the Daily EAA panel does, so the
+  // numbers match what's prescribed elsewhere.
+  const mainMealFoods = plan.current.trainingDay.meals
+    .filter(meal => !meal.name.toLowerCase().includes('during workout')
+      && !meal.name.toLowerCase().includes('intra')
+      && !meal.name.toLowerCase().includes('after workout'))
+    .map(meal => meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })))
+    .filter(m => m.length > 0);
+  const dailyEAA = mainMealFoods.length > 0 ? calcDailyEAA(mainMealFoods, allowedFoods, 2) : null;
+  const mainSuppPerMeal: Record<string, number> = {};
+  if (dailyEAA) for (const s of dailyEAA.perMeal) mainSuppPerMeal[s.aa] = s.mg;
+
+  const woMeal = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
+  const woFoods = woMeal ? woMeal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })) : [];
+  const woSupp = woFoods.length > 0 ? calcIndividualSupplement(woFoods, 96) : null;
+  const woSuppMg: Record<string, number> = {};
+  if (woSupp) for (const s of woSupp.aas) woSuppMg[s.aa] = s.mg;
+
+  type Row = { meal: string; empty: false; totalProtein: number; totalEAA: number; profile: Record<string, number>; pcts: Record<string, number>; nnu: number; limiting: string; suppApplied: boolean } | { meal: string; empty: true };
+
+  const rows: Row[] = plan.current.trainingDay.meals.map(meal => {
+    const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
+    if (items.length === 0) return { meal: meal.name, empty: true };
+    const foodInputs = items.map(f => ({ name: f.name, amount: f.amount as string }));
+    const nnu = calcNNU(foodInputs);
+    if (!nnu) return { meal: meal.name, empty: true };
+
+    // Decide which supplement to layer in for "with supplement" mode.
+    const lower = meal.name.toLowerCase();
+    const isIntra = lower.includes('during workout') || lower.includes('intra');
+    const isWO = lower.includes('after workout');
+    const supp = (!withSupplement || isIntra) ? null : (isWO ? woSuppMg : mainSuppPerMeal);
+
+    let profile = nnu.profile;
+    let pcts = nnu.pcts;
+    let total = nnu.totalEAA;
+    let nnuVal = nnu.nnu;
+    let limiting = nnu.limiting as string;
+    let suppApplied = false;
+
+    if (supp) {
+      const p: Record<string, number> = { ...profile };
+      for (const aa of EAA_ORDER) p[aa] += supp[aa] || 0;
+      const t = EAA_ORDER.reduce((s, aa) => s + p[aa], 0);
+      const newPcts: Record<string, number> = {};
+      for (const aa of EAA_ORDER) newPcts[aa] = (p[aa] / t) * 100;
+      let minR = Infinity;
+      let lim = 'leu';
+      for (const aa of EAA_ORDER) {
+        const r = newPcts[aa] / MAP[aa];
+        if (r < minR) { minR = r; lim = aa; }
+      }
+      profile = p;
+      pcts = newPcts;
+      total = t;
+      nnuVal = Math.round(minR * 1000) / 10;
+      limiting = lim;
+      suppApplied = true;
+    }
+
+    return { meal: meal.name, empty: false, totalProtein: nnu.totalProtein, totalEAA: total, profile, pcts, nnu: nnuVal, limiting, suppApplied };
+  });
+
+  const validRows = rows.filter((r): r is Extract<Row, { empty: false }> => !r.empty);
+
+  // Daily totals — sum mg across meals, then re-derive %.
+  const dailyMg: Record<string, number> = { leu: 0, ile: 0, val: 0, lys: 0, phe: 0, thr: 0, met: 0, trp: 0, his: 0 };
+  let dailyProtein = 0;
+  for (const r of validRows) {
+    dailyProtein += r.totalProtein;
+    for (const aa of EAA_ORDER) dailyMg[aa] += r.profile[aa];
+  }
+  const dailyTotalEAA = Object.values(dailyMg).reduce((s, v) => s + v, 0);
+  const dailyPcts: Record<string, number> = {};
+  let dailyNNU = 0;
+  let dailyLimiting = 'leu' as string;
+  if (dailyTotalEAA > 0) {
+    for (const aa of EAA_ORDER) dailyPcts[aa] = (dailyMg[aa] / dailyTotalEAA) * 100;
+    let minR = Infinity;
+    for (const aa of EAA_ORDER) {
+      const r = dailyPcts[aa] / MAP[aa];
+      if (r < minR) { minR = r; dailyLimiting = aa; }
+    }
+    dailyNNU = Math.round(minR * 1000) / 10;
+  }
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          onClick={() => setOpen(!open)}
+          className="text-xs text-white/30 hover:text-white/50 uppercase tracking-wider flex items-center gap-2"
+        >
+          <span className={`transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>&#9654;</span>
+          EAA Overview · per meal
+        </button>
+        {open && (
+          <div className="inline-flex rounded-lg border border-white/10 overflow-hidden text-[10px] uppercase tracking-wider">
+            <button
+              onClick={() => setWithSupplement(false)}
+              className={`px-3 py-1 transition-colors ${!withSupplement ? 'bg-white/10 text-white/80' : 'text-white/40 hover:text-white/60'}`}
+            >Food only</button>
+            <button
+              onClick={() => setWithSupplement(true)}
+              className={`px-3 py-1 transition-colors ${withSupplement ? 'bg-cyan-400/15 text-cyan-300' : 'text-white/40 hover:text-white/60'}`}
+            >+ Supplement</button>
+          </div>
+        )}
+      </div>
+      {open && (
+        <div className="mt-3 glass-card p-4 overflow-x-auto">
+          <table className="w-full text-xs min-w-[700px]">
+            <thead>
+              <tr className="text-white/30 text-left border-b border-white/5">
+                <th className="py-2 pr-3 font-normal">Meal</th>
+                <th className="py-2 px-2 font-normal text-right">Protein</th>
+                <th className="py-2 px-2 font-normal text-right">EAA total</th>
+                {EAA_ORDER.map(aa => (
+                  <th key={aa} className="py-2 px-1 font-normal text-right" title={EAA_NAMES[aa]}>
+                    {EAA_NAMES[aa].slice(0, 3)}
+                  </th>
+                ))}
+                <th className="py-2 pl-2 font-normal text-right">NNU</th>
+              </tr>
+              <tr className="text-white/15 text-[9px] text-left border-b border-white/5">
+                <th />
+                <th />
+                <th />
+                {EAA_ORDER.map(aa => (
+                  <th key={aa} className="py-1 px-1 font-normal text-right">
+                    target {MAP[aa]}%
+                  </th>
+                ))}
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                if (r.empty) {
+                  return (
+                    <tr key={i} className="border-b border-white/5">
+                      <td className="py-2 pr-3 text-white/40">{r.meal}</td>
+                      <td colSpan={11} className="py-2 text-white/20 text-[10px]">no food items</td>
+                    </tr>
+                  );
+                }
+                return (
+                  <tr key={i} className="border-b border-white/5 align-top">
+                    <td className="py-2 pr-3 text-white font-medium">{r.meal}</td>
+                    <td className="py-2 px-2 text-right text-white/70 font-mono">{r.totalProtein.toFixed(1)}g</td>
+                    <td className="py-2 px-2 text-right text-white/70 font-mono">{(r.totalEAA / 1000).toFixed(1)}g</td>
+                    {EAA_ORDER.map(aa => {
+                      const mg = r.profile[aa];
+                      const pct = r.pcts[aa];
+                      const target = MAP[aa];
+                      const isLimiting = aa === r.limiting;
+                      const isLow = pct < target * 0.95;
+                      const color = isLimiting ? 'text-red-400' : isLow ? 'text-yellow-400/70' : 'text-white/60';
+                      return (
+                        <td key={aa} className={`py-2 px-1 text-right font-mono ${color}`}>
+                          <div>{Math.round(mg)}</div>
+                          <div className="text-[9px] opacity-70">{pct.toFixed(1)}%</div>
+                        </td>
+                      );
+                    })}
+                    <td className="py-2 pl-2 text-right font-mono text-white/60">{r.nnu}%</td>
+                  </tr>
+                );
+              })}
+              {/* Daily totals */}
+              {dailyTotalEAA > 0 && (
+                <tr className="bg-white/5 align-top">
+                  <td className="py-2 pr-3 text-white font-bold uppercase tracking-wider text-[10px]">Daily total</td>
+                  <td className="py-2 px-2 text-right text-white font-mono font-bold">{dailyProtein.toFixed(1)}g</td>
+                  <td className="py-2 px-2 text-right text-white font-mono font-bold">{(dailyTotalEAA / 1000).toFixed(1)}g</td>
+                  {EAA_ORDER.map(aa => {
+                    const isLimiting = aa === dailyLimiting;
+                    const target = MAP[aa];
+                    const pct = dailyPcts[aa];
+                    const isLow = pct < target * 0.95;
+                    const color = isLimiting ? 'text-red-400' : isLow ? 'text-yellow-400/70' : 'text-white/80';
+                    return (
+                      <td key={aa} className={`py-2 px-1 text-right font-mono font-bold ${color}`}>
+                        <div>{Math.round(dailyMg[aa])}</div>
+                        <div className="text-[9px] opacity-70">{pct.toFixed(1)}%</div>
+                      </td>
+                    );
+                  })}
+                  <td className="py-2 pl-2 text-right font-mono font-bold text-white">{dailyNNU}%</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div className="mt-2 text-[10px] text-white/30">
+            Each cell: top = mg, bottom = % of meal&apos;s EAA total. Red = limiting amino acid for that meal. Yellow = below 95% of MAP target.
+            {withSupplement && <span className="ml-1 text-cyan-400/70">Prescribed EAA supplement layered in per meal — NNU should rise to ~95%.</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoods: string[] }) {
   // Compute daily EAA + after-workout supplement directly from current plan.
   // No localStorage caching — calcDailyEAA is fast and trusting cached state
@@ -2294,6 +2506,9 @@ export default function NutritionPlanPage() {
 
           {/* Auto-Optimize */}
           <AutoOptimizePanel plan={plan} allowedFoods={allowedFoods} persist={persist} />
+
+          {/* Per-meal EAA breakdown — collapsible */}
+          <EAAOverviewPanel plan={plan} allowedFoods={allowedFoods} />
 
           {/* Daily EAA Supplement Summary — computed lazily */}
           <DailyEAAPanel plan={plan} allowedFoods={allowedFoods} />
