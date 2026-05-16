@@ -194,6 +194,11 @@ export default function TrainingPlanPage() {
   const sessionIdRef = useRef(sessionId);
   const sessionDateRef = useRef(sessionDate);
   const activeWorkoutRef = useRef(activeWorkout);
+  // Names of exercises that started this session with bumpNextTime carried
+  // from the previous session — those flags get auto-cleared on first save
+  // (the bump message has been delivered). Newly-toggled flags survive.
+  const carriedBumpsRef = useRef<Set<string>>(new Set());
+  const bumpsClearedRef = useRef(false);
 
   // Keep refs in sync
   exercisesRef.current = exercises;
@@ -215,12 +220,22 @@ export default function TrainingPlanPage() {
     // Preserve fields set elsewhere (actualEnergy, readinessSnapshot) by merging with existing session
     const allSessions = await getTrainingSessions();
     const existing = allSessions.find(s => s.id === sessionIdRef.current);
+    // Clear carried-over bumpNextTime flags on first save — also clear them
+    // in local state so the badge disappears immediately for the user.
+    let exercisesToSave = exercisesRef.current;
+    if (!bumpsClearedRef.current && carriedBumpsRef.current.size > 0) {
+      exercisesToSave = exercisesRef.current.map(e =>
+        carriedBumpsRef.current.has(e.name) && e.bumpNextTime ? { ...e, bumpNextTime: false } : e
+      );
+      bumpsClearedRef.current = true;
+      setExercises(exercisesToSave);
+    }
     const session: TrainingSession = {
       ...(existing || {}),
       id: sessionIdRef.current,
       date: sessionDateRef.current || localDateStr(),
       workoutName: activeWorkoutRef.current,
-      exercises: exercisesRef.current,
+      exercises: exercisesToSave,
     };
     await saveTrainingSession(session);
     await refreshSessions();
@@ -279,6 +294,15 @@ export default function TrainingPlanPage() {
     setExercises(prev => prev.filter((_, i) => i !== idx));
     setExpandedExercise(null);
     setPendingDeleteIdx(null);
+    triggerAutoSave();
+  };
+
+  const toggleBumpNextTime = (idx: number) => {
+    setExercises(prev => prev.map((e, i) => i === idx ? { ...e, bumpNextTime: !e.bumpNextTime } : e));
+    // User explicitly toggled — pull this exercise out of the auto-clear set
+    // so flushSave doesn't immediately wipe what they just set.
+    const ex = exercisesRef.current[idx];
+    if (ex) carriedBumpsRef.current.delete(ex.name);
     triggerAutoSave();
   };
 
@@ -425,7 +449,9 @@ export default function TrainingPlanPage() {
     const preset = workouts.find(w => w.name === workoutName);
     if (!preset) return;
 
-    // Load from last session if available, otherwise use preset
+    // Load from last session if available, otherwise use preset.
+    // bumpNextTime is carried over from the prior session (so the user sees
+    // the flag during this session) and auto-cleared on first save below.
     const lastSession = await getLastSessionForWorkout(workoutName);
     const exerciseData: TrainingExercise[] = lastSession
       ? lastSession.exercises
@@ -442,6 +468,11 @@ export default function TrainingPlanPage() {
 
     const newId = Date.now().toString();
     const today = localDateStr();
+    // Snapshot which exercises started this session with bumpNextTime carried
+    // over from the prior session. flushSave will clear those flags on first
+    // save so they don't propagate into N+2.
+    carriedBumpsRef.current = new Set(exerciseData.filter(e => e.bumpNextTime).map(e => e.name));
+    bumpsClearedRef.current = false;
     setExercises(exerciseData);
     setActiveWorkout(workoutName);
     setSessionId(newId);
@@ -1227,6 +1258,15 @@ export default function TrainingPlanPage() {
                         <h3 className={`text-white font-semibold truncate ${ex.skipped ? 'line-through' : ''}`}>
                           {ex.name}
                         </h3>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleBumpNextTime(exIdx); }}
+                          title={ex.bumpNextTime ? 'Clear: bump weight next session' : 'Mark: bump weight next session'}
+                          className={`shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] transition-all ${
+                            ex.bumpNextTime
+                              ? 'bg-green-400/20 border border-green-400/40 text-green-300 shadow-[0_0_8px_rgba(34,197,94,0.25)]'
+                              : 'border border-white/15 text-white/30 hover:text-green-300 hover:border-green-400/40'
+                          }`}
+                        >&#9650;</button>
                       </div>
                       <p className="text-xs text-white/30 mt-0.5">
                         {workingSets.length} sets &times; {ex.targetReps} reps

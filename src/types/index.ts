@@ -58,6 +58,10 @@ export interface TrainingExercise {
   notes?: string;
   skipped?: boolean;
   calories?: number; // manually entered calories (e.g. from cardio machine display)
+  // Mark this exercise to bump the weight next session for this muscle group.
+  // Visual hint only — preset still uses the actually-lifted weights from the
+  // last session. Auto-clears after the next session of the same workout.
+  bumpNextTime?: boolean;
 }
 
 export interface Workout {
