@@ -526,7 +526,13 @@ export default function TrainingPlanPage() {
       const updated = [...prev];
       const ex = { ...updated[exIdx] };
       const sets = [...ex.sets];
-      sets[setIdx] = { ...sets[setIdx], reps: reps === '' ? undefined : Number(reps) };
+      // Allow ranges like "8-10" — store as string. Pure integer stored as
+      // number. Empty → undefined (so getEffectiveReps falls back to target).
+      let stored: number | string | undefined;
+      if (reps === '') stored = undefined;
+      else if (/^\d+$/.test(reps)) stored = Number(reps);
+      else stored = reps;
+      sets[setIdx] = { ...sets[setIdx], reps: stored };
       ex.sets = sets;
       updated[exIdx] = ex;
       return updated;
@@ -1516,11 +1522,12 @@ function SetRow({
         className="shrink-0 w-8 h-8 rounded-lg text-sm font-bold border border-green-500/20 bg-green-500/8 text-green-400 active:bg-green-500/30 transition-all"
       >+</button>
 
-      {/* Reps input */}
+      {/* Reps input — `inputMode="text"` so iOS shows the full keyboard
+          (numeric mode hid the "-" the user needs for range inputs like 8-10). */}
       <div className="w-14">
         <input
           type="text"
-          inputMode="numeric"
+          inputMode="text"
           value={set.reps ?? ''}
           onChange={(e) => onRepsChange(exIdx, setIdx, e.target.value)}
           className="glass-input w-full px-1 py-2 text-sm text-center data-value focus:shadow-[0_0_12px_rgba(185,10,10,0.2)]"

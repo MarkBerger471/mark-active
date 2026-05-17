@@ -20,7 +20,7 @@ function topSets(exercises: TrainingExercise[], hasDoneFlags: boolean): string[]
       if (working.length === 0) return null;
       const max = Math.max(...working.map(s => typeof s.weight === 'number' ? s.weight : parseFloat(s.weight as string) || 0));
       const top = working.find(s => (typeof s.weight === 'number' ? s.weight : parseFloat(s.weight as string) || 0) === max)!;
-      const reps = top.reps ?? (parseInt(ex.targetReps) || 0);
+      const reps = typeof top.reps === 'number' ? top.reps : (parseInt(String(top.reps ?? ex.targetReps)) || 0);
       return { name: ex.name, weight: max, reps, volume: max * reps * working.length };
     })
     .filter((x): x is { name: string; weight: number; reps: number; volume: number } => x != null)
@@ -51,7 +51,7 @@ export function formatSessionMessage(session: TrainingSession, bodyWeight: numbe
   const totalVolume = doneExercises.reduce((sum, ex) => {
     return sum + ex.sets.filter(s => !s.isWarmup && isDone(s, hasDoneFlags)).reduce((vSum, s) => {
       const w = typeof s.weight === 'number' ? s.weight : parseFloat(s.weight as string) || 0;
-      const r = s.reps ?? (parseInt(ex.targetReps) || 0);
+      const r = typeof s.reps === 'number' ? s.reps : (parseInt(String(s.reps ?? ex.targetReps)) || 0);
       return vSum + w * r;
     }, 0);
   }, 0);

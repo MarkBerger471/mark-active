@@ -20,6 +20,14 @@ export function parseLowerBoundReps(targetReps: string): number {
  * during workouts.
  */
 export function getEffectiveReps(set: TrainingSet, targetReps: string): number {
-  if (set.reps != null && set.reps > 0) return set.reps;
+  if (set.reps != null && set.reps !== '') {
+    if (typeof set.reps === 'number') {
+      if (set.reps > 0) return set.reps;
+    } else {
+      // String reps (e.g. "8-10") — use the lower bound, same convention as targetReps.
+      const n = parseLowerBoundReps(set.reps);
+      if (n > 0) return n;
+    }
+  }
   return parseLowerBoundReps(targetReps);
 }

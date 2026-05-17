@@ -45,7 +45,9 @@ export interface Exercise {
 // New training types
 export interface TrainingSet {
   weight: number | string;
-  reps?: number;
+  // Reps can be a number (e.g. 8) or a range string (e.g. "8-10") when the
+  // user wants to log an uncertain count. Analyses use the lower bound.
+  reps?: number | string;
   isWarmup: boolean;
   done?: boolean;
   prevDone?: boolean; // was this set completed in the previous session
