@@ -286,11 +286,21 @@ function buildA4PrintDoc(opts: { title: string; bodyHtml: string; extraCss?: str
 }
 
 function openPrintWindow(html: string) {
-  const w = window.open('', '_blank');
-  if (!w) { alert('Please allow popups to print.'); return; }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  // Use a hidden iframe instead of window.open. In an iOS standalone PWA a
+  // popup is opened in Safari, and after the print dialog closes the user
+  // is stuck there — the PWA has to be killed from the app switcher to come
+  // back. Printing from an in-page iframe keeps the user inside the PWA.
+  const prev = document.getElementById('print-iframe');
+  if (prev) prev.remove();
+  const iframe = document.createElement('iframe');
+  iframe.id = 'print-iframe';
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.cssText = 'position:fixed; left:-10000px; top:0; width:210mm; height:297mm; border:0; visibility:hidden;';
+  document.body.appendChild(iframe);
+  const cleanup = () => { try { iframe.remove(); } catch {} window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  setTimeout(cleanup, 60000); // safety fallback if afterprint never fires
+  iframe.srcdoc = html;
 }
 
 function lookupFood(name: string): { kcal: number; protein: number; carbs: number; fat: number } | null {
@@ -1481,7 +1491,7 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
   h1 { font-size: 22pt; margin: 0 0 2pt 0; letter-spacing: -0.4pt; font-weight: 700; }
   h2 { font-size: 11pt; margin: 18pt 0 6pt 0; padding-bottom: 4pt; border-bottom: 1.5px solid #111; letter-spacing: 0.5pt; text-transform: uppercase; font-weight: 700; }
   .hint { font-weight: 400; color: #666; font-size: 9pt; text-transform: none; letter-spacing: 0; margin-left: 6pt; }
-  .meta { color: #555; font-size: 9.5pt; margin-bottom: 4pt; }
+  .meta { color: #555; font-size: 9.5pt; margin-bottom: 10pt; padding-bottom: 8pt; border-bottom: 1.5px solid #111; }
   .nnu { color: #0a7c8c; font-weight: 600; }
   table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
   th { text-align: left; padding: 5pt 10pt; background: #f0f0f0; border-bottom: 1px solid #aaa; font-weight: 600; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.5pt; }
@@ -1799,15 +1809,28 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
         </section>`;
     }).filter(Boolean).join('');
 
+    // Headline uses the same total the app shows on the Actual card (2701-style),
+    // which includes supplement kcal and the prescribed EAA mix — so it accounts
+    // for the otherwise-missing intra-workout meal (supplements only) and the
+    // per-meal supplement macros that the printed meal list doesn't itemize.
+    const extrasKcal = Math.max(0, actualMacros.kcal - totalMacros.kcal);
+    const extrasLine = extrasKcal > 0
+      ? `<div class="meta-sub bordered">${totalMacros.kcal} kcal from listed food + ${extrasKcal} kcal from supplements &amp; intra-workout</div>`
+      : '';
+    const metaClass = extrasKcal > 0 ? 'meta' : 'meta bordered';
+
     const bodyHtml = `
   <h1>${escapeHtml(title)} Meal Plan</h1>
-  <div class="meta">Generated ${date} &middot; <strong>${totalMacros.kcal} kcal</strong> &middot; ${totalMacros.protein} g protein &middot; ${totalMacros.carbs} g carbs &middot; ${totalMacros.fat} g fat &middot; food only (no supplements)</div>
+  <div class="${metaClass}">Generated ${date} &middot; <strong>${actualMacros.kcal} kcal</strong> &middot; ${actualMacros.protein} g protein &middot; ${actualMacros.carbs} g carbs &middot; ${actualMacros.fat} g fat</div>
+  ${extrasLine}
   ${mealSections}
   <div class="footer">bodybuilding &middot; ${date}</div>`;
 
     const css = `
   h1 { font-size: 22pt; margin: 0 0 2pt 0; letter-spacing: -0.4pt; font-weight: 700; }
-  .meta { color: #555; font-size: 9.5pt; margin-bottom: 10pt; padding-bottom: 8pt; border-bottom: 1.5px solid #111; }
+  .meta { color: #555; font-size: 9.5pt; }
+  .meta-sub { color: #888; font-size: 8.5pt; margin-top: 2pt; font-style: italic; }
+  .bordered { margin-bottom: 10pt; padding-bottom: 8pt; border-bottom: 1.5px solid #111; }
   section.meal { margin-bottom: 10pt; page-break-inside: avoid; }
   h2 { font-size: 10.5pt; margin: 0 0 3pt 0; padding-bottom: 3pt; border-bottom: 1px solid #ccc; letter-spacing: 0.4pt; text-transform: uppercase; font-weight: 700; display: flex; align-items: baseline; gap: 8pt; }
   .hint { font-weight: 400; color: #666; font-size: 8.5pt; text-transform: none; letter-spacing: 0; }
