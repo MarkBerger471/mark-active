@@ -54,7 +54,9 @@ export default function Dashboard() {
   const [showTargetInput, setShowTargetInput] = useState(false);
   const [targetInput, setTargetInput] = useState('');
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
-  const [sleepIdx, setSleepIdx] = useState(0);
+  // -1 = auto-select most recent day with data in the last-7-day strip;
+  // 0..6 = explicit user selection (index into the rendered last-7 strip).
+  const [sleepIdx, setSleepIdx] = useState(-1);
 
   // Subjective readiness — stored per day, synced to Firestore
   const todayStr = new Date().toISOString().split('T')[0];
@@ -996,7 +998,32 @@ export default function Dashboard() {
 
           {/* Sleep — Concept 1B: Timeline + Day Strip */}
             {sleepData.length > 0 && (() => {
-              const d = sleepData[sleepIdx] || sleepData[0];
+              // Always render the last 7 calendar days in the strip, regardless
+              // of what's cached. With the ring inactive the cache may be days
+              // or weeks behind — without this, the strip just shows whatever
+              // is stored (April dates etc.) rather than the actual recent week.
+              const todayLocal = new Date();
+              const localDateStr = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+              const byDay = new Map(sleepData.map(s => [s.day, s]));
+              // last7[0] = 6 days ago, last7[6] = today
+              const last7: { day: string; data: SleepDay | null }[] = [];
+              for (let i = 6; i >= 0; i--) {
+                const dt = new Date(todayLocal);
+                dt.setDate(todayLocal.getDate() - i);
+                const ds = localDateStr(dt);
+                last7.push({ day: ds, data: byDay.get(ds) || null });
+              }
+              // Default selection: most recent day in the strip that has data.
+              // If none of the last 7 days have data (ring inactive), fall back
+              // to the most recent overall so the lower panel still has data.
+              const defaultIdx = (() => {
+                for (let i = last7.length - 1; i >= 0; i--) if (last7[i].data) return i;
+                return -1; // no data in last 7 days
+              })();
+              // `sleepIdx` is now an index into `last7`. -1 means "fall back to
+              // most recent overall" (older than 7 days).
+              const activeIdx = sleepIdx >= 0 && sleepIdx < last7.length ? sleepIdx : defaultIdx;
+              const d = (activeIdx >= 0 ? last7[activeIdx].data : null) || sleepData[0];
               const scoreColor = d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444';
 
               // Build timeline segments from phase durations
@@ -1057,21 +1084,27 @@ export default function Dashboard() {
                     </h2>
                   </div>
 
-                  {/* Day strip */}
+                  {/* Day strip — last 7 calendar days. Slots without data
+                      render dimmed and are non-clickable. */}
                   <div className="flex gap-1 mb-3">
-                    {[...sleepData].reverse().map((sd, ri) => {
-                      const i = sleepData.length - 1 - ri;
-                      const isActive = i === sleepIdx;
-                      const sc = sd.score >= 85 ? '#22c55e' : sd.score >= 70 ? '#f59e0b' : '#ef4444';
-                      const dateObj = new Date(sd.day + 'T00:00:00');
+                    {last7.map((slot, i) => {
+                      const isActive = i === activeIdx;
+                      const hasData = !!slot.data;
+                      const sc = slot.data
+                        ? (slot.data.score >= 85 ? '#22c55e' : slot.data.score >= 70 ? '#f59e0b' : '#ef4444')
+                        : 'rgba(255,255,255,0.25)';
+                      const dateObj = new Date(slot.day + 'T00:00:00');
                       const dayName = dateObj.toLocaleDateString('en-GB', { weekday: 'short' });
                       const dayNum = dateObj.getDate();
                       return (
-                        <button key={i} onClick={() => setSleepIdx(i)}
+                        <button key={slot.day} onClick={() => hasData && setSleepIdx(i)}
+                          disabled={!hasData}
                           className="flex-1 py-1.5 rounded-lg text-center transition-all"
                           style={{
                             border: isActive ? `1px solid ${sc}50` : '1px solid rgba(255,255,255,0.06)',
                             background: isActive ? `${sc}18` : 'rgba(255,255,255,0.03)',
+                            opacity: hasData ? 1 : 0.35,
+                            cursor: hasData ? 'pointer' : 'default',
                           }}>
                           <div className="text-[9px] uppercase" style={{ color: isActive ? `${sc}bb` : 'rgba(255,255,255,0.3)', fontWeight: isActive ? 600 : 400 }}>{dayName}</div>
                           <div className="text-[13px] mt-0.5" style={{ color: isActive ? sc : 'rgba(255,255,255,0.4)', fontWeight: isActive ? 800 : 700 }}>{dayNum}</div>
