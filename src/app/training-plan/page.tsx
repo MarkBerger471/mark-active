@@ -744,7 +744,15 @@ export default function TrainingPlanPage() {
                 <div className="space-y-2">
                   {(() => {
                     const sessionTs = (s: TrainingSession) => s.savedAt || s.date + 'T23:59:59.999Z';
-                    const sorted = [...sessions].sort((a, b) => sessionTs(b).localeCompare(sessionTs(a))).slice(0, 20);
+                    // Show sessions from the last 2 months. Older data stays in
+                    // storage (needed for previous-session lookups, all-time
+                    // history, etc.) but is hidden from this list.
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - 62);
+                    const cutoffStr = localDateStr(cutoff);
+                    const sorted = [...sessions]
+                      .filter(s => s.date >= cutoffStr)
+                      .sort((a, b) => sessionTs(b).localeCompare(sessionTs(a)));
                     const elements: React.ReactNode[] = [];
 
                     // Total working-set volume (kg × reps) for a session.
