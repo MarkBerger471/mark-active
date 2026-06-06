@@ -1237,6 +1237,10 @@ function EAAOverviewPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowed
     let nnuVal = nnu.nnu;
     let limiting = nnu.limiting as string;
     let suppApplied = false;
+    // EAA supplement is pure amino acid powder — count its grams as protein so
+    // the EAA-to-protein ratio stays meaningful and the column lines up with
+    // the supplement-adjusted EAA mg values.
+    let totalProtein = nnu.totalProtein;
 
     if (supp) {
       const p: Record<string, number> = { ...profile };
@@ -1256,9 +1260,11 @@ function EAAOverviewPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowed
       nnuVal = Math.round(minR * 1000) / 10;
       limiting = lim;
       suppApplied = true;
+      const suppMgSum = EAA_ORDER.reduce((s, aa) => s + (supp[aa] || 0), 0);
+      totalProtein = Math.round((nnu.totalProtein + suppMgSum / 1000) * 10) / 10;
     }
 
-    return { meal: meal.name, empty: false, totalProtein: nnu.totalProtein, totalEAA: total, profile, pcts, nnu: nnuVal, limiting, suppApplied };
+    return { meal: meal.name, empty: false, totalProtein, totalEAA: total, profile, pcts, nnu: nnuVal, limiting, suppApplied };
   });
 
   const validRows = rows.filter((r): r is Extract<Row, { empty: false }> => !r.empty);

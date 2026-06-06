@@ -199,7 +199,9 @@ const EAA_DB: Record<string, EAAProfile> = {
 const PROTEIN_PER_100G: Record<string, number> = {
   'greek yogurt': 10, 'yogurt': 10, 'cottage cheese': 11, 'cheese': 25,
   'feta': 14, 'milk': 3.4, 'whole milk': 3.2, 'casein': 75,
-  'whey': 80, 'whey protein': 80,
+  // 69% is whey *concentrate* (matches Mark's product); whey *isolate* (88%)
+  // kept separate below for accuracy if anyone uses isolate-labeled foods.
+  'whey': 69, 'whey protein': 69,
   'eggs': 12.6, 'egg': 12.6, 'egg whites': 11,
   'chicken': 31, 'chicken breast': 31, 'chicken thigh': 25,
   'turkey': 30, 'turkey breast': 30,
