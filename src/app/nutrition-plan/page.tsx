@@ -1681,9 +1681,13 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     const items = wo.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string }));
     return items.length > 0 ? calcIndividualSupplement(items, 96) : null;
   })();
+  // Include both the main EAA mix (eaaG, across 4 main meals) and the
+  // After-Workout supplement so the dashboard total matches the EAA
+  // Overview Daily Total (both supplements counted).
+  const woG = liveWO ? liveWO.totalMg / 1000 : 0;
   const actualMacros = {
-    kcal: foodMacros.kcal + Math.round(eaaG * 4),
-    protein: foodMacros.protein + Math.round(eaaG),
+    kcal: foodMacros.kcal + Math.round((eaaG + woG) * 4),
+    protein: foodMacros.protein + Math.round(eaaG + woG),
     carbs: foodMacros.carbs,
     fat: foodMacros.fat,
   };
