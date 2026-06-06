@@ -2053,7 +2053,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                                 <div className="text-[10px] text-white/70 leading-relaxed">
                                   Standard protein recommendations assume ~70% Net Nitrogen Utilization (the typical Western mixed diet). With your optimized plan (EAA supplement filling the gaps per meal), your whole-day NNU is <strong className="text-cyan-300">{avgNNUWithEAA}%</strong>. You&apos;re getting more usable protein per gram eaten.
                                   <br/><br/>
-                                  Scaled equivalent: <strong className="text-white">~{Math.round(recommendedTargets.protein * 70 / avgNNUWithEAA / 5) * 5} g/day</strong> at your NNU gives the same MPS as 258 g at 70% NNU. Shown below the main target as &quot;NNU-adj&quot;.
+                                  Scaled equivalent: <strong className="text-white">~{Math.round(recommendedTargets.protein * 70 / avgNNUWithEAA / 5) * 5} g/day</strong> at your NNU gives the same MPS as {recommendedTargets.protein} g at 70% NNU. Shown below the main target as &quot;NNU-adj&quot;.
                                   <br/><br/>
                                   <span className="text-white/50">Caveat: the main recommendation stays at 2.25 g/kg because protein has uses beyond MPS (immune, connective tissue, satiety, thermic effect) that don&apos;t benefit from high NNU. Treat the adjusted number as the floor — never go below it.</span>
                                 </div>
