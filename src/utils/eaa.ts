@@ -816,6 +816,98 @@ export function calcDailyEAA(meals: FoodInput[][], allowedFoods?: string[], leve
   return { perDay, perMeal, totalPerDay, mealCount, avgNNUBefore, avgNNUAfter };
 }
 
+/**
+ * A group of meals that share the same EAA mix.
+ * `mealIndices` are positions in the input `meals` array.
+ */
+export interface SupplementGroup {
+  mealIndices: number[];
+  mealNames: string[];
+  supplement: DailyEAASupplement;
+}
+
+/**
+ * Compute supplement groups. Each main meal can use the same mix (groupCount=1,
+ * simplest workflow), share with a few similar meals (groupCount=2, best
+ * balance of accuracy vs convenience), or get its own mix (groupCount =
+ * meals.length, highest per-meal NNU but most mixing).
+ *
+ * For groupCount=2 we enumerate every non-trivial partition of the meals into
+ * two non-empty subsets and pick the one with the highest protein-weighted
+ * NNU after supplementation. For 4 meals that's 7 partitions — trivial.
+ */
+export function calcGroupedEAA(
+  meals: FoodInput[][],
+  mealNames: string[],
+  groupCount: number,
+  allowedFoods?: string[],
+  level: number = 2,
+): SupplementGroup[] {
+  if (meals.length === 0) return [];
+
+  const buildGroup = (idxs: number[]): SupplementGroup | null => {
+    const subset = idxs.map(i => meals[i]);
+    const sup = calcDailyEAA(subset, allowedFoods, level);
+    if (!sup) return null;
+    return {
+      mealIndices: idxs,
+      mealNames: idxs.map(i => mealNames[i] ?? `Meal ${i + 1}`),
+      supplement: sup,
+    };
+  };
+
+  // 1 group: one mix for everything.
+  if (groupCount <= 1) {
+    const g = buildGroup(meals.map((_, i) => i));
+    return g ? [g] : [];
+  }
+
+  // Per-meal: one mix per meal.
+  if (groupCount >= meals.length) {
+    return meals.map((_, i) => buildGroup([i])).filter((g): g is SupplementGroup => g != null);
+  }
+
+  // 2 groups: enumerate partitions, pick the highest weighted NNU.
+  if (groupCount === 2) {
+    const n = meals.length;
+    let best: { groups: SupplementGroup[]; nnu: number } | null = null;
+    // Fix meal 0 in subset A to dedupe symmetric partitions.
+    for (let mask = 0; mask < (1 << (n - 1)); mask++) {
+      const a: number[] = [0];
+      const b: number[] = [];
+      for (let i = 1; i < n; i++) ((mask >> (i - 1)) & 1 ? a : b).push(i);
+      if (a.length === 0 || b.length === 0) continue;
+      const gA = buildGroup(a);
+      const gB = buildGroup(b);
+      if (!gA || !gB) continue;
+      // Protein-weighted NNU across both groups.
+      let totalProt = 0, weighted = 0;
+      for (const g of [gA, gB]) {
+        // weight by total protein across the group's meals (proxy: supplement counts × meal protein)
+        for (const idx of g.mealIndices) {
+          const r = calcNNU(meals[idx]);
+          if (!r) continue;
+          totalProt += r.totalProtein;
+          // Per-meal NNU with this group's supplement
+          const p = { ...r.profile };
+          for (const s of g.supplement.perMeal) p[s.aa] += s.mg;
+          const t = EAA_ORDER.reduce((sum, aa) => sum + p[aa], 0);
+          let minR = Infinity;
+          for (const aa of EAA_ORDER) { const x = (p[aa] / t * 100) / MAP[aa]; if (x < minR) minR = x; }
+          weighted += Math.round(minR * 1000) / 10 * r.totalProtein;
+        }
+      }
+      const score = totalProt > 0 ? weighted / totalProt : 0;
+      if (!best || score > best.nnu) best = { groups: [gA, gB], nnu: score };
+    }
+    return best?.groups ?? [];
+  }
+
+  // Fallback: not supported, treat as single group.
+  const g = buildGroup(meals.map((_, i) => i));
+  return g ? [g] : [];
+}
+
 // ─── Iterative AI Optimizer ───
 
 export interface IterationResult {

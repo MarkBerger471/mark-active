@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Navigation from '@/components/Navigation';
 import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan, getSetting, getSettingRemote, saveSetting, nutritionPlanExistsRemotely, getMeasurements } from '@/utils/storage';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem, Measurement } from '@/types';
-import { calcNNU, optimizeMeal, calcDailyEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult } from '@/utils/eaa';
+import { calcNNU, optimizeMeal, calcDailyEAA, calcGroupedEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult, type SupplementGroup } from '@/utils/eaa';
 import { FOODS } from '@/utils/foods';
 import { calcDerivedTDEE, calcWeeklyIntake, calcRecommendedMacros } from '@/utils/calories';
 
@@ -1024,21 +1024,33 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
 // all meals' EAA contributions into a daily total row at the bottom. Toggle
 // switches between "food only" and "food + prescribed EAA supplement" so
 // you can see the per-meal supplement actually closes the iso gap.
-function EAAOverviewPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoods: string[] }) {
+function EAAOverviewPanel({ plan, allowedFoods, groupCount }: { plan: NutritionPlan; allowedFoods: string[]; groupCount: number }) {
   const [open, setOpen] = useState(false);
   const [withSupplement, setWithSupplement] = useState(false);
 
   // Compute supplement amounts the same way the Daily EAA panel does, so the
-  // numbers match what's prescribed elsewhere.
-  const mainMealFoods = plan.current.trainingDay.meals
-    .filter(meal => !meal.name.toLowerCase().includes('during workout')
-      && !meal.name.toLowerCase().includes('intra')
-      && !meal.name.toLowerCase().includes('after workout'))
-    .map(meal => meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })))
-    .filter(m => m.length > 0);
-  const dailyEAA = mainMealFoods.length > 0 ? calcDailyEAA(mainMealFoods, allowedFoods, 2) : null;
-  const mainSuppPerMeal: Record<string, number> = {};
-  if (dailyEAA) for (const s of dailyEAA.perMeal) mainSuppPerMeal[s.aa] = s.mg;
+  // numbers match what's prescribed elsewhere. With groupCount > 1 each main
+  // meal can have a different mix — we map meal name → supplement mg dict.
+  const isMain = (n: string) => !n.toLowerCase().includes('during workout')
+    && !n.toLowerCase().includes('intra')
+    && !n.toLowerCase().includes('after workout');
+  const mainMealEntries = plan.current.trainingDay.meals
+    .filter(meal => isMain(meal.name))
+    .map(meal => ({
+      name: meal.name,
+      foods: meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })),
+    }))
+    .filter(m => m.foods.length > 0);
+  const mainGroups: SupplementGroup[] = mainMealEntries.length > 0
+    ? calcGroupedEAA(mainMealEntries.map(m => m.foods), mainMealEntries.map(m => m.name), groupCount, allowedFoods, 2)
+    : [];
+  // Map each main meal name to its group's per-meal supplement (mg by AA).
+  const suppByMealName: Record<string, Record<string, number>> = {};
+  for (const g of mainGroups) {
+    const mg: Record<string, number> = {};
+    for (const s of g.supplement.perMeal) mg[s.aa] = s.mg;
+    for (const idx of g.mealIndices) suppByMealName[mainMealEntries[idx].name] = mg;
+  }
 
   const woMeal = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
   const woFoods = woMeal ? woMeal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })) : [];
@@ -1059,7 +1071,7 @@ function EAAOverviewPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowed
     const lower = meal.name.toLowerCase();
     const isIntra = lower.includes('during workout') || lower.includes('intra');
     const isWO = lower.includes('after workout');
-    const supp = (!withSupplement || isIntra) ? null : (isWO ? woSuppMg : mainSuppPerMeal);
+    const supp = (!withSupplement || isIntra) ? null : (isWO ? woSuppMg : (suppByMealName[meal.name] || null));
 
     let profile = nnu.profile;
     let pcts = nnu.pcts;
@@ -1237,19 +1249,44 @@ function EAAOverviewPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowed
   );
 }
 
-function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoods: string[] }) {
+function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan: NutritionPlan; allowedFoods: string[]; groupCount: number; setGroupCount: (n: number) => void }) {
   // Compute daily EAA + after-workout supplement directly from current plan.
   // No localStorage caching — calcDailyEAA is fast and trusting cached state
   // caused the panel to lock onto stale 'no supplement needed' even when the
   // current plan clearly needed supplements (the cache vs recompute race bug).
-  const mainMeals = plan.current.trainingDay.meals
+  const mainMealEntries = plan.current.trainingDay.meals
     .filter(meal => !meal.name.toLowerCase().includes('during workout') && !meal.name.toLowerCase().includes('intra')
       && !meal.name.toLowerCase().includes('after workout'))
-    .map(meal => {
-      const items = meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
-      return items.map(f => ({ name: f.name, amount: f.amount as string }));
-    }).filter(m => m.length > 0);
-  const daily = mainMeals.length > 0 ? calcDailyEAA(mainMeals, allowedFoods, 2) : null;
+    .map(meal => ({
+      name: meal.name,
+      foods: meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })),
+    }))
+    .filter(m => m.foods.length > 0);
+  const mainCount = mainMealEntries.length;
+  const groups: SupplementGroup[] = mainCount > 0
+    ? calcGroupedEAA(mainMealEntries.map(m => m.foods), mainMealEntries.map(m => m.name), groupCount, allowedFoods, 2)
+    : [];
+  // Aggregate the “daily” shape from groups for legacy storage/consumers.
+  const aggregatedTotalPerDay = groups.reduce((s, g) => s + g.supplement.totalPerDay, 0);
+  const aggregatedAvgNNUAfter = (() => {
+    let weight = 0, sum = 0;
+    for (const g of groups) {
+      const w = g.mealIndices.length;
+      sum += g.supplement.avgNNUAfter * w;
+      weight += w;
+    }
+    return weight > 0 ? Math.round(sum / weight * 10) / 10 : 0;
+  })();
+  const aggregatedAvgNNUBefore = (() => {
+    let weight = 0, sum = 0;
+    for (const g of groups) {
+      const w = g.mealIndices.length;
+      sum += g.supplement.avgNNUBefore * w;
+      weight += w;
+    }
+    return weight > 0 ? Math.round(sum / weight * 10) / 10 : 0;
+  })();
+  const daily = groups.length > 0 ? groups[0].supplement : null; // for legacy print + storage paths
 
   const woMealItems = (() => {
     const wo = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
@@ -1262,37 +1299,52 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
   // cross-device sync of supplement amounts that user might consume).
   const persistKey = useRef('');
   useEffect(() => {
-    const sig = JSON.stringify({ d: daily?.totalPerDay, p: daily?.perMeal, w: woSupplement?.totalMg });
+    const sig = JSON.stringify({ d: aggregatedTotalPerDay, g: groupCount, w: woSupplement?.totalMg });
     if (sig === persistKey.current) return;
     persistKey.current = sig;
     try {
-      const eaaGStr = String(daily ? daily.totalPerDay / 1000 : 0);
+      const eaaGStr = String(aggregatedTotalPerDay / 1000);
+      // Legacy single-mix fields — useful when groupCount=1; for >1 we also
+      // write `eaa_groups` for richer consumers.
       localStorage.setItem('eaa_daily_result', JSON.stringify(daily));
       localStorage.setItem('eaa_g_per_day', eaaGStr);
-      localStorage.setItem('eaa_per_meal', JSON.stringify(daily ? daily.perMeal : []));
+      localStorage.setItem('eaa_per_meal', JSON.stringify(daily?.perMeal || []));
       localStorage.setItem('eaa_wo_supplement', JSON.stringify(woSupplement));
+      localStorage.setItem('eaa_groups', JSON.stringify(groups));
       saveSetting('eaa_g_per_day', eaaGStr);
-      saveSetting('eaa_per_meal', JSON.stringify(daily ? daily.perMeal : []));
+      saveSetting('eaa_per_meal', JSON.stringify(daily?.perMeal || []));
       saveSetting('eaa_wo_supplement', JSON.stringify(woSupplement));
+      saveSetting('eaa_groups', JSON.stringify(groups));
     } catch {}
-  }, [daily, woSupplement]);
+  }, [aggregatedTotalPerDay, groupCount, woSupplement, daily, groups]);
 
   const computing = false;
 
   const handlePrint = () => {
-    if (!daily) return;
+    if (groups.length === 0) return;
     const date = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
     const fmt = (mg: number) => `${(mg / 1000).toFixed(2)} g`;
+    const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
-    const perMealMap = new Map(daily.perMeal.map(p => [p.aa, p.mg]));
-    const mainRows = daily.perDay.map(p => {
-      const perMealMg = perMealMap.get(p.aa) ?? (p.mg / daily.mealCount);
-      return `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td><td>${fmt(p.mg * 3)}</td><td>${fmt(p.mg * 7)}</td></tr>`;
+    const groupSections = groups.map((g, gi) => {
+      const perMealMap = new Map(g.supplement.perMeal.map(p => [p.aa, p.mg]));
+      const totalDaily = g.supplement.totalPerDay;
+      const totalPerMeal = totalDaily / g.supplement.mealCount;
+      const perServingG = (totalPerMeal / 1000).toFixed(2);
+      const rows = g.supplement.perDay.map(p => {
+        const perMealMg = perMealMap.get(p.aa) ?? (p.mg / g.supplement.mealCount);
+        return `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td><td>${fmt(p.mg * 3)}</td><td>${fmt(p.mg * 7)}</td></tr>`;
+      }).join('');
+      const totalRow = `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td><td>${fmt(totalDaily * 3)}</td><td>${fmt(totalDaily * 7)}</td></tr>`;
+      const label = groups.length === 1 ? 'Main Mix' : `Mix ${String.fromCharCode(65 + gi)}`;
+      const mealNames = g.mealNames.map(esc).join(' · ');
+      return `
+        <h2>${label} <span class="hint">${esc(mealNames)} &middot; ~${perServingG} g per meal</span></h2>
+        <table>
+          <thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th><th>3 Days</th><th>1 Week</th></tr></thead>
+          <tbody>${rows}${totalRow}</tbody>
+        </table>`;
     }).join('');
-    const totalDaily = daily.totalPerDay;
-    const totalPerMeal = totalDaily / daily.mealCount;
-    const mainTotalRow = `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td><td>${fmt(totalDaily * 3)}</td><td>${fmt(totalDaily * 7)}</td></tr>`;
-    const perServingG = (totalPerMeal / 1000).toFixed(2);
 
     let woSection = '';
     if (woSupplement) {
@@ -1308,18 +1360,15 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
         </table>`;
     }
 
+    const mixNoun = groups.length === 1 ? 'a single jar' : `${groups.length} labelled jars`;
     const bodyHtml = `
   <h1>EAA Supplement Mix</h1>
-  <div class="meta">Generated ${date} &middot; <span class="nnu">NNU ${daily.avgNNUBefore}% &rarr; ${daily.avgNNUAfter}%</span> &middot; ${daily.mealCount} meals/day</div>
-  <h2>Main Mix <span class="hint">${daily.mealCount} meals/day &middot; ~${perServingG} g per meal</span></h2>
-  <table>
-    <thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th><th>3 Days</th><th>1 Week</th></tr></thead>
-    <tbody>${mainRows}${mainTotalRow}</tbody>
-  </table>
+  <div class="meta">Generated ${date} &middot; <span class="nnu">NNU ${aggregatedAvgNNUBefore}% &rarr; ${aggregatedAvgNNUAfter}%</span> &middot; ${mainCount} meals/day &middot; ${groups.length} ${groups.length === 1 ? 'mix' : 'mixes'}</div>
+  ${groupSections}
   ${woSection}
   <div class="note">
-    <strong>How to mix:</strong> weigh each amino acid (precision scale &ge; 0.01 g) and combine in a single jar. Take ~${perServingG} g with each meal.
-    ${woSupplement ? `Mix the After-Workout blend separately; take ${(woSupplement.totalMg / 1000).toFixed(2)} g after each meal.` : ''}
+    <strong>How to mix:</strong> weigh each amino acid (precision scale &ge; 0.01 g) and combine into ${mixNoun}. Take the listed per-meal dose with each labelled meal.
+    ${woSupplement ? `Mix the After-Workout blend separately; take ${(woSupplement.totalMg / 1000).toFixed(2)} g after each workout.` : ''}
   </div>
   <div class="footer">bodybuilding &middot; ${date}</div>`;
 
@@ -1340,49 +1389,101 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
     openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css }));
   };
 
+  // Grouping options: 1 mix, 2 mixes (paired), or per-meal (= mainCount).
+  // Hide "paired" if there are < 3 main meals (degenerates to per-meal).
+  const modeOptions: { value: number; label: string; sub: string }[] = [
+    { value: 1, label: '1 mix', sub: 'simplest' },
+  ];
+  if (mainCount >= 3) modeOptions.push({ value: 2, label: '2 mixes', sub: 'paired' });
+  if (mainCount >= 2) modeOptions.push({ value: mainCount, label: `${mainCount} mixes`, sub: 'per meal' });
+  // Clamp current selection to a valid option.
+  const effectiveGroupCount = (() => {
+    if (groupCount <= 1) return 1;
+    if (groupCount >= mainCount) return mainCount;
+    if (groupCount === 2 && mainCount >= 3) return 2;
+    return 1;
+  })();
+
   return (
     <div className="mb-6 glass-card p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <h3 className="text-sm font-semibold text-white">Daily EAA Supplement</h3>
         <div className="flex items-center gap-2">
-          {computing && <span className="text-[10px] text-cyan-400/40">Computing...</span>}
-          {daily && (
+          {/* Grouping selector */}
+          {mainCount >= 2 && (
+            <div className="inline-flex rounded-lg border border-white/10 overflow-hidden text-[10px] uppercase tracking-wider">
+              {modeOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setGroupCount(opt.value)}
+                  title={opt.sub}
+                  className={`px-2.5 py-1 transition-colors ${effectiveGroupCount === opt.value ? 'bg-cyan-400/15 text-cyan-300' : 'text-white/40 hover:text-white/60'}`}
+                >{opt.label}</button>
+              ))}
+            </div>
+          )}
+          {groups.length > 0 && (
             <button onClick={handlePrint} className={PRINT_BTN_CLASS} title="Print as PDF — daily, 3-day, weekly amounts">
               Print
             </button>
           )}
         </div>
       </div>
-      {computing ? (
-        <div className="text-xs text-white/30">Computing optimal supplements...</div>
-      ) : daily ? (
+      {groups.length > 0 ? (
         <>
-          <div className="flex items-baseline gap-2 mb-3">
-            <span className="text-lg font-bold text-cyan-400">NNU {daily.avgNNUBefore}% → {daily.avgNNUAfter}%</span>
-            <span className="text-xs text-white/20">{daily.mealCount} meals · {(daily.totalPerDay / 1000).toFixed(1)}g/day</span>
+          <div className="flex items-baseline gap-2 mb-3 flex-wrap">
+            <span className="text-lg font-bold text-cyan-400">NNU {aggregatedAvgNNUBefore}% → {aggregatedAvgNNUAfter}%</span>
+            <span className="text-xs text-white/20">{mainCount} meals · {(aggregatedTotalPerDay / 1000).toFixed(1)}g/day across {groups.length} {groups.length === 1 ? 'mix' : 'mixes'}</span>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Total per day</div>
-              {daily.perDay.map((p, i) => (
-                <div key={i} className="flex justify-between text-xs mb-1">
-                  <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
-                  <span className="text-white/40 font-mono">{p.mg < 1000 ? `${p.mg}mg` : `${(p.mg / 1000).toFixed(1)}g`}</span>
+
+          {/* One card per group */}
+          <div className={groups.length > 1 ? 'space-y-3' : ''}>
+            {groups.map((g, gi) => {
+              const perMealMg = g.supplement.perMeal.reduce((s, p) => s + p.mg, 0);
+              const perMealG = perMealMg / 1000;
+              const dailyMg = perMealMg * g.mealIndices.length;
+              const mixLabel = groups.length === 1 ? 'Main Mix' : `Mix ${String.fromCharCode(65 + gi)}`;
+              return (
+                <div key={gi} className={groups.length > 1 ? 'rounded-lg border border-white/5 p-3' : ''}>
+                  <div className="flex items-baseline gap-2 mb-2 flex-wrap">
+                    <span className="text-sm font-semibold text-cyan-300">{mixLabel}</span>
+                    <span className="text-[10px] text-white/40">{g.mealNames.join(' · ')}</span>
+                    <span className="text-[10px] text-white/30 ml-auto">{perMealG.toFixed(2)}g/meal × {g.mealIndices.length} = {(dailyMg/1000).toFixed(2)}g/day</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-[10px] text-white/25 uppercase tracking-wider mb-1.5">Per meal</div>
+                      {g.supplement.perMeal.map((p, i) => (
+                        <div key={i} className="flex justify-between text-xs mb-0.5">
+                          <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
+                          <span className="text-white/40 font-mono">{p.mg}mg</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-white/25 uppercase tracking-wider mb-1.5">Total per day</div>
+                      {g.supplement.perDay.map((p, i) => (
+                        <div key={i} className="flex justify-between text-xs mb-0.5">
+                          <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
+                          <span className="text-white/40 font-mono">{p.mg < 1000 ? `${p.mg}mg` : `${(p.mg/1000).toFixed(1)}g`}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {groups.length > 1 && (
+                    <div className="mt-2 text-[10px] text-white/30">
+                      NNU {g.supplement.avgNNUBefore}% → {g.supplement.avgNNUAfter}% across {g.mealIndices.length} meal{g.mealIndices.length > 1 ? 's' : ''}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-            <div>
-              <div className="text-[10px] text-white/25 uppercase tracking-wider mb-2">Per meal (~{daily.mealCount} meals)</div>
-              {daily.perMeal.map((p, i) => (
-                <div key={i} className="flex justify-between text-xs mb-1">
-                  <span className="text-cyan-400/70">{EAA_NAMES[p.aa]}</span>
-                  <span className="text-white/40 font-mono">{p.mg}mg</span>
-                </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
+
           <div className="mt-3 pt-3 border-t border-white/5 text-[10px] text-white/20">
-            Mix into a single powder. Take {Math.round(daily.totalPerDay / daily.mealCount / 100) / 10}g per meal.
+            {groups.length === 1
+              ? `Mix into a single jar. Take ${(aggregatedTotalPerDay / mainCount / 1000).toFixed(2)} g with each main meal.`
+              : `Mix each blend into its own labelled jar. Take the labelled dose with each listed meal.`}
           </div>
 
           {/* After Workout individual supplement */}
@@ -1390,7 +1491,7 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
             <div className="mt-4 pt-4 border-t border-white/10">
               <div className="flex items-baseline gap-2 mb-2">
                 <span className="text-sm font-semibold text-amber-400">After Workout</span>
-                <span className="text-xs text-white/20">{(woSupplement.totalMg / 1000).toFixed(1)}g · NNU {woSupplement.foodNNU}% → {woSupplement.finalNNU}%</span>
+                <span className="text-xs text-white/20">{(woSupplement.totalMg / 1000).toFixed(2)}g · NNU {woSupplement.foodNNU}% → {woSupplement.finalNNU}%</span>
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                 {woSupplement.aas.map((s, i) => (
@@ -1405,8 +1506,8 @@ function DailyEAAPanel({ plan, allowedFoods }: { plan: NutritionPlan; allowedFoo
 
           {/* Total daily */}
           <div className="mt-3 pt-3 border-t border-white/5 text-[10px] text-white/30">
-            Total daily: {((daily.totalPerDay + (woSupplement?.totalMg || 0)) / 1000).toFixed(1)}g
-            <span className="text-white/15"> ({(daily.totalPerDay / 1000).toFixed(1)}g main + {((woSupplement?.totalMg || 0) / 1000).toFixed(1)}g after WO)</span>
+            Total daily: {((aggregatedTotalPerDay + (woSupplement?.totalMg || 0)) / 1000).toFixed(2)}g
+            <span className="text-white/15"> ({(aggregatedTotalPerDay / 1000).toFixed(2)}g main + {((woSupplement?.totalMg || 0) / 1000).toFixed(2)}g after WO)</span>
           </div>
         </>
       ) : (
@@ -1447,7 +1548,7 @@ function MacroTarget({ label, value, onChange, unit, color }: { label: string; v
   );
 }
 
-function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, allowedFoods, onSaveOptimizedMeal, recommendedTargets }: {
+function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, allowedFoods, onSaveOptimizedMeal, recommendedTargets, eaaGroupCount }: {
   dayPlan: DayPlan;
   title: string;
   color: string;
@@ -1460,6 +1561,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   editPlan: DayPlan | null;
   setEditPlan: (p: DayPlan) => void;
   recommendedTargets?: { kcal: number; protein: number; carbs: number; fat: number } | null;
+  eaaGroupCount: number;
 }) {
   // Track which Recommended-macro info popover is open
   const [expandedRec, setExpandedRec] = useState<string | null>(null);
@@ -1492,28 +1594,43 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     saveSetting('macro_targets', JSON.stringify(next));
   };
 
-  // Actual macros — computed in real-time from all meals + live EAA supplement
+  // Actual macros — computed in real-time from all meals + live EAA supplements
   // (no localStorage read — derived directly from current plan in the NNU calc above)
   const foodMacros = sumMacros(dayPlan.meals);
-  const liveDaily = (() => {
-    const isExcluded = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra') || l.includes('after workout'); };
-    const mains = dayPlan.meals.filter(m => !isExcluded(m.name)).map(m => {
-      const items = m.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
-      return items.map(f => ({ name: f.name, amount: f.amount as string }));
-    }).filter(m => m.length > 0);
-    return mains.length > 0 ? calcDailyEAA(mains, undefined, 2) : null;
-  })();
-  const eaaG = liveDaily ? liveDaily.totalPerDay / 1000 : 0;
-  const dailyEAAFromStorage = liveDaily?.perMeal || [];
+  const isExcludedMain = (n: string) => { const l = n.toLowerCase(); return l.includes('during workout') || l.includes('intra') || l.includes('after workout'); };
+  const liveMainMealFoods = dayPlan.meals.filter(m => !isExcludedMain(m.name)).map(m => {
+    const items = m.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount);
+    return items.map(f => ({ name: f.name, amount: f.amount as string }));
+  }).filter(m => m.length > 0);
+  const liveMainMealNames = dayPlan.meals.filter(m => !isExcludedMain(m.name)).map(m => m.name)
+    .filter((_, i) => liveMainMealFoods[i]?.length > 0);
+  // Grouped supplement: with groupCount=1 this is a single mix; with =2 two
+  // pairs; with =meals.length one per meal.
+  const liveGroups = liveMainMealFoods.length > 0
+    ? calcGroupedEAA(liveMainMealFoods, liveMainMealNames, eaaGroupCount)
+    : [];
+  // Total main mix grams across all groups (sum of per-meal × meal count per group).
+  const eaaG = liveGroups.reduce((sum, g) => sum + (g.supplement.totalPerDay / 1000), 0);
+  // Legacy single-mix view for surfaces that haven't migrated yet (storage cache):
+  const liveDaily = liveGroups.length === 1 ? liveGroups[0].supplement : null;
+  // Map each main meal name → its group's per-meal supplement. MealCard reads
+  // this so its NNU/supplement display reflects the actual mix that meal will
+  // get under the current grouping mode.
+  const suppByMealName: Record<string, { aa: string; mg: number }[]> = {};
+  for (const g of liveGroups) {
+    for (const idx of g.mealIndices) {
+      suppByMealName[liveMainMealNames[idx]] = g.supplement.perMeal;
+    }
+  }
   const liveWO = (() => {
     const wo = dayPlan.meals.find(m => m.name.toLowerCase().includes('after workout'));
     if (!wo) return null;
     const items = wo.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string }));
     return items.length > 0 ? calcIndividualSupplement(items, 96) : null;
   })();
-  // Include both the main EAA mix (eaaG, across 4 main meals) and the
-  // After-Workout supplement so the dashboard total matches the EAA
-  // Overview Daily Total (both supplements counted).
+  // Include both the main EAA mix (across all groups) and the After-Workout
+  // supplement so the dashboard total matches the EAA Overview Daily Total
+  // (both supplements counted).
   const woG = liveWO ? liveWO.totalMg / 1000 : 0;
   const actualMacros = {
     kcal: foodMacros.kcal + Math.round((eaaG + woG) * 4),
@@ -2003,7 +2120,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                 return plan.meals.map((meal, i) => (
                   <MealCard key={i} meal={meal} allowedFoods={allowedFoods}
                     avgTargets={isIntra(meal.name) ? INTRA_TARGETS : avg}
-                    dailyEAAPerMeal={dailyEAAFromStorage}
+                    dailyEAAPerMeal={suppByMealName[meal.name] || []}
                     woSupplement={liveWO}
                     onSaveOptimized={onSaveOptimizedMeal ? (m) => onSaveOptimizedMeal(i, m) : undefined} />
                 ));
@@ -2134,6 +2251,31 @@ export default function NutritionPlanPage() {
     }
     return DEFAULT_OPTIMIZER_FOODS;
   });
+  // EAA supplement grouping: 1 = single shared mix (simplest), 2 = optimal
+  // pairing of meals (best balance of NNU vs convenience), large = one mix
+  // per main meal (highest per-meal NNU, most jars to weigh).
+  const [eaaGroupCount, setEaaGroupCountState] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('eaa_group_count');
+      if (v) { const n = parseInt(v, 10); if (n >= 1 && n <= 8) return n; }
+    }
+    return 1;
+  });
+  const setEaaGroupCount = (n: number) => {
+    setEaaGroupCountState(n);
+    try {
+      localStorage.setItem('eaa_group_count', String(n));
+      saveSetting('eaa_group_count', String(n));
+    } catch {}
+  };
+  // Sync from Firestore on mount.
+  useEffect(() => {
+    getSettingRemote('eaa_group_count').then(v => {
+      if (!v) return;
+      const n = parseInt(v, 10);
+      if (n >= 1 && n <= 8) setEaaGroupCountState(n);
+    });
+  }, []);
   // Always pull latest from Firestore on mount (was only loading if localStorage
   // was empty — so a stale cached list on one device would override the real
   // saved selection from another device, silently reverting edits).
@@ -2327,16 +2469,21 @@ export default function NutritionPlanPage() {
     const l = n.toLowerCase();
     return l.includes('during workout') || l.includes('intra') || l.includes('after workout');
   };
-  const mainsForEAA = plan.current.trainingDay.meals
+  const mainsForEAAEntries = plan.current.trainingDay.meals
     .filter(m => !isExcludedFromEAA(m.name))
-    .map(meal => meal.items
-      .map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
-      .filter(it => it.name.trim() && it.amount)
-      .map(f => ({ name: f.name, amount: f.amount as string }))
-    )
-    .filter(m => m.length > 0);
-  const liveDailyEAA = mainsForEAA.length > 0 ? calcDailyEAA(mainsForEAA, undefined, 2) : null;
-  const eaaDailyKcal = liveDailyEAA ? Math.round(liveDailyEAA.totalPerDay * 4 / 1000) : 0;
+    .map(meal => ({
+      name: meal.name,
+      foods: meal.items
+        .map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
+        .filter(it => it.name.trim() && it.amount)
+        .map(f => ({ name: f.name, amount: f.amount as string })),
+    }))
+    .filter(m => m.foods.length > 0);
+  const liveEAAGroups = mainsForEAAEntries.length > 0
+    ? calcGroupedEAA(mainsForEAAEntries.map(m => m.foods), mainsForEAAEntries.map(m => m.name), eaaGroupCount, undefined, 2)
+    : [];
+  const eaaTotalMg = liveEAAGroups.reduce((s, g) => s + g.supplement.totalPerDay, 0);
+  const eaaDailyKcal = Math.round(eaaTotalMg * 4 / 1000);
   const dailyPlanKcal = foodSum.kcal + eaaDailyKcal;
   const wkIntake = calcWeeklyIntake(dailyPlanKcal, plan.current.trainingDay.meals).weeklyAvgKcal;
   const derived = measurements.length >= 2 ? calcDerivedTDEE(measurements, wkIntake, 28) : null;
@@ -2364,6 +2511,7 @@ export default function NutritionPlanPage() {
               allowedFoods={allowedFoods}
               onSaveOptimizedMeal={saveOptimizedMeal}
               recommendedTargets={recommended}
+              eaaGroupCount={eaaGroupCount}
             />
           </div>
 
@@ -2371,10 +2519,10 @@ export default function NutritionPlanPage() {
           <AutoOptimizePanel plan={plan} allowedFoods={allowedFoods} persist={persist} />
 
           {/* Per-meal EAA breakdown — collapsible */}
-          <EAAOverviewPanel plan={plan} allowedFoods={allowedFoods} />
+          <EAAOverviewPanel plan={plan} allowedFoods={allowedFoods} groupCount={eaaGroupCount} />
 
           {/* Daily EAA Supplement Summary — computed lazily */}
-          <DailyEAAPanel plan={plan} allowedFoods={allowedFoods} />
+          <DailyEAAPanel plan={plan} allowedFoods={allowedFoods} groupCount={eaaGroupCount} setGroupCount={setEaaGroupCount} />
 
           {/* NNU Food Preferences */}
           <div className="mb-6">
