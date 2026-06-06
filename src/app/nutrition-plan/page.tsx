@@ -6,7 +6,30 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Navigation from '@/components/Navigation';
 import { getNutritionPlan, saveNutritionPlan, getDefaultNutritionPlan, getSetting, getSettingRemote, saveSetting, nutritionPlanExistsRemotely, getMeasurements } from '@/utils/storage';
 import { NutritionPlan, NutritionPlanVersion, DayPlan, NutritionMeal, FoodItem, Measurement } from '@/types';
-import { calcNNU, optimizeMeal, calcDailyEAA, calcGroupedEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult, type SupplementGroup } from '@/utils/eaa';
+import { calcNNU, optimizeMeal, calcDailyEAA, calcGroupedEAA, calcIndividualSupplement, autoOptimize, EAA_ORDER, EAA_NAMES, MAP, TARGET_NNU, ALL_OPTIMIZER_FOODS, DEFAULT_OPTIMIZER_FOODS, isKnownFood, saveCustomFood, getCustomFoods, type AutoOptimizeResult, type SupplementGroup } from '@/utils/eaa';
+
+// Grouping mode for EAA supplements. See state declaration in NutritionPlanPage.
+type EAAGroupMode = '1' | '2-auto' | '2-manual' | 'per-meal';
+
+// Derive the (groupCount, manualPartition) pair calcGroupedEAA needs from the
+// stored mode + manual assignments. Centralised so every consumer gets the
+// same answer for the same inputs.
+function deriveGroupingParams(
+  mode: EAAGroupMode,
+  manual: Record<string, number>,
+  mealNames: string[],
+): { groupCount: number; manualPartition?: number[] } {
+  if (mealNames.length === 0) return { groupCount: 1 };
+  if (mode === '1') return { groupCount: 1 };
+  if (mode === 'per-meal') return { groupCount: mealNames.length };
+  if (mode === '2-manual') {
+    // Fallback: if a meal isn't yet assigned, split in half by index order.
+    const half = Math.floor(mealNames.length / 2);
+    const partition = mealNames.map((n, i) => manual[n] ?? (i < half ? 0 : 1));
+    return { groupCount: 2, manualPartition: partition };
+  }
+  return { groupCount: 2 };
+}
 import { FOODS } from '@/utils/foods';
 import { calcDerivedTDEE, calcWeeklyIntake, calcRecommendedMacros } from '@/utils/calories';
 
@@ -422,7 +445,7 @@ function MealCard({ meal, allowedFoods, onSaveOptimized, avgTargets, dailyEAAPer
     setOptimization(null);
     setTimeout(() => {
       try {
-        const result = optimizeMeal(foodInputs, 96, allowedFoods, useLevel);
+        const result = optimizeMeal(foodInputs, TARGET_NNU, allowedFoods, useLevel);
         setOptimization(result);
       } catch { setOptimization(null); }
       setOptimizing(false);
@@ -1024,7 +1047,7 @@ function AutoOptimizePanel({ plan, allowedFoods, persist }: { plan: NutritionPla
 // all meals' EAA contributions into a daily total row at the bottom. Toggle
 // switches between "food only" and "food + prescribed EAA supplement" so
 // you can see the per-meal supplement actually closes the iso gap.
-function EAAOverviewPanel({ plan, allowedFoods, groupCount }: { plan: NutritionPlan; allowedFoods: string[]; groupCount: number }) {
+function EAAOverviewPanel({ plan, allowedFoods, groupMode, manualGroups }: { plan: NutritionPlan; allowedFoods: string[]; groupMode: EAAGroupMode; manualGroups: Record<string, number> }) {
   const [open, setOpen] = useState(false);
   const [withSupplement, setWithSupplement] = useState(false);
 
@@ -1041,8 +1064,9 @@ function EAAOverviewPanel({ plan, allowedFoods, groupCount }: { plan: NutritionP
       foods: meal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })),
     }))
     .filter(m => m.foods.length > 0);
+  const params = deriveGroupingParams(groupMode, manualGroups, mainMealEntries.map(m => m.name));
   const mainGroups: SupplementGroup[] = mainMealEntries.length > 0
-    ? calcGroupedEAA(mainMealEntries.map(m => m.foods), mainMealEntries.map(m => m.name), groupCount, allowedFoods, 2)
+    ? calcGroupedEAA(mainMealEntries.map(m => m.foods), mainMealEntries.map(m => m.name), params.groupCount, allowedFoods, 2, params.manualPartition)
     : [];
   // Map each main meal name to its group's per-meal supplement (mg by AA).
   const suppByMealName: Record<string, Record<string, number>> = {};
@@ -1054,7 +1078,7 @@ function EAAOverviewPanel({ plan, allowedFoods, groupCount }: { plan: NutritionP
 
   const woMeal = plan.current.trainingDay.meals.find(m => m.name.toLowerCase().includes('after workout'));
   const woFoods = woMeal ? woMeal.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string })) : [];
-  const woSupp = woFoods.length > 0 ? calcIndividualSupplement(woFoods, 96) : null;
+  const woSupp = woFoods.length > 0 ? calcIndividualSupplement(woFoods) : null;
   const woSuppMg: Record<string, number> = {};
   if (woSupp) for (const s of woSupp.aas) woSuppMg[s.aa] = s.mg;
 
@@ -1249,7 +1273,7 @@ function EAAOverviewPanel({ plan, allowedFoods, groupCount }: { plan: NutritionP
   );
 }
 
-function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan: NutritionPlan; allowedFoods: string[]; groupCount: number; setGroupCount: (n: number) => void }) {
+function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGroups, setManualGroups }: { plan: NutritionPlan; allowedFoods: string[]; groupMode: EAAGroupMode; setGroupMode: (m: EAAGroupMode) => void; manualGroups: Record<string, number>; setManualGroups: (m: Record<string, number>) => void }) {
   // Compute daily EAA + after-workout supplement directly from current plan.
   // No localStorage caching — calcDailyEAA is fast and trusting cached state
   // caused the panel to lock onto stale 'no supplement needed' even when the
@@ -1263,8 +1287,9 @@ function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan
     }))
     .filter(m => m.foods.length > 0);
   const mainCount = mainMealEntries.length;
+  const params = deriveGroupingParams(groupMode, manualGroups, mainMealEntries.map(m => m.name));
   const groups: SupplementGroup[] = mainCount > 0
-    ? calcGroupedEAA(mainMealEntries.map(m => m.foods), mainMealEntries.map(m => m.name), groupCount, allowedFoods, 2)
+    ? calcGroupedEAA(mainMealEntries.map(m => m.foods), mainMealEntries.map(m => m.name), params.groupCount, allowedFoods, 2, params.manualPartition)
     : [];
   // Aggregate the “daily” shape from groups for legacy storage/consumers.
   const aggregatedTotalPerDay = groups.reduce((s, g) => s + g.supplement.totalPerDay, 0);
@@ -1293,18 +1318,18 @@ function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan
     if (!wo) return [];
     return wo.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string }));
   })();
-  const woSupplement = woMealItems.length > 0 ? calcIndividualSupplement(woMealItems, 96) : null;
+  const woSupplement = woMealItems.length > 0 ? calcIndividualSupplement(woMealItems) : null;
 
   // Mirror to localStorage + Firestore so other surfaces stay in sync (e.g. for
   // cross-device sync of supplement amounts that user might consume).
   const persistKey = useRef('');
   useEffect(() => {
-    const sig = JSON.stringify({ d: aggregatedTotalPerDay, g: groupCount, w: woSupplement?.totalMg });
+    const sig = JSON.stringify({ d: aggregatedTotalPerDay, m: groupMode, w: woSupplement?.totalMg });
     if (sig === persistKey.current) return;
     persistKey.current = sig;
     try {
       const eaaGStr = String(aggregatedTotalPerDay / 1000);
-      // Legacy single-mix fields — useful when groupCount=1; for >1 we also
+      // Legacy single-mix fields — useful when groupMode='1'; for >1 we also
       // write `eaa_groups` for richer consumers.
       localStorage.setItem('eaa_daily_result', JSON.stringify(daily));
       localStorage.setItem('eaa_g_per_day', eaaGStr);
@@ -1316,7 +1341,7 @@ function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan
       saveSetting('eaa_wo_supplement', JSON.stringify(woSupplement));
       saveSetting('eaa_groups', JSON.stringify(groups));
     } catch {}
-  }, [aggregatedTotalPerDay, groupCount, woSupplement, daily, groups]);
+  }, [aggregatedTotalPerDay, groupMode, woSupplement, daily, groups]);
 
   const computing = false;
 
@@ -1389,20 +1414,47 @@ function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan
     openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css }));
   };
 
-  // Grouping options: 1 mix, 2 mixes (paired), or per-meal (= mainCount).
-  // Hide "paired" if there are < 3 main meals (degenerates to per-meal).
-  const modeOptions: { value: number; label: string; sub: string }[] = [
-    { value: 1, label: '1 mix', sub: 'simplest' },
+  // Grouping options. Hide "2 mixes" variants if there are < 3 main meals
+  // (degenerates to per-meal).
+  const modeOptions: { value: EAAGroupMode; label: string; sub: string }[] = [
+    { value: '1', label: '1 mix', sub: 'simplest' },
   ];
-  if (mainCount >= 3) modeOptions.push({ value: 2, label: '2 mixes', sub: 'paired' });
-  if (mainCount >= 2) modeOptions.push({ value: mainCount, label: `${mainCount} mixes`, sub: 'per meal' });
-  // Clamp current selection to a valid option.
-  const effectiveGroupCount = (() => {
-    if (groupCount <= 1) return 1;
-    if (groupCount >= mainCount) return mainCount;
-    if (groupCount === 2 && mainCount >= 3) return 2;
-    return 1;
-  })();
+  if (mainCount >= 3) modeOptions.push({ value: '2-auto', label: '2 auto', sub: 'optimal pairing' });
+  if (mainCount >= 3) modeOptions.push({ value: '2-manual', label: '2 manual', sub: 'you pick A / B' });
+  if (mainCount >= 2) modeOptions.push({ value: 'per-meal', label: `${mainCount} per meal`, sub: 'highest NNU' });
+
+  // When the user first switches to '2-manual', seed the assignment from
+  // either the auto-best partition (if available) or split-by-index. Without
+  // this, all meals start on A and only one mix shows.
+  useEffect(() => {
+    if (groupMode !== '2-manual' || mainCount < 2) return;
+    const allAssigned = mainMealEntries.every(m => manualGroups[m.name] !== undefined);
+    if (allAssigned) return;
+    // Seed: use the auto pairing as the starting point if it exists.
+    const autoGroups = calcGroupedEAA(
+      mainMealEntries.map(m => m.foods),
+      mainMealEntries.map(m => m.name),
+      2,
+      allowedFoods,
+      2,
+    );
+    const seed: Record<string, number> = { ...manualGroups };
+    if (autoGroups.length === 2) {
+      autoGroups.forEach((g, gi) => g.mealIndices.forEach(idx => {
+        if (seed[mainMealEntries[idx].name] === undefined) seed[mainMealEntries[idx].name] = gi;
+      }));
+    } else {
+      // Fallback: split by index.
+      const half = Math.floor(mainCount / 2);
+      mainMealEntries.forEach((m, i) => {
+        if (seed[m.name] === undefined) seed[m.name] = i < half ? 0 : 1;
+      });
+    }
+    setManualGroups(seed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupMode, mainCount]);
+
+  const groupLabel = (gi: number) => String.fromCharCode(65 + gi); // 0→A, 1→B
 
   return (
     <div className="mb-6 glass-card p-5">
@@ -1415,9 +1467,9 @@ function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan
               {modeOptions.map(opt => (
                 <button
                   key={opt.value}
-                  onClick={() => setGroupCount(opt.value)}
+                  onClick={() => setGroupMode(opt.value)}
                   title={opt.sub}
-                  className={`px-2.5 py-1 transition-colors ${effectiveGroupCount === opt.value ? 'bg-cyan-400/15 text-cyan-300' : 'text-white/40 hover:text-white/60'}`}
+                  className={`px-2.5 py-1 transition-colors ${groupMode === opt.value ? 'bg-cyan-400/15 text-cyan-300' : 'text-white/40 hover:text-white/60'}`}
                 >{opt.label}</button>
               ))}
             </div>
@@ -1429,6 +1481,34 @@ function DailyEAAPanel({ plan, allowedFoods, groupCount, setGroupCount }: { plan
           )}
         </div>
       </div>
+
+      {/* Manual assignment — only when 2-manual is selected */}
+      {groupMode === '2-manual' && mainCount >= 2 && (
+        <div className="mb-4 p-3 rounded-lg border border-white/10 bg-white/[0.02]">
+          <div className="text-[10px] text-white/40 uppercase tracking-wider mb-2">Assign each meal</div>
+          <div className="flex flex-wrap gap-2">
+            {mainMealEntries.map(m => {
+              const current = manualGroups[m.name] ?? 0;
+              return (
+                <div key={m.name} className="inline-flex items-center gap-1.5">
+                  <span className="text-xs text-white/60">{m.name}</span>
+                  <div className="inline-flex rounded border border-white/10 overflow-hidden text-[10px]">
+                    {[0, 1].map(gi => (
+                      <button
+                        key={gi}
+                        onClick={() => setManualGroups({ ...manualGroups, [m.name]: gi })}
+                        className={`px-2 py-0.5 transition-colors ${current === gi
+                          ? gi === 0 ? 'bg-cyan-400/20 text-cyan-300' : 'bg-amber-400/20 text-amber-300'
+                          : 'text-white/40 hover:text-white/60'}`}
+                      >{groupLabel(gi)}</button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {groups.length > 0 ? (
         <>
           <div className="flex items-baseline gap-2 mb-3 flex-wrap">
@@ -1548,7 +1628,7 @@ function MacroTarget({ label, value, onChange, unit, color }: { label: string; v
   );
 }
 
-function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, allowedFoods, onSaveOptimizedMeal, recommendedTargets, eaaGroupCount }: {
+function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCancel, editPlan, setEditPlan, allowedFoods, onSaveOptimizedMeal, recommendedTargets, eaaGroupMode, eaaManualGroups }: {
   dayPlan: DayPlan;
   title: string;
   color: string;
@@ -1561,7 +1641,8 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   editPlan: DayPlan | null;
   setEditPlan: (p: DayPlan) => void;
   recommendedTargets?: { kcal: number; protein: number; carbs: number; fat: number } | null;
-  eaaGroupCount: number;
+  eaaGroupMode: EAAGroupMode;
+  eaaManualGroups: Record<string, number>;
 }) {
   // Track which Recommended-macro info popover is open
   const [expandedRec, setExpandedRec] = useState<string | null>(null);
@@ -1606,8 +1687,9 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     .filter((_, i) => liveMainMealFoods[i]?.length > 0);
   // Grouped supplement: with groupCount=1 this is a single mix; with =2 two
   // pairs; with =meals.length one per meal.
+  const liveGroupingParams = deriveGroupingParams(eaaGroupMode, eaaManualGroups, liveMainMealNames);
   const liveGroups = liveMainMealFoods.length > 0
-    ? calcGroupedEAA(liveMainMealFoods, liveMainMealNames, eaaGroupCount)
+    ? calcGroupedEAA(liveMainMealFoods, liveMainMealNames, liveGroupingParams.groupCount, undefined, 2, liveGroupingParams.manualPartition)
     : [];
   // Total main mix grams across all groups (sum of per-meal × meal count per group).
   const eaaG = liveGroups.reduce((sum, g) => sum + (g.supplement.totalPerDay / 1000), 0);
@@ -1626,7 +1708,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
     const wo = dayPlan.meals.find(m => m.name.toLowerCase().includes('after workout'));
     if (!wo) return null;
     const items = wo.items.map(it => parseFoodItem(it)).filter(it => it.name.trim() && it.amount).map(f => ({ name: f.name, amount: f.amount as string }));
-    return items.length > 0 ? calcIndividualSupplement(items, 96) : null;
+    return items.length > 0 ? calcIndividualSupplement(items) : null;
   })();
   // Include both the main EAA mix (across all groups) and the After-Workout
   // supplement so the dashboard total matches the EAA Overview Daily Total
@@ -1806,9 +1888,10 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
   return (
     <div className="glass-card overflow-hidden p-5">
           {/* Whole-day weighted NNU — protein-weighted across ALL real meals.
-              Mains use the daily-avg EAA supplement; After Workout uses its
-              own individual EAA supplement; both are computed live so this
-              header agrees with the per-meal pills and the Daily EAA panel. */}
+              Main meals use whichever mix their supplement group prescribes
+              (single shared, paired, or per-meal); After Workout uses its own
+              individual supplement. Computed live so this header agrees with
+              the per-meal pills and the Daily EAA panel. */}
           {(() => {
             const isIntraOrEmpty = (n: string) => {
               const l = n.toLowerCase();
@@ -1816,18 +1899,11 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
             };
             const isAfterWO = (n: string) => n.toLowerCase().includes('after workout');
 
-            const mainFoodsByMeal = dayPlan.meals
-              .filter(m => !isIntraOrEmpty(m.name) && !isAfterWO(m.name))
-              .map(meal => meal.items
-                .map(it => { try { return parseFoodItem(it); } catch { return { name: '' }; } })
-                .filter(it => it.name.trim() && it.amount)
-                .map(f => ({ name: f.name, amount: f.amount as string }))
-              )
-              .filter(m => m.length > 0);
-
-            const dailyEAAResult = mainFoodsByMeal.length > 0 ? calcDailyEAA(mainFoodsByMeal, undefined, 2) : null;
-            const dailyAvgPerMeal = dailyEAAResult?.perMeal || [];
-            const supplementGramsPerMeal = dailyEAAResult ? Math.round(dailyEAAResult.totalPerDay / dailyEAAResult.mealCount / 100) / 10 : 0;
+            // suppByMealName + eaaG already account for groupCount — they were
+            // computed earlier in DayPlanView from calcGroupedEAA.
+            const supplementGramsPerMeal = liveMainMealNames.length > 0
+              ? Math.round(eaaG / liveMainMealNames.length * 100) / 10
+              : 0;
 
             // Compute per-meal NNU (food-only and with-EAA) across ALL real meals
             // including After Workout (which uses individual EAA via liveWO).
@@ -1841,7 +1917,9 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
               if (items.length === 0) continue;
               const r = calcNNU(items);
               if (!r || r.totalProtein <= 0) continue;
-              const eaaToAdd = isAfterWO(meal.name) ? (liveWO?.aas || []) : dailyAvgPerMeal;
+              const eaaToAdd = isAfterWO(meal.name)
+                ? (liveWO?.aas || [])
+                : (suppByMealName[meal.name] || []);
               let withEAA = r.nnu;
               if (eaaToAdd.length > 0) {
                 const p = { ...r.profile };
@@ -1884,7 +1962,7 @@ function DayPlanView({ dayPlan, title, color, editing, onStartEdit, onSave, onCa
                           <span className="text-sm text-white/40">%</span>
                         </div>
                         <span className="text-[9px] text-white/30 uppercase">
-                          {dailyEAAResult ? `with EAA (${supplementGramsPerMeal}g/meal)` : 'no EAA needed'}
+                          {supplementGramsPerMeal > 0 ? `with EAA (${supplementGramsPerMeal}g/meal avg)` : 'no EAA needed'}
                         </span>
                       </div>
                     </div>
@@ -2251,29 +2329,56 @@ export default function NutritionPlanPage() {
     }
     return DEFAULT_OPTIMIZER_FOODS;
   });
-  // EAA supplement grouping: 1 = single shared mix (simplest), 2 = optimal
-  // pairing of meals (best balance of NNU vs convenience), large = one mix
-  // per main meal (highest per-meal NNU, most jars to weigh).
-  const [eaaGroupCount, setEaaGroupCountState] = useState<number>(() => {
+  // EAA supplement grouping mode:
+  //   '1'         = single shared mix (simplest)
+  //   '2-auto'    = 2 mixes, optimal pairing chosen by the app
+  //   '2-manual'  = 2 mixes, user assigns each meal to Mix A or Mix B
+  //   'per-meal'  = one mix per main meal
+  const [eaaGroupMode, setEaaGroupModeState] = useState<EAAGroupMode>(() => {
     if (typeof window !== 'undefined') {
-      const v = localStorage.getItem('eaa_group_count');
-      if (v) { const n = parseInt(v, 10); if (n >= 1 && n <= 8) return n; }
+      const v = localStorage.getItem('eaa_group_mode');
+      if (v === '1' || v === '2-auto' || v === '2-manual' || v === 'per-meal') return v;
+      // Migrate from old `eaa_group_count` numeric setting.
+      const c = localStorage.getItem('eaa_group_count');
+      if (c) {
+        const n = parseInt(c, 10);
+        if (n === 1) return '1';
+        if (n === 2) return '2-auto';
+        if (n >= 3) return 'per-meal';
+      }
     }
-    return 1;
+    return '1';
   });
-  const setEaaGroupCount = (n: number) => {
-    setEaaGroupCountState(n);
+  // meal-name → group-index assignment used only when mode = '2-manual'.
+  const [eaaManualGroups, setEaaManualGroupsState] = useState<Record<string, number>>(() => {
+    if (typeof window !== 'undefined') {
+      try { const s = localStorage.getItem('eaa_manual_groups'); if (s) return JSON.parse(s); } catch {}
+    }
+    return {};
+  });
+  const setEaaGroupMode = (m: EAAGroupMode) => {
+    setEaaGroupModeState(m);
     try {
-      localStorage.setItem('eaa_group_count', String(n));
-      saveSetting('eaa_group_count', String(n));
+      localStorage.setItem('eaa_group_mode', m);
+      saveSetting('eaa_group_mode', m);
+    } catch {}
+  };
+  const setEaaManualGroups = (next: Record<string, number>) => {
+    setEaaManualGroupsState(next);
+    try {
+      const json = JSON.stringify(next);
+      localStorage.setItem('eaa_manual_groups', json);
+      saveSetting('eaa_manual_groups', json);
     } catch {}
   };
   // Sync from Firestore on mount.
   useEffect(() => {
-    getSettingRemote('eaa_group_count').then(v => {
+    getSettingRemote('eaa_group_mode').then(v => {
+      if (v === '1' || v === '2-auto' || v === '2-manual' || v === 'per-meal') setEaaGroupModeState(v);
+    });
+    getSettingRemote('eaa_manual_groups').then(v => {
       if (!v) return;
-      const n = parseInt(v, 10);
-      if (n >= 1 && n <= 8) setEaaGroupCountState(n);
+      try { setEaaManualGroupsState(JSON.parse(v)); } catch {}
     });
   }, []);
   // Always pull latest from Firestore on mount (was only loading if localStorage
@@ -2479,8 +2584,9 @@ export default function NutritionPlanPage() {
         .map(f => ({ name: f.name, amount: f.amount as string })),
     }))
     .filter(m => m.foods.length > 0);
+  const liveEAAParams = deriveGroupingParams(eaaGroupMode, eaaManualGroups, mainsForEAAEntries.map(m => m.name));
   const liveEAAGroups = mainsForEAAEntries.length > 0
-    ? calcGroupedEAA(mainsForEAAEntries.map(m => m.foods), mainsForEAAEntries.map(m => m.name), eaaGroupCount, undefined, 2)
+    ? calcGroupedEAA(mainsForEAAEntries.map(m => m.foods), mainsForEAAEntries.map(m => m.name), liveEAAParams.groupCount, undefined, 2, liveEAAParams.manualPartition)
     : [];
   const eaaTotalMg = liveEAAGroups.reduce((s, g) => s + g.supplement.totalPerDay, 0);
   const eaaDailyKcal = Math.round(eaaTotalMg * 4 / 1000);
@@ -2511,7 +2617,8 @@ export default function NutritionPlanPage() {
               allowedFoods={allowedFoods}
               onSaveOptimizedMeal={saveOptimizedMeal}
               recommendedTargets={recommended}
-              eaaGroupCount={eaaGroupCount}
+              eaaGroupMode={eaaGroupMode}
+              eaaManualGroups={eaaManualGroups}
             />
           </div>
 
@@ -2519,10 +2626,17 @@ export default function NutritionPlanPage() {
           <AutoOptimizePanel plan={plan} allowedFoods={allowedFoods} persist={persist} />
 
           {/* Per-meal EAA breakdown — collapsible */}
-          <EAAOverviewPanel plan={plan} allowedFoods={allowedFoods} groupCount={eaaGroupCount} />
+          <EAAOverviewPanel plan={plan} allowedFoods={allowedFoods} groupMode={eaaGroupMode} manualGroups={eaaManualGroups} />
 
           {/* Daily EAA Supplement Summary — computed lazily */}
-          <DailyEAAPanel plan={plan} allowedFoods={allowedFoods} groupCount={eaaGroupCount} setGroupCount={setEaaGroupCount} />
+          <DailyEAAPanel
+            plan={plan}
+            allowedFoods={allowedFoods}
+            groupMode={eaaGroupMode}
+            setGroupMode={setEaaGroupMode}
+            manualGroups={eaaManualGroups}
+            setManualGroups={setEaaManualGroups}
+          />
 
           {/* NNU Food Preferences */}
           <div className="mb-6">

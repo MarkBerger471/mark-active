@@ -25,6 +25,14 @@ export const MAP: Record<EAA, number> = {
   thr: 11.1, met: 7.0, trp: 2.6, his: 1.1,
 };
 
+// NNU target the supplement calculators aim for. Each meal's worst-ratio AA
+// is pushed to this percentage of MAP. Single source of truth — change here
+// and every consumer (Daily EAA, After-Workout, grouped, per-meal) follows.
+// 96 % is the practical sweet spot: higher targets explode the supplement
+// size (98 % needs ~3.5× more powder for only ~3 % more NNU) without
+// meaningful biological benefit.
+export const TARGET_NNU = 96;
+
 // Derived maps from the unified FOODS DB — single source of truth.
 // The legacy const names are kept so the rest of this file (and the
 // optimizer's lookupMacro helper) can remain unchanged.
@@ -751,13 +759,13 @@ export function calcDailyEAA(meals: FoodInput[][], allowedFoods?: string[], leve
 
   for (const foods of meals) {
     const nnu = calcNNU(foods);
-    if (!nnu || nnu.nnu >= 96) {
+    if (!nnu || nnu.nnu >= TARGET_NNU) {
       mealResults.push({ nnu: nnu?.nnu || 100, gaps: {} });
       continue;
     }
 
     // Compute targeted AAs for CURRENT food (not after food optimization)
-    const fix = calcTargetedAAs(nnu.profile, 96);
+    const fix = calcTargetedAAs(nnu.profile, TARGET_NNU);
     if (!fix || fix.aas.length === 0) {
       mealResults.push({ nnu: nnu.nnu, gaps: {} });
       continue;
@@ -778,9 +786,14 @@ export function calcDailyEAA(meals: FoodInput[][], allowedFoods?: string[], leve
     }
   }
 
-  // Filter to significant AAs (>200mg/day) and sort by amount
+  // Filter to significant AAs. The floor scales with the number of meals so
+  // small per-meal gaps (e.g. Tryptophan's ~100 mg/meal) aren't silently
+  // dropped in low-count groups. 50 mg/meal matches the per-meal rounding
+  // precision below.
+  const mealCountForFilter = meals.length || 1;
+  const minGapPerDay = 50 * mealCountForFilter;
   const perDay = EAA_ORDER
-    .filter(aa => (totalGaps[aa] || 0) > 200)
+    .filter(aa => (totalGaps[aa] || 0) > minGapPerDay)
     .map(aa => ({ aa, mg: Math.round((totalGaps[aa] || 0) / 100) * 100 })) // round to 100mg
     .sort((a, b) => b.mg - a.mg);
 
@@ -835,6 +848,10 @@ export interface SupplementGroup {
  * For groupCount=2 we enumerate every non-trivial partition of the meals into
  * two non-empty subsets and pick the one with the highest protein-weighted
  * NNU after supplementation. For 4 meals that's 7 partitions — trivial.
+ *
+ * `manualPartition`: when present and length matches meals.length, treat it as
+ * the explicit group index for each meal (0, 1, 2, …) and skip auto-search.
+ * Useful when the user wants to hand-pick which meals share a mix.
  */
 export function calcGroupedEAA(
   meals: FoodInput[][],
@@ -842,6 +859,7 @@ export function calcGroupedEAA(
   groupCount: number,
   allowedFoods?: string[],
   level: number = 2,
+  manualPartition?: number[],
 ): SupplementGroup[] {
   if (meals.length === 0) return [];
 
@@ -865,6 +883,24 @@ export function calcGroupedEAA(
   // Per-meal: one mix per meal.
   if (groupCount >= meals.length) {
     return meals.map((_, i) => buildGroup([i])).filter((g): g is SupplementGroup => g != null);
+  }
+
+  // Manual partition: build groups from the explicit assignment if it covers
+  // all meals. Empty groups (no meal assigned to them) are dropped.
+  if (manualPartition && manualPartition.length === meals.length) {
+    const byGroup = new Map<number, number[]>();
+    for (let i = 0; i < meals.length; i++) {
+      const g = manualPartition[i];
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g)!.push(i);
+    }
+    const out: SupplementGroup[] = [];
+    for (const [, idxs] of [...byGroup.entries()].sort((a, b) => a[0] - b[0])) {
+      const g = buildGroup(idxs);
+      if (g) out.push(g);
+    }
+    if (out.length > 0) return out;
+    // If manual produced nothing usable, fall through to auto below.
   }
 
   // 2 groups: enumerate partitions, pick the highest weighted NNU.
@@ -1035,7 +1071,7 @@ export function autoOptimize(
 
 // Keep simple suggestFix as a wrapper for backward compat
 /** Calculate individual targeted supplement for a single meal (e.g., After Workout) */
-export function calcIndividualSupplement(foods: FoodInput[], targetNNU: number = 96): { aas: { aa: EAA; mg: number }[]; totalMg: number; foodNNU: number; finalNNU: number } | null {
+export function calcIndividualSupplement(foods: FoodInput[], targetNNU: number = TARGET_NNU): { aas: { aa: EAA; mg: number }[]; totalMg: number; foodNNU: number; finalNNU: number } | null {
   const nnu = calcNNU(foods);
   if (!nnu || nnu.nnu >= targetNNU) return null;
   const fix = calcTargetedAAs(nnu.profile, targetNNU);
