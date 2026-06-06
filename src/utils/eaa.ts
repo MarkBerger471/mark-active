@@ -10,7 +10,9 @@
  * with food alone. A targeted EAA supplement is needed to reach >95%.
  */
 
-export type EAA = 'leu' | 'ile' | 'val' | 'lys' | 'phe' | 'thr' | 'met' | 'trp' | 'his';
+import { FOODS, PIECE_G, type EAA, type EAAProfile } from './foods';
+export type { EAA, EAAProfile } from './foods';
+
 export const EAA_NAMES: Record<EAA, string> = {
   leu: 'Leucine', ile: 'Isoleucine', val: 'Valine', lys: 'Lysine',
   phe: 'Phenylalanine', thr: 'Threonine', met: 'Methionine', trp: 'Tryptophan', his: 'Histidine',
@@ -23,329 +25,25 @@ export const MAP: Record<EAA, number> = {
   thr: 11.1, met: 7.0, trp: 2.6, his: 1.1,
 };
 
-// EAA profiles: mg per gram of protein for each food (USDA FoodData Central)
-export type EAAProfile = Record<EAA, number>;
+// Derived maps from the unified FOODS DB — single source of truth.
+// The legacy const names are kept so the rest of this file (and the
+// optimizer's lookupMacro helper) can remain unchanged.
+const EAA_DB: Record<string, EAAProfile> = Object.fromEntries(
+  Object.entries(FOODS).filter(([, f]) => f.eaa).map(([k, f]) => [k, f.eaa!])
+);
+const PROTEIN_PER_100G: Record<string, number> = Object.fromEntries(
+  Object.entries(FOODS).map(([k, f]) => [k, f.protein])
+);
+const KCAL_PER_100G: Record<string, number> = Object.fromEntries(
+  Object.entries(FOODS).map(([k, f]) => [k, f.kcal])
+);
+const CARBS_PER_100G: Record<string, number> = Object.fromEntries(
+  Object.entries(FOODS).map(([k, f]) => [k, f.carbs])
+);
+const FAT_PER_100G: Record<string, number> = Object.fromEntries(
+  Object.entries(FOODS).map(([k, f]) => [k, f.fat])
+);
 
-// USDA FoodData Central SR Legacy verified values (mg per gram of protein)
-// Verified 2026-04-10. Unverified foods marked with (est.)
-const EAA_DB: Record<string, EAAProfile> = {
-  // Dairy — verified from USDA milk protein composition
-  'greek yogurt': { leu: 98, ile: 56, val: 65, lys: 82, phe: 50, thr: 44, met: 26, trp: 14, his: 28 },
-  'yogurt':       { leu: 98, ile: 56, val: 65, lys: 82, phe: 50, thr: 44, met: 26, trp: 14, his: 28 },
-  'cottage cheese': { leu: 100, ile: 53, val: 67, lys: 84, phe: 52, thr: 45, met: 24, trp: 13, his: 29 },
-  'cheese':       { leu: 92, ile: 50, val: 66, lys: 82, phe: 53, thr: 36, met: 26, trp: 14, his: 33 },
-  'feta':         { leu: 90, ile: 48, val: 62, lys: 78, phe: 51, thr: 38, met: 24, trp: 13, his: 28 },
-  'milk':         { leu: 98, ile: 56, val: 65, lys: 82, phe: 50, thr: 44, met: 26, trp: 14, his: 28 },
-  'whole milk':   { leu: 98, ile: 56, val: 65, lys: 82, phe: 50, thr: 44, met: 26, trp: 14, his: 28 },
-  'casein':       { leu: 92, ile: 52, val: 65, lys: 80, phe: 50, thr: 44, met: 28, trp: 12, his: 30 },
-
-  // Protein powders — USDA whey protein concentrate
-  'whey':         { leu: 148, ile: 90, val: 73, lys: 132, phe: 47, thr: 89, met: 28, trp: 24, his: 28 },
-  'whey protein': { leu: 148, ile: 90, val: 73, lys: 132, phe: 47, thr: 89, met: 28, trp: 24, his: 28 },
-
-  // Eggs — USDA 171287, 172183
-  'eggs':         { leu: 86, ile: 53, val: 68, lys: 73, phe: 54, thr: 44, met: 30, trp: 13, his: 25 },
-  'egg':          { leu: 86, ile: 53, val: 68, lys: 73, phe: 54, thr: 44, met: 30, trp: 13, his: 25 },
-  'egg whites':   { leu: 83, ile: 50, val: 63, lys: 75, phe: 50, thr: 41, met: 29, trp: 13, his: 22 },
-
-  // Poultry — USDA 171477 chicken breast cooked
-  'chicken':        { leu: 82, ile: 48, val: 51, lys: 95, phe: 40, thr: 44, met: 26, trp: 12, his: 37 },
-  'chicken breast': { leu: 82, ile: 48, val: 51, lys: 95, phe: 40, thr: 44, met: 26, trp: 12, his: 37 },
-  'chicken thigh':  { leu: 79, ile: 47, val: 50, lys: 90, phe: 39, thr: 43, met: 25, trp: 11, his: 35 },
-  'turkey':         { leu: 83, ile: 50, val: 53, lys: 92, phe: 42, thr: 45, met: 27, trp: 12, his: 36 },
-  'turkey breast':  { leu: 83, ile: 50, val: 53, lys: 92, phe: 42, thr: 45, met: 27, trp: 12, his: 36 },
-
-  // Beef — USDA ground beef 85% lean cooked
-  'beef':        { leu: 77, ile: 44, val: 48, lys: 87, phe: 39, thr: 43, met: 26, trp: 9, his: 33 },
-  'ground beef': { leu: 77, ile: 44, val: 48, lys: 87, phe: 39, thr: 43, met: 26, trp: 9, his: 33 },
-  'steak':       { leu: 77, ile: 44, val: 48, lys: 87, phe: 39, thr: 43, met: 26, trp: 9, his: 33 },
-
-  // Fish & seafood — USDA verified
-  'salmon':  { leu: 81, ile: 46, val: 52, lys: 92, phe: 39, thr: 44, met: 30, trp: 11, his: 29 },
-  'tuna':    { leu: 85, ile: 48, val: 55, lys: 95, phe: 41, thr: 45, met: 30, trp: 11, his: 30 },
-  'tilapia': { leu: 80, ile: 48, val: 51, lys: 90, phe: 40, thr: 45, met: 30, trp: 11, his: 29 },
-  'shrimp':  { leu: 84, ile: 48, val: 45, lys: 94, phe: 42, thr: 43, met: 29, trp: 11, his: 27 },
-
-  // Grains — USDA verified
-  'oatmeal': { leu: 76, ile: 41, val: 55, lys: 42, phe: 53, thr: 34, met: 18, trp: 14, his: 24 },
-  'oats':    { leu: 76, ile: 41, val: 55, lys: 42, phe: 53, thr: 34, met: 18, trp: 14, his: 24 },
-  'rice':    { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 },
-  'white rice':   { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 },
-  'jasmine rice': { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 },
-  'brown rice':   { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 },
-  'rice dry':     { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 },
-  'dry rice':     { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 },
-  'cream of rice': { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 },
-  'bread':        { leu: 70, ile: 36, val: 44, lys: 27, phe: 49, thr: 29, met: 16, trp: 11, his: 22 },
-  'rye bread':    { leu: 66, ile: 35, val: 46, lys: 31, phe: 47, thr: 30, met: 15, trp: 10, his: 22 },
-  'whole rye bread': { leu: 66, ile: 35, val: 46, lys: 31, phe: 47, thr: 30, met: 15, trp: 10, his: 22 },
-  'pasta':        { leu: 75, ile: 39, val: 47, lys: 25, phe: 52, thr: 30, met: 17, trp: 11, his: 24 },
-  'pasta dry':    { leu: 75, ile: 39, val: 47, lys: 25, phe: 52, thr: 30, met: 17, trp: 11, his: 24 },
-  'dry pasta':    { leu: 75, ile: 39, val: 47, lys: 25, phe: 52, thr: 30, met: 17, trp: 11, his: 24 },
-
-  // Nuts & seeds — USDA verified almonds, peanut butter
-  'almonds':       { leu: 69, ile: 36, val: 39, lys: 27, phe: 53, thr: 28, met: 7, trp: 10, his: 26 },
-  'nuts':          { leu: 69, ile: 36, val: 39, lys: 27, phe: 53, thr: 28, met: 7, trp: 10, his: 26 },
-  'walnuts':       { leu: 73, ile: 38, val: 47, lys: 26, phe: 44, thr: 34, met: 17, trp: 12, his: 24 },
-  'peanut butter': { leu: 72, ile: 38, val: 46, lys: 39, phe: 59, thr: 30, met: 13, trp: 11, his: 29 },
-  'almond butter': { leu: 69, ile: 36, val: 39, lys: 27, phe: 53, thr: 28, met: 7, trp: 10, his: 26 },
-  'pumpkin seeds': { leu: 78, ile: 50, val: 58, lys: 40, phe: 49, thr: 33, met: 24, trp: 16, his: 26 },
-
-  // Legumes & soy — USDA verified lentils, chickpeas, tofu
-  'lentils':    { leu: 75, ile: 44, val: 52, lys: 69, phe: 55, thr: 40, met: 9, trp: 9, his: 32 },
-  'soy':        { leu: 78, ile: 47, val: 48, lys: 63, phe: 50, thr: 39, met: 13, trp: 13, his: 26 },
-  'chickpeas':  { leu: 71, ile: 41, val: 48, lys: 64, phe: 52, thr: 41, met: 11, trp: 9, his: 31 },
-  'black beans':{ leu: 78, ile: 43, val: 51, lys: 67, phe: 53, thr: 41, met: 12, trp: 11, his: 27 },
-  'edamame':    { leu: 78, ile: 47, val: 48, lys: 63, phe: 50, thr: 39, met: 13, trp: 13, his: 26 },
-  'tofu':       { leu: 81, ile: 53, val: 55, lys: 65, phe: 55, thr: 44, met: 14, trp: 15, his: 31 },
-  'tempeh':     { leu: 79, ile: 49, val: 51, lys: 58, phe: 48, thr: 39, met: 12, trp: 14, his: 25 },
-
-  // More dairy
-  'quark':      { leu: 97, ile: 55, val: 64, lys: 82, phe: 52, thr: 46, met: 27, trp: 14, his: 30 },
-  'skyr':       { leu: 96, ile: 54, val: 63, lys: 81, phe: 51, thr: 45, met: 27, trp: 14, his: 29 },
-  'kefir':      { leu: 95, ile: 53, val: 62, lys: 80, phe: 48, thr: 44, met: 25, trp: 14, his: 27 },
-  'mozzarella': { leu: 93, ile: 51, val: 65, lys: 83, phe: 54, thr: 37, met: 27, trp: 14, his: 33 },
-  'parmesan':   { leu: 94, ile: 52, val: 67, lys: 84, phe: 55, thr: 38, met: 28, trp: 13, his: 35 },
-  'ricotta':    { leu: 95, ile: 52, val: 63, lys: 80, phe: 50, thr: 43, met: 26, trp: 13, his: 29 },
-  'gouda':      { leu: 93, ile: 51, val: 66, lys: 83, phe: 54, thr: 37, met: 27, trp: 14, his: 34 },
-  'cream cheese': { leu: 91, ile: 50, val: 62, lys: 78, phe: 49, thr: 36, met: 24, trp: 13, his: 28 },
-  'whey isolate': { leu: 155, ile: 95, val: 76, lys: 138, phe: 49, thr: 93, met: 30, trp: 25, his: 29 },
-
-  // More fish & seafood
-  'cod':       { leu: 84, ile: 48, val: 53, lys: 91, phe: 41, thr: 44, met: 31, trp: 12, his: 29 },
-  'sardines':  { leu: 82, ile: 50, val: 54, lys: 89, phe: 42, thr: 46, met: 31, trp: 12, his: 32 },
-  'mackerel':  { leu: 82, ile: 49, val: 53, lys: 90, phe: 41, thr: 45, met: 30, trp: 12, his: 30 },
-  'trout':     { leu: 83, ile: 50, val: 54, lys: 91, phe: 41, thr: 46, met: 31, trp: 12, his: 31 },
-  'crab':      { leu: 80, ile: 47, val: 46, lys: 83, phe: 42, thr: 42, met: 27, trp: 12, his: 21 },
-  'scallops':  { leu: 78, ile: 46, val: 46, lys: 82, phe: 40, thr: 43, met: 28, trp: 11, his: 20 },
-
-  // More meat
-  'duck':          { leu: 80, ile: 48, val: 51, lys: 84, phe: 41, thr: 44, met: 27, trp: 12, his: 31 },
-  'venison':       { leu: 83, ile: 50, val: 55, lys: 88, phe: 43, thr: 47, met: 29, trp: 13, his: 34 },
-  'bison':         { leu: 82, ile: 49, val: 53, lys: 87, phe: 42, thr: 46, met: 28, trp: 12, his: 34 },
-  'pork':          { leu: 80, ile: 47, val: 50, lys: 85, phe: 41, thr: 44, met: 26, trp: 12, his: 33 },
-  'pork tenderloin': { leu: 82, ile: 48, val: 52, lys: 87, phe: 42, thr: 45, met: 27, trp: 12, his: 34 },
-  'lamb':          { leu: 81, ile: 48, val: 51, lys: 86, phe: 41, thr: 44, met: 26, trp: 12, his: 32 },
-  'rabbit':        { leu: 82, ile: 49, val: 53, lys: 88, phe: 42, thr: 46, met: 28, trp: 13, his: 33 },
-  'goat':          { leu: 80, ile: 47, val: 50, lys: 85, phe: 40, thr: 44, met: 26, trp: 12, his: 32 },
-  'liver (beef)':  { leu: 84, ile: 48, val: 55, lys: 82, phe: 47, thr: 43, met: 24, trp: 14, his: 31 },
-  'bacon':         { leu: 78, ile: 45, val: 49, lys: 82, phe: 39, thr: 42, met: 25, trp: 11, his: 32 },
-  'prosciutto':    { leu: 79, ile: 46, val: 50, lys: 83, phe: 40, thr: 43, met: 26, trp: 12, his: 33 },
-
-  // Seeds
-  'sunflower seeds': { leu: 66, ile: 44, val: 52, lys: 36, phe: 47, thr: 37, met: 19, trp: 14, his: 24 },
-  'chia seeds':      { leu: 68, ile: 41, val: 51, lys: 43, phe: 48, thr: 35, met: 14, trp: 17, his: 27 },
-  'flax seeds':      { leu: 65, ile: 40, val: 50, lys: 40, phe: 46, thr: 37, met: 18, trp: 16, his: 24 },
-  'hemp seeds':      { leu: 68, ile: 43, val: 53, lys: 39, phe: 47, thr: 36, met: 23, trp: 12, his: 28 },
-  'sesame seeds':    { leu: 70, ile: 39, val: 48, lys: 27, phe: 47, thr: 37, met: 29, trp: 14, his: 25 },
-  'pine nuts':       { leu: 67, ile: 38, val: 48, lys: 34, phe: 42, thr: 33, met: 19, trp: 11, his: 24 },
-  'cashews':         { leu: 66, ile: 38, val: 45, lys: 40, phe: 44, thr: 30, met: 15, trp: 12, his: 22 },
-  'pistachios':      { leu: 69, ile: 40, val: 49, lys: 48, phe: 46, thr: 31, met: 13, trp: 10, his: 24 },
-  'macadamia nuts':  { leu: 60, ile: 32, val: 40, lys: 12, phe: 45, thr: 28, met: 8, trp: 14, his: 16 },
-  'brazil nuts':     { leu: 63, ile: 36, val: 46, lys: 30, phe: 43, thr: 28, met: 68, trp: 9, his: 22 },
-  'hazelnuts':       { leu: 65, ile: 35, val: 43, lys: 26, phe: 46, thr: 27, met: 10, trp: 11, his: 24 },
-  'pecans':          { leu: 59, ile: 32, val: 40, lys: 24, phe: 42, thr: 26, met: 16, trp: 9, his: 22 },
-  'coconut':         { leu: 54, ile: 30, val: 42, lys: 30, phe: 37, thr: 27, met: 14, trp: 8, his: 17 },
-
-  // Grains & pseudo-grains
-  'quinoa':      { leu: 59, ile: 36, val: 42, lys: 54, phe: 42, thr: 30, met: 22, trp: 12, his: 29 },
-  'buckwheat':   { leu: 68, ile: 39, val: 51, lys: 58, phe: 43, thr: 38, met: 17, trp: 13, his: 25 },
-  'amaranth':    { leu: 59, ile: 39, val: 45, lys: 55, phe: 42, thr: 36, met: 18, trp: 11, his: 26 },
-  'spelt':       { leu: 72, ile: 38, val: 47, lys: 28, phe: 50, thr: 30, met: 17, trp: 12, his: 23 },
-  'millet':      { leu: 104, ile: 37, val: 47, lys: 16, phe: 51, thr: 31, met: 17, trp: 12, his: 19 },
-  'barley':      { leu: 68, ile: 36, val: 49, lys: 36, phe: 56, thr: 35, met: 17, trp: 12, his: 23 },
-  'corn':        { leu: 123, ile: 36, val: 51, lys: 27, phe: 49, thr: 37, met: 21, trp: 7, his: 30 },
-
-  // More fish & seafood
-  'halibut':   { leu: 83, ile: 49, val: 53, lys: 91, phe: 41, thr: 46, met: 31, trp: 12, his: 30 },
-  'swordfish': { leu: 82, ile: 48, val: 52, lys: 90, phe: 40, thr: 45, met: 30, trp: 12, his: 31 },
-  'sea bass':  { leu: 81, ile: 48, val: 52, lys: 89, phe: 40, thr: 45, met: 30, trp: 11, his: 30 },
-  'mussels':   { leu: 77, ile: 46, val: 44, lys: 80, phe: 41, thr: 43, met: 26, trp: 12, his: 20 },
-  'octopus':   { leu: 79, ile: 47, val: 45, lys: 82, phe: 42, thr: 42, met: 27, trp: 12, his: 21 },
-  'squid':     { leu: 78, ile: 47, val: 44, lys: 81, phe: 41, thr: 42, met: 27, trp: 12, his: 21 },
-  'lobster':   { leu: 80, ile: 47, val: 46, lys: 83, phe: 42, thr: 42, met: 28, trp: 12, his: 21 },
-  'anchovies': { leu: 82, ile: 50, val: 54, lys: 90, phe: 42, thr: 46, met: 31, trp: 12, his: 33 },
-
-  // Vegetables (protein-containing)
-  'broccoli':    { leu: 60, ile: 35, val: 47, lys: 60, phe: 38, thr: 38, met: 14, trp: 14, his: 23 },
-  'spinach':     { leu: 62, ile: 38, val: 45, lys: 50, phe: 40, thr: 37, met: 15, trp: 12, his: 20 },
-  'peas':        { leu: 72, ile: 42, val: 48, lys: 72, phe: 43, thr: 38, met: 10, trp: 10, his: 25 },
-  'asparagus':   { leu: 58, ile: 37, val: 45, lys: 52, phe: 35, thr: 38, met: 14, trp: 12, his: 20 },
-  'mushrooms':   { leu: 55, ile: 35, val: 45, lys: 50, phe: 40, thr: 42, met: 15, trp: 16, his: 22 },
-  'sweet potato': { leu: 56, ile: 34, val: 44, lys: 40, phe: 43, thr: 35, met: 14, trp: 11, his: 18 },
-  'potato':      { leu: 58, ile: 35, val: 46, lys: 56, phe: 38, thr: 35, met: 14, trp: 12, his: 18 },
-  'avocado':     { leu: 62, ile: 36, val: 45, lys: 52, phe: 40, thr: 30, met: 18, trp: 12, his: 20 },
-
-  // Fruits (minimal protein but sometimes in smoothies)
-  'banana':  { leu: 56, ile: 32, val: 42, lys: 42, phe: 36, thr: 28, met: 10, trp: 12, his: 18 },
-
-  // Legumes extra
-  'kidney beans': { leu: 78, ile: 43, val: 50, lys: 66, phe: 53, thr: 40, met: 12, trp: 10, his: 27 },
-  'navy beans':   { leu: 76, ile: 42, val: 49, lys: 65, phe: 52, thr: 39, met: 11, trp: 10, his: 26 },
-  'pinto beans':  { leu: 77, ile: 43, val: 50, lys: 66, phe: 53, thr: 40, met: 12, trp: 10, his: 27 },
-  'mung beans':   { leu: 76, ile: 44, val: 49, lys: 68, phe: 51, thr: 39, met: 11, trp: 10, his: 26 },
-  'soy milk':     { leu: 76, ile: 46, val: 47, lys: 62, phe: 49, thr: 38, met: 12, trp: 13, his: 25 },
-  'pea protein':  { leu: 80, ile: 44, val: 49, lys: 72, phe: 52, thr: 37, met: 10, trp: 9, his: 24 },
-
-  // Superfoods
-  'spirulina':         { leu: 81, ile: 54, val: 62, lys: 46, phe: 44, thr: 47, met: 20, trp: 14, his: 16 },
-  'nutritional yeast': { leu: 73, ile: 48, val: 56, lys: 72, phe: 43, thr: 49, met: 16, trp: 12, his: 22 },
-  'chlorella':         { leu: 79, ile: 52, val: 60, lys: 48, phe: 43, thr: 46, met: 19, trp: 14, his: 16 },
-  'bee pollen':        { leu: 72, ile: 43, val: 50, lys: 58, phe: 40, thr: 38, met: 18, trp: 12, his: 24 },
-  'collagen':          { leu: 26, ile: 14, val: 22, lys: 35, phe: 20, thr: 18, met: 8, trp: 0, his: 10 },
-};
-
-// Protein per 100g
-const PROTEIN_PER_100G: Record<string, number> = {
-  'greek yogurt': 10, 'yogurt': 10, 'cottage cheese': 11, 'cheese': 25,
-  'feta': 14, 'milk': 3.4, 'whole milk': 3.2, 'casein': 75,
-  // 69% is whey *concentrate* (matches Mark's product); whey *isolate* (88%)
-  // kept separate below for accuracy if anyone uses isolate-labeled foods.
-  'whey': 69, 'whey protein': 69,
-  'eggs': 12.6, 'egg': 12.6, 'egg whites': 11,
-  'chicken': 31, 'chicken breast': 31, 'chicken thigh': 25,
-  'turkey': 30, 'turkey breast': 30,
-  'beef': 26, 'ground beef': 26, 'steak': 26,
-  'salmon': 20, 'tuna': 28, 'tilapia': 20, 'shrimp': 24,
-  'oatmeal': 17, 'oats': 17,
-  'rice': 2.7, 'white rice': 2.7, 'jasmine rice': 2.7, 'brown rice': 2.3,
-  'rice dry': 7, 'dry rice': 7, 'cream of rice': 6,
-  'bread': 9, 'rye bread': 5.6, 'whole rye bread': 5.6,
-  'pasta': 5, 'pasta dry': 13, 'dry pasta': 13,
-  'almonds': 21, 'nuts': 20, 'walnuts': 15,
-  'peanut butter': 25, 'almond butter': 21,
-  'pumpkin seeds': 30, 'lentils': 25, 'soy': 36,
-  'chickpeas': 19, 'black beans': 21, 'edamame': 11, 'tofu': 8, 'tempeh': 19,
-  'kidney beans': 24, 'navy beans': 22, 'pinto beans': 21, 'mung beans': 24,
-  'soy milk': 3.3, 'pea protein': 80,
-  'quark': 12, 'skyr': 11, 'kefir': 3.3, 'mozzarella': 22, 'parmesan': 35,
-  'ricotta': 11, 'gouda': 25, 'cream cheese': 6, 'whey isolate': 90,
-  'cod': 18, 'sardines': 25, 'mackerel': 19, 'trout': 20, 'crab': 18, 'scallops': 15,
-  'halibut': 21, 'swordfish': 20, 'sea bass': 18, 'mussels': 12, 'octopus': 15,
-  'squid': 15, 'lobster': 19, 'anchovies': 29,
-  'duck': 19, 'venison': 30, 'bison': 28, 'pork': 25, 'pork tenderloin': 26, 'lamb': 25,
-  'rabbit': 29, 'goat': 27, 'liver (beef)': 20, 'bacon': 37, 'prosciutto': 26,
-  'sunflower seeds': 21, 'chia seeds': 17, 'flax seeds': 18, 'hemp seeds': 32, 'sesame seeds': 18,
-  'pine nuts': 14, 'cashews': 18, 'pistachios': 20, 'macadamia nuts': 8, 'brazil nuts': 14,
-  'hazelnuts': 15, 'pecans': 9, 'coconut': 3.3,
-  'quinoa': 4.4, 'buckwheat': 3.4, 'amaranth': 4, 'spelt': 5.5,
-  'millet': 3.5, 'barley': 2.3, 'corn': 3.2,
-  'broccoli': 2.8, 'spinach': 2.9, 'peas': 5.4, 'asparagus': 2.2,
-  'mushrooms': 3.1, 'sweet potato': 1.6, 'potato': 2, 'avocado': 2, 'banana': 1.1,
-  'spirulina': 57, 'nutritional yeast': 50, 'chlorella': 58, 'bee pollen': 20, 'collagen': 90,
-  // Zero/low protein items (so isKnownFood recognizes them)
-  'creatine': 0, 'dextrose': 0, 'maltodextrin': 0, 'cluster dextrin': 0,
-  'apple': 0.3, 'orange': 0.9, 'berries': 1.2, 'blueberries': 0.7,
-  'honey': 0.3, 'olive oil': 0, 'coconut oil': 0, 'rice cakes': 8,
-};
-
-// Kcal per 100g
-const KCAL_PER_100G: Record<string, number> = {
-  'eggs': 143, 'egg': 143, 'egg whites': 52, 'greek yogurt': 59, 'cottage cheese': 98,
-  'milk': 42, 'whole milk': 61, 'whey': 400, 'whey protein': 400, 'casein': 370,
-  'chicken breast': 165, 'chicken': 165, 'chicken thigh': 179,
-  'turkey breast': 147, 'turkey': 147,
-  'salmon': 208, 'tuna': 132, 'tilapia': 96, 'shrimp': 99,
-  'beef': 254, 'ground beef': 254, 'steak': 271,
-  'pumpkin seeds': 559, 'almonds': 579, 'walnuts': 654,
-  'peanut butter': 588, 'almond butter': 614,
-  'lentils': 360, 'soy': 446,
-  'oatmeal': 389, 'oats': 389, 'cheese': 403, 'feta': 264,
-  'yogurt': 59,
-  'rice': 130, 'white rice': 130, 'jasmine rice': 130, 'brown rice': 112,
-  'rice dry': 360, 'dry rice': 360, 'cream of rice': 370,
-  'bread': 265, 'rye bread': 170, 'whole rye bread': 170,
-  'pasta': 131, 'pasta dry': 371, 'dry pasta': 371,
-  'nuts': 607,
-  'chickpeas': 164, 'black beans': 132, 'edamame': 121, 'tofu': 76, 'tempeh': 193,
-  'kidney beans': 127, 'navy beans': 140, 'pinto beans': 143, 'mung beans': 105,
-  'soy milk': 33, 'pea protein': 370,
-  'quark': 67, 'skyr': 63, 'kefir': 41, 'mozzarella': 280, 'parmesan': 431,
-  'ricotta': 174, 'gouda': 356, 'cream cheese': 342, 'whey isolate': 370,
-  'cod': 82, 'sardines': 208, 'mackerel': 205, 'trout': 148, 'crab': 97, 'scallops': 69,
-  'halibut': 111, 'swordfish': 144, 'sea bass': 97, 'mussels': 86, 'octopus': 82,
-  'squid': 92, 'lobster': 89, 'anchovies': 210,
-  'duck': 201, 'venison': 158, 'bison': 143, 'pork': 242, 'pork tenderloin': 143, 'lamb': 258,
-  'rabbit': 173, 'goat': 143, 'liver (beef)': 135, 'bacon': 541, 'prosciutto': 195,
-  'sunflower seeds': 584, 'chia seeds': 486, 'flax seeds': 534, 'hemp seeds': 553, 'sesame seeds': 573,
-  'pine nuts': 673, 'cashews': 553, 'pistachios': 560, 'macadamia nuts': 718, 'brazil nuts': 659,
-  'hazelnuts': 628, 'pecans': 691, 'coconut': 354,
-  'quinoa': 120, 'buckwheat': 92, 'amaranth': 102, 'spelt': 127,
-  'millet': 119, 'barley': 123, 'corn': 86,
-  'broccoli': 34, 'spinach': 23, 'peas': 81, 'asparagus': 20,
-  'mushrooms': 22, 'sweet potato': 86, 'potato': 77, 'avocado': 160, 'banana': 89,
-  'spirulina': 290, 'nutritional yeast': 325, 'chlorella': 280, 'bee pollen': 314, 'collagen': 340,
-};
-
-// Carbs per 100g
-const CARBS_PER_100G: Record<string, number> = {
-  'eggs': 0.7, 'egg': 0.7, 'egg whites': 0.7,
-  'greek yogurt': 3.6, 'yogurt': 3.6, 'cottage cheese': 3.4, 'milk': 5, 'whole milk': 4.8,
-  'cheese': 1.3, 'feta': 4, 'mozzarella': 2.2, 'parmesan': 3.2, 'ricotta': 3,
-  'quark': 4, 'skyr': 4, 'kefir': 4.5, 'gouda': 2.2, 'cream cheese': 4,
-  'whey': 10, 'whey protein': 10, 'whey isolate': 2, 'casein': 12, 'pea protein': 5, 'collagen': 0,
-  'chicken breast': 0, 'chicken': 0, 'chicken thigh': 0, 'turkey breast': 0, 'turkey': 0, 'duck': 0,
-  'beef': 0, 'ground beef': 0, 'steak': 0, 'bison': 0, 'venison': 0,
-  'pork': 0, 'pork tenderloin': 0, 'lamb': 0, 'rabbit': 0, 'goat': 0,
-  'liver (beef)': 4, 'bacon': 1.4, 'prosciutto': 0.5,
-  'salmon': 0, 'tuna': 0, 'cod': 0, 'tilapia': 0, 'shrimp': 0.2,
-  'sardines': 0, 'mackerel': 0, 'trout': 0, 'halibut': 0, 'swordfish': 0,
-  'sea bass': 0, 'crab': 0, 'lobster': 0, 'scallops': 2.4, 'mussels': 3.7,
-  'octopus': 2.2, 'squid': 3.1, 'anchovies': 0,
-  'oatmeal': 66, 'oats': 66, 'rice': 28, 'white rice': 28, 'brown rice': 24,
-  'rice dry': 79, 'dry rice': 79, 'cream of rice': 83, 'jasmine rice': 28,
-  'bread': 49, 'rye bread': 25, 'whole rye bread': 25, 'pasta': 25, 'pasta dry': 74, 'dry pasta': 74,
-  'quinoa': 21, 'buckwheat': 20, 'amaranth': 19, 'spelt': 26, 'millet': 23, 'barley': 28, 'corn': 19,
-  'almonds': 22, 'walnuts': 14, 'cashews': 30, 'pistachios': 28, 'pine nuts': 13,
-  'brazil nuts': 12, 'hazelnuts': 17, 'pecans': 14, 'macadamia nuts': 14,
-  'peanut butter': 20, 'almond butter': 19, 'pumpkin seeds': 5, 'sunflower seeds': 20,
-  'hemp seeds': 2.7, 'chia seeds': 42, 'flax seeds': 29, 'sesame seeds': 23,
-  'lentils': 20, 'chickpeas': 27, 'black beans': 24, 'kidney beans': 23,
-  'tofu': 2, 'tempeh': 10, 'edamame': 8.6, 'soy milk': 1.8,
-  'soy': 30, 'coconut': 15, 'nuts': 21,
-  'navy beans': 27, 'pinto beans': 26, 'mung beans': 19,
-  'peas': 14, 'broccoli': 7, 'spinach': 3.6, 'asparagus': 3.9, 'mushrooms': 3.3,
-  'sweet potato': 20, 'potato': 17, 'avocado': 9, 'banana': 23,
-  'spirulina': 24, 'chlorella': 23, 'nutritional yeast': 36, 'bee pollen': 40,
-};
-
-// Fat per 100g
-const FAT_PER_100G: Record<string, number> = {
-  'eggs': 9.5, 'egg': 9.5, 'egg whites': 0.2,
-  'greek yogurt': 0.4, 'yogurt': 0.4, 'cottage cheese': 4.3, 'milk': 1, 'whole milk': 3.3,
-  'cheese': 33, 'feta': 21, 'mozzarella': 17, 'parmesan': 29, 'ricotta': 13,
-  'quark': 0.3, 'skyr': 0.2, 'kefir': 1, 'gouda': 27, 'cream cheese': 34,
-  'whey': 5, 'whey protein': 5, 'whey isolate': 1, 'casein': 3, 'pea protein': 2, 'collagen': 0,
-  'chicken breast': 3.6, 'chicken': 3.6, 'chicken thigh': 8.2, 'turkey breast': 2.1, 'turkey': 2.1, 'duck': 11,
-  'beef': 17, 'ground beef': 17, 'steak': 18, 'bison': 2.4, 'venison': 3.2,
-  'pork': 14, 'pork tenderloin': 3.5, 'lamb': 17, 'rabbit': 3.5, 'goat': 3,
-  'liver (beef)': 3.6, 'bacon': 42, 'prosciutto': 8,
-  'salmon': 13, 'tuna': 1.3, 'cod': 0.7, 'tilapia': 1.7, 'shrimp': 0.3,
-  'sardines': 11, 'mackerel': 14, 'trout': 6.6, 'halibut': 2.3, 'swordfish': 4.4,
-  'sea bass': 2, 'crab': 1.5, 'lobster': 0.9, 'scallops': 0.5, 'mussels': 2.2,
-  'octopus': 1, 'squid': 1.4, 'anchovies': 10,
-  'oatmeal': 7, 'oats': 7, 'rice': 0.3, 'white rice': 0.3, 'brown rice': 0.8,
-  'rice dry': 0.6, 'dry rice': 0.6, 'cream of rice': 0.5, 'jasmine rice': 0.3,
-  'bread': 3.2, 'rye bread': 1.2, 'whole rye bread': 1.2, 'pasta': 1.1, 'pasta dry': 1.5, 'dry pasta': 1.5,
-  'quinoa': 1.9, 'buckwheat': 0.6, 'amaranth': 1.6, 'spelt': 1.7, 'millet': 1, 'barley': 0.4, 'corn': 1.2,
-  'almonds': 50, 'walnuts': 65, 'cashews': 44, 'pistachios': 45, 'pine nuts': 68,
-  'brazil nuts': 66, 'hazelnuts': 61, 'pecans': 72, 'macadamia nuts': 76,
-  'peanut butter': 50, 'almond butter': 56, 'pumpkin seeds': 49, 'sunflower seeds': 51,
-  'hemp seeds': 49, 'chia seeds': 31, 'flax seeds': 42, 'sesame seeds': 50,
-  'lentils': 0.4, 'chickpeas': 2.6, 'black beans': 0.5, 'kidney beans': 0.5,
-  'tofu': 4.8, 'tempeh': 11, 'edamame': 5, 'soy milk': 1.8,
-  'soy': 20, 'coconut': 33, 'nuts': 54,
-  'navy beans': 0.6, 'pinto beans': 0.7, 'mung beans': 0.4,
-  'peas': 0.4, 'broccoli': 0.4, 'spinach': 0.4, 'asparagus': 0.1, 'mushrooms': 0.3,
-  'sweet potato': 0.1, 'potato': 0.1, 'avocado': 15, 'banana': 0.3,
-  'spirulina': 8, 'chlorella': 9, 'nutritional yeast': 4, 'bee pollen': 7,
-};
-
-const PIECE_G: Record<string, number> = {
-  'egg': 60, 'eggs': 60, 'egg whites': 33, 'banana': 120, 'avocado': 150,
-  'bagel': 100, 'tortilla': 45, 'rice cakes': 9, 'rice cake': 9,
-  'protein bar': 60, 'apple': 180, 'orange': 150,
-};
 
 // ─── Custom food DB (localStorage) ───
 
