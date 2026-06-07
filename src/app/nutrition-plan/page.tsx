@@ -99,7 +99,32 @@ const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: numb
 const PRINT_BTN_CLASS = "text-[10px] uppercase tracking-wider text-cyan-400/70 hover:text-cyan-300 transition-colors px-2.5 py-1 rounded border border-cyan-400/25 hover:border-cyan-400/50 hover:bg-cyan-400/5";
 
 // Build an A4 print document that auto-shrinks content to fit a single page.
-function buildA4PrintDoc(opts: { title: string; bodyHtml: string; extraCss?: string }): string {
+function buildA4PrintDoc(opts: { title: string; bodyHtml: string; extraCss?: string; multiPage?: boolean }): string {
+  // Multi-page mode: real @page margins, no forced single-page scaling. Tables
+  // and sections get `page-break-inside: avoid` so they don't split mid-row.
+  // Use for documents that naturally span 1-2 pages (e.g. EAA mix with several
+  // grouped tables) where shrinking-to-fit makes text unreadable.
+  if (opts.multiPage) {
+    return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${opts.title}</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  section, table { page-break-inside: avoid; }
+  h2 { page-break-after: avoid; }
+  ${opts.extraCss || ''}
+</style></head>
+<body>
+  ${opts.bodyHtml}
+  <script>
+    window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 200); });
+  <\/script>
+</body></html>`;
+  }
+  // Single-page mode: auto-shrink content to fit A4. Used for the food meal
+  // plan where one page is the natural format.
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${opts.title}</title>
 <style>
@@ -1351,6 +1376,10 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
     const fmt = (mg: number) => `${(mg / 1000).toFixed(2)} g`;
     const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
+    // For multiple groups, drop the 3-Days / 1-Week columns so two tables fit
+    // side-by-side comfortably. The 3/7-day amounts are easy to derive from
+    // the 1-Day column anyway (×3, ×7).
+    const compact = groups.length >= 2;
     const groupSections = groups.map((g, gi) => {
       const perMealMap = new Map(g.supplement.perMeal.map(p => [p.aa, p.mg]));
       const totalDaily = g.supplement.totalPerDay;
@@ -1358,18 +1387,30 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
       const perServingG = (totalPerMeal / 1000).toFixed(2);
       const rows = g.supplement.perDay.map(p => {
         const perMealMg = perMealMap.get(p.aa) ?? (p.mg / g.supplement.mealCount);
-        return `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td><td>${fmt(p.mg * 3)}</td><td>${fmt(p.mg * 7)}</td></tr>`;
+        return compact
+          ? `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td></tr>`
+          : `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td><td>${fmt(p.mg * 3)}</td><td>${fmt(p.mg * 7)}</td></tr>`;
       }).join('');
-      const totalRow = `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td><td>${fmt(totalDaily * 3)}</td><td>${fmt(totalDaily * 7)}</td></tr>`;
+      const totalRow = compact
+        ? `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td></tr>`
+        : `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td><td>${fmt(totalDaily * 3)}</td><td>${fmt(totalDaily * 7)}</td></tr>`;
       const label = groups.length === 1 ? 'Main Mix' : `Mix ${String.fromCharCode(65 + gi)}`;
       const mealNames = g.mealNames.map(esc).join(' · ');
+      const header = compact
+        ? `<thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th></tr></thead>`
+        : `<thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th><th>3 Days</th><th>1 Week</th></tr></thead>`;
       return `
-        <h2>${label} <span class="hint">${esc(mealNames)} &middot; ~${perServingG} g per meal</span></h2>
-        <table>
-          <thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th><th>3 Days</th><th>1 Week</th></tr></thead>
-          <tbody>${rows}${totalRow}</tbody>
-        </table>`;
+        <section>
+          <h2>${label} <span class="hint">${esc(mealNames)} &middot; ~${perServingG} g per meal</span></h2>
+          <table>${header}<tbody>${rows}${totalRow}</tbody></table>
+        </section>`;
     }).join('');
+
+    // Pack into a 2-column grid when there are multiple groups so the page
+    // stays one-up.
+    const groupBlock = compact
+      ? `<div class="grid-2">${groupSections}</div>`
+      : groupSections;
 
     let woSection = '';
     if (woSupplement) {
@@ -1378,38 +1419,42 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
       ).join('');
       const woTotal = `<tr class="total"><td>TOTAL</td><td>${fmt(woSupplement.totalMg)}</td><td>${fmt(woSupplement.totalMg * 3)}</td><td>${fmt(woSupplement.totalMg * 7)}</td></tr>`;
       woSection = `
-        <h2>After Workout <span class="hint">single serving · ${(woSupplement.totalMg / 1000).toFixed(2)} g per meal</span></h2>
-        <table>
-          <thead><tr><th>Amino Acid</th><th>1 Meal</th><th>3 Meals</th><th>7 Meals</th></tr></thead>
-          <tbody>${woRows}${woTotal}</tbody>
-        </table>`;
+        <section>
+          <h2>After Workout <span class="hint">single serving &middot; ${(woSupplement.totalMg / 1000).toFixed(2)} g per meal</span></h2>
+          <table>
+            <thead><tr><th>Amino Acid</th><th>1 Meal</th><th>3 Meals</th><th>7 Meals</th></tr></thead>
+            <tbody>${woRows}${woTotal}</tbody>
+          </table>
+        </section>`;
     }
 
     const mixNoun = groups.length === 1 ? 'a single jar' : `${groups.length} labelled jars`;
     const bodyHtml = `
   <h1>EAA Supplement Mix</h1>
   <div class="meta">Generated ${date} &middot; <span class="nnu">NNU ${aggregatedAvgNNUBefore}% &rarr; ${aggregatedAvgNNUAfter}%</span> &middot; ${mainCount} meals/day &middot; ${groups.length} ${groups.length === 1 ? 'mix' : 'mixes'}</div>
-  ${groupSections}
+  ${groupBlock}
   ${woSection}
   <div class="note">
-    <strong>How to mix:</strong> weigh each amino acid (precision scale &ge; 0.01 g) and combine into ${mixNoun}. Take the listed per-meal dose with each labelled meal.
+    <strong>How to mix:</strong> weigh each amino acid (precision scale &ge; 0.01 g) and combine into ${mixNoun}. Take the listed per-meal dose with each labelled meal.${compact ? ' 3-day and 1-week amounts: multiply the 1-Day column by 3 and 7.' : ''}
     ${woSupplement ? `Mix the After-Workout blend separately; take ${(woSupplement.totalMg / 1000).toFixed(2)} g after each workout.` : ''}
   </div>
   <div class="footer">bodybuilding &middot; ${date}</div>`;
 
     const css = `
   h1 { font-size: 22pt; margin: 0 0 2pt 0; letter-spacing: -0.4pt; font-weight: 700; }
-  h2 { font-size: 11pt; margin: 18pt 0 6pt 0; padding-bottom: 4pt; border-bottom: 1.5px solid #111; letter-spacing: 0.5pt; text-transform: uppercase; font-weight: 700; }
+  h2 { font-size: 12pt; margin: 14pt 0 5pt 0; padding-bottom: 4pt; border-bottom: 1.5px solid #111; letter-spacing: 0.4pt; text-transform: uppercase; font-weight: 700; }
+  section:first-child h2, .grid-2 section:nth-child(-n+2) h2 { margin-top: 4pt; }
   .hint { font-weight: 400; color: #666; font-size: 9pt; text-transform: none; letter-spacing: 0; margin-left: 6pt; }
-  .meta { color: #555; font-size: 9.5pt; margin-bottom: 10pt; padding-bottom: 8pt; border-bottom: 1.5px solid #111; }
+  .meta { color: #555; font-size: 10pt; margin-bottom: 10pt; padding-bottom: 8pt; border-bottom: 1.5px solid #111; }
   .nnu { color: #0a7c8c; font-weight: 600; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
-  th { text-align: left; padding: 5pt 10pt; background: #f0f0f0; border-bottom: 1px solid #aaa; font-weight: 600; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.5pt; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12pt 18pt; }
+  table { width: 100%; border-collapse: collapse; font-size: 11pt; }
+  th { text-align: left; padding: 5pt 8pt; background: #f0f0f0; border-bottom: 1px solid #aaa; font-weight: 600; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.4pt; }
   th:not(:first-child), td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
-  td { padding: 5pt 10pt; border-bottom: 1px solid #eee; }
+  td { padding: 5pt 8pt; border-bottom: 1px solid #eee; }
   tr.total td { border-top: 1.5px solid #222; border-bottom: none; padding-top: 7pt; font-weight: 700; }
-  .note { margin-top: 14pt; font-size: 9pt; color: #555; line-height: 1.5; }
-  .footer { margin-top: 18pt; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 6pt; }`;
+  .note { margin-top: 14pt; font-size: 9.5pt; color: #444; line-height: 1.55; padding: 8pt 10pt; background: #f7f7f7; border-radius: 4pt; }
+  .footer { margin-top: 12pt; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 6pt; }`;
 
     openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css }));
   };

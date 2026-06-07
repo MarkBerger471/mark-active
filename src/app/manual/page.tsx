@@ -9,6 +9,69 @@ import Navigation from '@/components/Navigation';
 // change ships (formula change, food DB correction, UX change, etc).
 const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   {
+    date: '2026-06-06',
+    title: 'NNU: hardcoded 258 g in protein popover replaced with dynamic value',
+    items: [
+      'The protein-recommendation popover read "your NNU-adjusted intake gives the same MPS as 258 g at 70 % NNU" — the 258 was a stale literal from an old bodyweight × multiplier. Now uses the live `recommendedTargets.protein` value so the sentence stays internally consistent (e.g. "~205 g/day at your NNU = 272 g at 70 % NNU")',
+    ],
+  },
+  {
+    date: '2026-06-06',
+    title: 'EAA: 2-manual grouping, per-meal NNU bug fix, TARGET_NNU constant',
+    items: [
+      'New "2 manual" mode in the EAA grouping selector — pick which meals share Mix A and Mix B with A/B toggles. Seeded from the auto-best partition. Persists as `eaa_group_mode` + `eaa_manual_groups`',
+      'Per-meal mode bug: calcDailyEAA dropped any AA whose total gap was < 200 mg/day, calibrated for 4-meal groups. In per-meal mode (1 meal) the 100 mg Trp gap got silently dropped → Trp became limiting → NNU crashed to 75 %. Threshold now scales as 50 mg × mealCount. Lunch 10:30 in per-meal: 75 % → 95 %',
+      'Added `TARGET_NNU` constant in eaa.ts (= 96). Used by every supplement calculator instead of 5 hardcoded "96"s. Single source of truth for the per-meal NNU target — raising it explodes the supplement size (98 % needs ~3.5× more powder for only ~3 % more NNU)',
+      'Headline NNU pill now reads from the active grouping mode instead of always using the single-mix value',
+    ],
+  },
+  {
+    date: '2026-06-06',
+    title: 'EAA: supplement grouping mode (1 / 2 mixes / per meal)',
+    items: [
+      '`Daily EAA Supplement` panel has a new selector: 1 mix (current default) · 2 auto (optimal pairing chosen by the app) · 2 manual · N per meal',
+      'New `calcGroupedEAA(meals, names, groupCount, ..., manualPartition?)` in eaa.ts. For groupCount=2 it enumerates every non-trivial partition and picks the one with highest protein-weighted NNU after supplementation',
+      'For Mark’s training-day plan the auto pairing is (Breakfast + Dinner) / (Lunch 10:30 + Lunch 15:00). Per-meal NNU lifts from ~91 % → ~93.5 % at the cost of one extra jar',
+      'EAA Overview, Daily EAA panel, dashboard Actual card, and print output all honour the selected mode',
+    ],
+  },
+  {
+    date: '2026-06-06',
+    title: 'Food DB unified into a single source of truth',
+    items: [
+      'Five overlapping inline data tables (FOOD_DB in page.tsx, EAA_DB + PROTEIN_PER_100G + KCAL_PER_100G + CARBS_PER_100G + FAT_PER_100G in eaa.ts) collapsed to one canonical `FOODS` map in src/utils/foods.ts',
+      'Each entry now holds kcal/protein/carbs/fat per 100 g plus the EAA profile (mg per gram of protein) when known',
+      'Drift surfaced by the audit: whey 80 → 69 % protein (concentrate matches Mark’s label); tuna 28 → 26 g/100 g (canned in water, matches stored values). Previously each DB had a different number, silently shifting per-meal protein totals',
+    ],
+  },
+  {
+    date: '2026-06-06',
+    title: 'EAA Overview: protein column aligns with NNU% in + Supplement mode',
+    items: [
+      'When "+ Supplement" was toggled on, the EAA mg values and NNU % updated for the prescribed EAA mix but the protein column stayed at food-only. This made the EAA-to-protein ratio look artificially high (~59 % vs the realistic ~52 %). Now adds the supplement grams to the protein column too',
+      'After-Workout supplement (~4 g) now also counted in the dashboard Actual card so the daily total matches the EAA Overview Daily Total (previously only the main EAA mix was added)',
+    ],
+  },
+  {
+    date: '2026-06-06',
+    title: 'Print: headline totals the in-app actual; PWA no longer trapped in Safari',
+    items: [
+      'Meal-plan print header now shows the same total the Actual card shows (food + supplements + EAA mix) with a small breakdown line. Previously only food-items were summed so the print headline was several hundred kcal under the in-app number',
+      'EAA print header now has the same divider rule as the meal-plan print for consistency',
+      'openPrintWindow switched from `window.open(\'\', \'_blank\')` to a hidden iframe. In an iOS standalone PWA the popup was opening in Safari and stranding the user there — the PWA had to be killed from the app switcher. Iframe printing keeps everything inside the PWA',
+    ],
+  },
+  {
+    date: '2026-05-31',
+    title: 'Dashboard, training, reps input',
+    items: [
+      'Sleep strip on the dashboard always renders the last 7 calendar days. With Oura inactive the strip used to show whatever was cached (April dates with gaps); now it shows today + 6 days back and dims slots without data',
+      'Training: Recent Sessions list shows the last 2 months instead of a hard-capped 20 entries. Older sessions stay in storage for previous-session lookups',
+      'Reps input: keyboard switched from numeric-only to text so iOS PWA shows the "-" key for rep ranges (e.g. "8-10")',
+      'Training-plan: per-exercise "bump next time" green chip — flags an exercise to bump the weight at the next session of the same workout. Auto-clears after the next session',
+    ],
+  },
+  {
     date: '2026-05-03',
     title: 'Training: volume comparison glow now robust to un-tapped working sets',
     items: [
@@ -204,7 +267,7 @@ export default function ManualPage() {
         <div className="max-w-5xl mx-auto">
           <div className="mb-6">
             <h1 className="text-3xl font-bold text-white">User Manual</h1>
-            <p className="text-xs text-white/40 mt-1">How the calorie + nutrition logic works · last updated 2026-04-25</p>
+            <p className="text-xs text-white/40 mt-1">How the calorie + nutrition logic works · last updated 2026-06-06</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-6">
@@ -259,31 +322,44 @@ export default function ManualPage() {
                   Fat        = (kcal × 25%) / 9        →  bulk 25%, cut 30%<br/>
                   Carbs      = remainder of kcal
                 </p>
-                <p>For you (114.8 kg, bulking, TDEE ~2,700): <Code>3,100 kcal / 258g P / 86g F / 352g C</Code>.</p>
+                <p>For you (113.5 kg, current TDEE ~2,870, bulking example): <Code>3,300 kcal / 255g P / 92g F / 380g C</Code>. The exact numbers shift with bodyweight, TDEE drift, and the active phase.</p>
                 <p>Tap any macro on the Recommended row to see the formula, the source papers, and the consequences of going under or over the recommended amount.</p>
-                <Box tone="tip"><strong>NNU-adjusted protein:</strong> Below the Protein cell you&apos;ll see <Code>NNU-adj: ~195g</Code>. That&apos;s a theoretical floor — at your 92% NNU you could eat as little as 195g and still get the same MPS as someone eating 258g at 70% NNU (the assumed quality of typical mixed diets). The main recommendation stays at 258g because protein has uses beyond MPS (immune, connective tissue, satiety, thermic effect) that don&apos;t scale with NNU.</Box>
+                <Box tone="tip"><strong>NNU-adjusted protein:</strong> below the Protein cell you&apos;ll see <Code>NNU-adj: ~205g</Code> (number changes with bodyweight). That&apos;s a theoretical floor — at your ~93 % NNU you could eat as little as 205 g and still get the same MPS as someone eating the full main target at 70 % NNU (typical mixed-diet quality). The math is a two-step conversion: usable = target × 0.70; adjusted_intake = usable / 0.937. The main recommendation stays at the un-adjusted target because protein has uses beyond MPS (immune, connective tissue, satiety, thermic effect) that don&apos;t scale with NNU.</Box>
               </Section>
 
               <Section id="nnu" title="3 — NNU & EAA supplements">
                 <p><strong className="text-white">NNU = Net Nitrogen Utilization</strong>. The percentage of ingested protein that becomes new tissue (vs being oxidized as energy).</p>
-                <p>Typical mixed Western diet: ~65–75% NNU. With optimized meals + targeted EAA (Essential Amino Acid) supplementation: 90%+. Yours sits at ~92%.</p>
-                <p>NNU is bottlenecked by the <em>limiting amino acid</em> — whichever EAA is below threshold caps MPS for that meal. Different foods are deficient in different EAAs:</p>
+                <p>Typical mixed Western diet: ~65–75% NNU. With optimized meals + targeted EAA (Essential Amino Acid) supplementation: 90%+. Yours sits at ~91–95 % depending on the grouping mode (see below).</p>
+                <p>NNU is bottlenecked by the <em>limiting amino acid</em> — whichever EAA is furthest below its MAP target percentage caps MPS for that meal. Different foods are deficient in different EAAs:</p>
                 <ul className="list-disc ml-5 space-y-1">
-                  <li>Whey: low in lysine</li>
-                  <li>Cottage cheese: low in methionine</li>
-                  <li>Rice/bread: low in lysine and methionine</li>
+                  <li>Whey: very Leu/Lys-heavy, short on Phe (4.7 % of its own EAA vs MAP&apos;s 12.9 %)</li>
+                  <li>Cottage cheese: short on methionine</li>
+                  <li>Rice / bread: short on lysine and methionine</li>
                   <li>Eggs: well-balanced (a "complete" protein)</li>
+                  <li>Spirulina: high in Iso / Val / Phe — close to MAP for all three</li>
                 </ul>
-                <p>An EAA supplement adds the deficient amino acids in pre-broken-down powder form, raising the meal&apos;s NNU.</p>
-                <p><strong className="text-white">How the daily mix is computed:</strong></p>
+                <p>An EAA supplement adds the deficient amino acids in pre-broken-down powder form, raising the meal&apos;s NNU. The target is set by the <Code>TARGET_NNU</Code> constant in <Code>src/utils/eaa.ts</Code> — currently <strong>96 %</strong>. That&apos;s the practical sweet spot; raising it to 98 % needs ~3.5× more powder for only ~3 % more NNU.</p>
+
+                <p><strong className="text-white">Grouping modes (Daily EAA Supplement panel):</strong></p>
+                <ul className="list-disc ml-5 space-y-1">
+                  <li><strong>1 mix</strong> — one powder, one dose at every main meal. Simplest workflow. For your plan: ~25 g/day, weighted per-meal NNU ~91 %.</li>
+                  <li><strong>2 auto</strong> — the app enumerates every non-trivial partition of your main meals into two groups and picks the one with the highest protein-weighted NNU. For your plan that&apos;s (Breakfast + Dinner) / (Lunch 10:30 + Lunch 15:00). ~25 g/day, NNU ~93.5 %.</li>
+                  <li><strong>2 manual</strong> — same two-mix structure but you assign each meal to Mix A or Mix B yourself (A/B toggles appear inline). Useful if you want to deliberately pair meals you eat at the same time of day, or override the auto pick.</li>
+                  <li><strong>N per meal</strong> — one bespoke mix per main meal. Highest per-meal NNU (~95 %) but the most jars to weigh.</li>
+                </ul>
+
+                <p><strong className="text-white">How a mix is computed:</strong></p>
                 <ol className="list-decimal ml-5 space-y-1">
-                  <li>For each main meal, compute the AA gaps to reach 96% NNU</li>
-                  <li>Sum gaps across all 4 main meals → "TOTAL PER DAY"</li>
-                  <li>Divide by 4 → "PER MEAL" dose (this is what you mix into one powder)</li>
-                  <li>Apply the uniform per-meal dose back to each meal and compute the actual achieved NNU (typically ~91-92%, not 96%, because uniform can&apos;t fit every meal perfectly)</li>
+                  <li>For each meal in the group, compute the AA gaps to reach <Code>TARGET_NNU</Code> via <Code>calcTargetedAAs</Code></li>
+                  <li>Sum gaps across all meals in the group → "TOTAL PER DAY"</li>
+                  <li>Drop any AA whose total daily gap is below <Code>50 mg × mealCount</Code> (was hardcoded 200 mg before — that quietly killed Tryptophan in per-meal mode)</li>
+                  <li>Round to 100 mg / day, divide by mealCount, round to 50 mg / meal</li>
+                  <li>Apply the result to each meal in the group and compute the achieved NNU (typically a few % short of <Code>TARGET_NNU</Code> because one uniform dose can&apos;t fit every meal&apos;s gap exactly, and rounding loses ~0.5 %)</li>
                 </ol>
-                <Box tone="info"><strong>One mix, four equal doses.</strong> The uniform per-meal supplement is mixed once and taken with Breakfast, Lunch 10:30, Lunch 15:00, and Dinner. The During-Workout and After-Workout meals are excluded (they get their own treatment).</Box>
-                <p><strong>After-Workout exception:</strong> The post-workout drink (whey + cream of rice + banana) has its own calculated EAA mix because whey&apos;s gaps are very different from solid meals. That mix appears as a separate amber-colored card and is taken individually with the drink.</p>
+
+                <p><strong className="text-white">After-Workout exception:</strong> the post-workout drink (whey + cream of rice) has its own individual EAA mix via <Code>calcIndividualSupplement</Code> because whey&apos;s gaps are very different from solid meals — Phe / Val / Met dominate. That mix appears as a separate amber card and is taken individually with the drink. The grouping selector does not affect it.</p>
+
+                <Box tone="info"><strong>Tryptophan:</strong> if you don&apos;t have L-Trp supplement, just skip it. Your food already provides 600+ mg Trp per meal (2.4–3.2 × MAP); the ~100 mg/meal Trp in the prescribed mix only exists to prevent dilution by the other added EAAs. Skipping it drops per-meal NNU by ~4 % (still ≥87 %). Food substitutes are tricky — high-Trp foods (whey, pumpkin seeds, chia) bring other AAs that worsen the limiting AA in some meals.</Box>
               </Section>
 
               <Section id="dashboard" title="4 — Reading the Dashboard">
