@@ -1376,10 +1376,11 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
     const fmt = (mg: number) => `${(mg / 1000).toFixed(2)} g`;
     const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
-    // For multiple groups, drop the 3-Days / 1-Week columns so two tables fit
-    // side-by-side comfortably. The 3/7-day amounts are easy to derive from
-    // the 1-Day column anyway (×3, ×7).
-    const compact = groups.length >= 2;
+    // Every mix gets the full Per Meal / 1 Day / 3 Days / 1 Week view so the
+    // user can read the shopping-list amounts directly without doing × 3 / × 7
+    // in their head. Tables stack full-width; multi-page mode flows to a
+    // second page if needed (typical: 1 page for 1-mix, 1–2 pages for 2-mix,
+    // 2 pages for per-meal).
     const groupSections = groups.map((g, gi) => {
       const perMealMap = new Map(g.supplement.perMeal.map(p => [p.aa, p.mg]));
       const totalDaily = g.supplement.totalPerDay;
@@ -1387,30 +1388,21 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
       const perServingG = (totalPerMeal / 1000).toFixed(2);
       const rows = g.supplement.perDay.map(p => {
         const perMealMg = perMealMap.get(p.aa) ?? (p.mg / g.supplement.mealCount);
-        return compact
-          ? `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td></tr>`
-          : `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td><td>${fmt(p.mg * 3)}</td><td>${fmt(p.mg * 7)}</td></tr>`;
+        return `<tr><td>${EAA_NAMES[p.aa]}</td><td>${fmt(perMealMg)}</td><td>${fmt(p.mg)}</td><td>${fmt(p.mg * 3)}</td><td>${fmt(p.mg * 7)}</td></tr>`;
       }).join('');
-      const totalRow = compact
-        ? `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td></tr>`
-        : `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td><td>${fmt(totalDaily * 3)}</td><td>${fmt(totalDaily * 7)}</td></tr>`;
+      const totalRow = `<tr class="total"><td>TOTAL</td><td>${fmt(totalPerMeal)}</td><td>${fmt(totalDaily)}</td><td>${fmt(totalDaily * 3)}</td><td>${fmt(totalDaily * 7)}</td></tr>`;
       const label = groups.length === 1 ? 'Main Mix' : `Mix ${String.fromCharCode(65 + gi)}`;
       const mealNames = g.mealNames.map(esc).join(' · ');
-      const header = compact
-        ? `<thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th></tr></thead>`
-        : `<thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th><th>3 Days</th><th>1 Week</th></tr></thead>`;
       return `
         <section>
           <h2>${label} <span class="hint">${esc(mealNames)} &middot; ~${perServingG} g per meal</span></h2>
-          <table>${header}<tbody>${rows}${totalRow}</tbody></table>
+          <table>
+            <thead><tr><th>Amino Acid</th><th>Per Meal</th><th>1 Day</th><th>3 Days</th><th>1 Week</th></tr></thead>
+            <tbody>${rows}${totalRow}</tbody>
+          </table>
         </section>`;
     }).join('');
-
-    // Pack into a 2-column grid when there are multiple groups so the page
-    // stays one-up.
-    const groupBlock = compact
-      ? `<div class="grid-2">${groupSections}</div>`
-      : groupSections;
+    const groupBlock = groupSections;
 
     let woSection = '';
     if (woSupplement) {
@@ -1435,7 +1427,7 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
   ${groupBlock}
   ${woSection}
   <div class="note">
-    <strong>How to mix:</strong> weigh each amino acid (precision scale &ge; 0.01 g) and combine into ${mixNoun}. Take the listed per-meal dose with each labelled meal.${compact ? ' 3-day and 1-week amounts: multiply the 1-Day column by 3 and 7.' : ''}
+    <strong>How to mix:</strong> weigh each amino acid (precision scale &ge; 0.01 g) and combine into ${mixNoun}. Take the listed per-meal dose with each labelled meal.
     ${woSupplement ? `Mix the After-Workout blend separately; take ${(woSupplement.totalMg / 1000).toFixed(2)} g after each workout.` : ''}
   </div>
   <div class="footer">bodybuilding &middot; ${date}</div>`;
