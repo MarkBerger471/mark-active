@@ -1440,6 +1440,13 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
   </div>
   <div class="footer">bodybuilding &middot; ${date}</div>`;
 
+    // Multi-page mode (no auto-shrink): real @page margins, sections never
+    // split mid-table. The 2-column grid still packs Mix A + Mix B
+    // side-by-side; in 2-mix mode the whole thing fits on a single physical
+    // A4 page naturally, in per-meal mode it flows to a 2nd page if needed.
+    // Switched away from single-page auto-shrink because the iterative scale
+    // script's measurements diverge when CSS grid is involved, producing
+    // mostly-empty extra pages.
     const css = `
   h1 { font-size: 22pt; margin: 0 0 2pt 0; letter-spacing: -0.4pt; font-weight: 700; }
   h2 { font-size: 12pt; margin: 14pt 0 5pt 0; padding-bottom: 4pt; border-bottom: 1.5px solid #111; letter-spacing: 0.4pt; text-transform: uppercase; font-weight: 700; }
@@ -1453,10 +1460,10 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
   th:not(:first-child), td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
   td { padding: 5pt 8pt; border-bottom: 1px solid #eee; }
   tr.total td { border-top: 1.5px solid #222; border-bottom: none; padding-top: 7pt; font-weight: 700; }
-  .note { margin-top: 14pt; font-size: 9.5pt; color: #444; line-height: 1.55; padding: 8pt 10pt; background: #f7f7f7; border-radius: 4pt; }
+  .note { margin-top: 14pt; font-size: 9.5pt; color: #444; line-height: 1.55; padding: 8pt 10pt; background: #f7f7f7; border-radius: 4pt; page-break-inside: avoid; }
   .footer { margin-top: 12pt; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 6pt; }`;
 
-    openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css }));
+    openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css, multiPage: true }));
   };
 
   // Grouping options. Hide "2 mixes" variants if there are < 3 main meals
