@@ -99,16 +99,17 @@ const SUPPLEMENT_DB: Record<string, { kcal: number; protein: number; carbs: numb
 const PRINT_BTN_CLASS = "text-[10px] uppercase tracking-wider text-cyan-400/70 hover:text-cyan-300 transition-colors px-2.5 py-1 rounded border border-cyan-400/25 hover:border-cyan-400/50 hover:bg-cyan-400/5";
 
 // Build an A4 print document that auto-shrinks content to fit a single page.
-function buildA4PrintDoc(opts: { title: string; bodyHtml: string; extraCss?: string; multiPage?: boolean }): string {
+function buildA4PrintDoc(opts: { title: string; bodyHtml: string; extraCss?: string; multiPage?: boolean; landscape?: boolean }): string {
   // Multi-page mode: real @page margins, no forced single-page scaling. Tables
   // and sections get `page-break-inside: avoid` so they don't split mid-row.
   // Use for documents that naturally span 1-2 pages (e.g. EAA mix with several
   // grouped tables) where shrinking-to-fit makes text unreadable.
   if (opts.multiPage) {
+    const orient = opts.landscape ? 'A4 landscape' : 'A4';
     return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${opts.title}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm; }
+  @page { size: ${orient}; margin: 14mm 16mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -1377,10 +1378,11 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
     const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
     // Every mix gets the full Per Meal / 1 Day / 3 Days / 1 Week view so the
-    // user can read the shopping-list amounts directly without doing × 3 / × 7
-    // in their head. Tables stack full-width; multi-page mode flows to a
-    // second page if needed (typical: 1 page for 1-mix, 1–2 pages for 2-mix,
-    // 2 pages for per-meal).
+    // shopping-list amounts are readable directly. With multiple mixes we
+    // switch to A4 landscape and side-by-side: 2 cols for 2-mix, 2×2 for
+    // per-meal. That keeps everything on a single page at readable size
+    // without abbreviating columns.
+    const multiMix = groups.length >= 2;
     const groupSections = groups.map((g, gi) => {
       const perMealMap = new Map(g.supplement.perMeal.map(p => [p.aa, p.mg]));
       const totalDaily = g.supplement.totalPerDay;
@@ -1402,7 +1404,7 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
           </table>
         </section>`;
     }).join('');
-    const groupBlock = groupSections;
+    const groupBlock = multiMix ? `<div class="grid-2">${groupSections}</div>` : groupSections;
 
     let woSection = '';
     if (woSupplement) {
@@ -1446,7 +1448,7 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
   .hint { font-weight: 400; color: #666; font-size: 9pt; text-transform: none; letter-spacing: 0; margin-left: 6pt; }
   .meta { color: #555; font-size: 10pt; margin-bottom: 10pt; padding-bottom: 8pt; border-bottom: 1.5px solid #111; }
   .nnu { color: #0a7c8c; font-weight: 600; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12pt 18pt; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14pt 20pt; }
   table { width: 100%; border-collapse: collapse; font-size: 11pt; }
   th { text-align: left; padding: 5pt 8pt; background: #f0f0f0; border-bottom: 1px solid #aaa; font-weight: 600; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.4pt; }
   th:not(:first-child), td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
@@ -1455,7 +1457,7 @@ function DailyEAAPanel({ plan, allowedFoods, groupMode, setGroupMode, manualGrou
   .note { margin-top: 14pt; font-size: 9.5pt; color: #444; line-height: 1.55; padding: 8pt 10pt; background: #f7f7f7; border-radius: 4pt; page-break-inside: avoid; }
   .footer { margin-top: 12pt; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 6pt; }`;
 
-    openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css, multiPage: true }));
+    openPrintWindow(buildA4PrintDoc({ title: 'EAA Supplement Mix', bodyHtml, extraCss: css, multiPage: true, landscape: multiMix }));
   };
 
   // Grouping options. Hide "2 mixes" variants if there are < 3 main meals
