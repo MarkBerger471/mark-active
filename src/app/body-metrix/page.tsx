@@ -13,6 +13,8 @@ export default function BodyMetrix() {
   const router = useRouter();
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const pendingDeleteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showQuickWeight, setShowQuickWeight] = useState(false);
   const [quickWeightDate, setQuickWeightDate] = useState(new Date().toISOString().split('T')[0]);
   const [quickWeight, setQuickWeight] = useState('');
@@ -233,21 +235,31 @@ export default function BodyMetrix() {
     e.preventDefault();
     const w = parseFloat(quickWeight);
     if (!w || w <= 0) return;
-    // Reuse the last full measurement's circumference values so charts that
-    // still treat 0 as "real" don't suddenly dip. Charts that respect the
-    // weightOnly flag will skip these regardless.
-    const lastFull = [...measurements].sort((a, b) => b.date.localeCompare(a.date)).find(m => !m.weightOnly);
-    const measurement: Measurement = {
-      date: quickWeightDate,
-      arms: lastFull?.arms ?? 0,
-      chest: lastFull?.chest ?? 0,
-      waist: lastFull?.waist ?? 0,
-      legs: lastFull?.legs ?? 0,
-      weight: w,
-      weightOnly: true,
-      photos: {},
-    };
-    await saveMeasurement(measurement);
+    // Measurements are keyed by date (Firestore docId = date). If a FULL
+    // measurement already exists on this date, replacing it with a weight-only
+    // entry would destroy photos / BF% / circumferences / subjective data.
+    // Instead, just update the weight on the existing entry.
+    const existing = measurements.find(m => m.date === quickWeightDate);
+    if (existing && !existing.weightOnly) {
+      await saveMeasurement({ ...existing, weight: w });
+    } else {
+      // Reuse the last full measurement's circumference values so charts that
+      // still treat 0 as "real" don't suddenly dip. Charts that respect the
+      // weightOnly flag will skip these regardless.
+      const lastFull = [...measurements].sort((a, b) => b.date.localeCompare(a.date)).find(m => !m.weightOnly);
+      const measurement: Measurement = {
+        date: quickWeightDate,
+        savedAt: existing?.savedAt,
+        arms: lastFull?.arms ?? 0,
+        chest: lastFull?.chest ?? 0,
+        waist: lastFull?.waist ?? 0,
+        legs: lastFull?.legs ?? 0,
+        weight: w,
+        weightOnly: true,
+        photos: {},
+      };
+      await saveMeasurement(measurement);
+    }
     setMeasurements(await getMeasurements());
     setShowQuickWeight(false);
     setQuickWeight('');
@@ -301,11 +313,21 @@ export default function BodyMetrix() {
     return diff;
   };
 
+  // Two-tap delete confirm: window.confirm() is silently swallowed in iOS
+  // standalone PWAs (same bug we fixed on the training page), so the first
+  // tap arms the button ("Sure?") and the second tap actually deletes.
+  // Auto-disarms after 3 s.
   const handleDelete = async (dateStr: string) => {
-    if (confirm('Delete this measurement entry?')) {
-      await deleteMeasurement(dateStr);
-      setMeasurements(await getMeasurements());
+    if (pendingDelete !== dateStr) {
+      setPendingDelete(dateStr);
+      if (pendingDeleteTimer.current) clearTimeout(pendingDeleteTimer.current);
+      pendingDeleteTimer.current = setTimeout(() => setPendingDelete(null), 3000);
+      return;
     }
+    if (pendingDeleteTimer.current) clearTimeout(pendingDeleteTimer.current);
+    setPendingDelete(null);
+    await deleteMeasurement(dateStr);
+    setMeasurements(await getMeasurements());
   };
 
   const editMeasurement = (m: Measurement) => {
@@ -741,9 +763,9 @@ export default function BodyMetrix() {
                         <div className="flex gap-2">
                           <button
                             onClick={() => handleDelete(m.date)}
-                            className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-red-400"
+                            className={`btn-secondary text-sm px-3 py-1 ${pendingDelete === m.date ? 'text-red-400 border-red-400/50 bg-red-500/10' : 'text-white/40 hover:text-red-400'}`}
                           >
-                            Delete
+                            {pendingDelete === m.date ? 'Sure?' : 'Delete'}
                           </button>
                         </div>
                       </div>
@@ -773,9 +795,9 @@ export default function BodyMetrix() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDelete(m.date); }}
-                          className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-red-400"
+                          className={`btn-secondary text-sm px-3 py-1 ${pendingDelete === m.date ? 'text-red-400 border-red-400/50 bg-red-500/10' : 'text-white/40 hover:text-red-400'}`}
                         >
-                          Delete
+                          {pendingDelete === m.date ? 'Sure?' : 'Delete'}
                         </button>
                       </div>
                     </div>

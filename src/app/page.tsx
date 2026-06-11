@@ -61,6 +61,11 @@ export default function Dashboard() {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [latestMeasurement, setLatestMeasurement] = useState<Measurement | null>(null);
   const [previousMeasurement, setPreviousMeasurement] = useState<Measurement | null>(null);
+  // The most recent weight reading *before* the latest entry (can be a mid-week
+  // weight-only entry). Used for the Weight stat's delta so it always shows the
+  // change vs the last actual weigh-in, while other stats compare to the
+  // previous full measurement.
+  const [previousWeightMeasurement, setPreviousWeightMeasurement] = useState<Measurement | null>(null);
   const [showPhotos, setShowPhotos] = useState(false);
   const [phase, setPhase] = useState<Phase>('bulking');
   const [targetWeight, setTargetWeight] = useState<number | null>(null);
@@ -70,6 +75,11 @@ export default function Dashboard() {
   // -1 = auto-select most recent day with data in the last-7-day strip;
   // 0..6 = explicit user selection (index into the rendered last-7 strip).
   const [sleepIdx, setSleepIdx] = useState(-1);
+  // A single "now" timestamp captured once per mount. Used by the dashboard's
+  // freshness calcs (4-week window, hours-since-workout) instead of calling
+  // Date.now() during render, which is impure. The dashboard is short-lived /
+  // frequently reloaded, so a per-mount stamp is accurate enough.
+  const [nowTs] = useState(() => Date.now());
 
   // Subjective readiness — stored per day, synced to Firestore
   const todayStr = new Date().toISOString().split('T')[0];
@@ -173,6 +183,13 @@ export default function Dashboard() {
           // weekly full measurement are the most meaningful headline number.
           if (prevFull) setPreviousMeasurement(prevFull);
           else if (all.length > 1) setPreviousMeasurement(all[all.length - 2]);
+          // Previous *weight* reading = most recent entry before `latest` that
+          // has a weight (any kind). Keeps the Weight delta to a 1-step change.
+          const prevWeight = (() => {
+            for (let i = all.length - 2; i >= 0; i--) if (all[i].weight) return all[i];
+            return null;
+          })();
+          setPreviousWeightMeasurement(prevWeight);
         }
       });
       getSetting('phase').then(v => { if (v) setPhase(v as Phase); });
@@ -299,12 +316,21 @@ export default function Dashboard() {
           {/* Quick Stats */}
           {latestMeasurement && (() => {
             const sparkData = (field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs') =>
-              measurements.map(m => m[field]).filter((v): v is number => v != null).slice(-8);
+              measurements
+                // For non-weight fields, weight-only mid-week entries carry the
+                // last full measurement's values forward as placeholders — skip
+                // them so the sparkline doesn't draw flat duplicate points.
+                .filter(m => field === 'weight' || !m.weightOnly)
+                .map(m => m[field]).filter((v): v is number => v != null).slice(-8);
             const fieldIcon: Record<string, string> = { weight: 'weight', bodyFat: 'body-fat', muscleMass: 'muscle-mass', arms: 'arms', chest: 'chest', waist: 'waist', legs: 'legs' };
             const iconOffset: Record<string, string> = { muscleMass: 'sm:-top-1 top-[15%]', weight: 'sm:top-0 top-[15%]' };
             const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'arms' | 'chest' | 'waist' | 'legs'; lowerIsBetter?: boolean | 'phase'; hero?: boolean }, idx: number) => {
               const curVal = latestMeasurement[stat.field];
-              const prevVal = previousMeasurement?.[stat.field];
+              // Weight compares to the most recent prior weigh-in (incl. mid-week
+              // weight-only entries); all other stats compare to the previous
+              // full measurement so deltas aren't skewed by mid-week placeholders.
+              const prevRef = stat.field === 'weight' ? previousWeightMeasurement : previousMeasurement;
+              const prevVal = prevRef?.[stat.field];
               const change = (curVal != null && prevVal != null)
                 ? Math.round((curVal - prevVal) * 10) / 10
                 : undefined;
@@ -727,7 +753,7 @@ export default function Dashboard() {
                     // Trend label: only meaningful with ≥8 weeks of clean data.
                     // For now we have ~4 weeks → "stabilizing".
                     const startDate = new Date(effectiveStart + 'T00:00:00');
-                    const weeksSinceStart = Math.floor((Date.now() - startDate.getTime()) / (86400000 * 7));
+                    const weeksSinceStart = Math.floor((nowTs - startDate.getTime()) / (86400000 * 7));
                     let trendLabel = 'stabilizing';
                     if (weeksSinceStart >= 8 && valid.length >= 4) {
                       // Compare first half vs second half of the visible samples
@@ -812,7 +838,7 @@ export default function Dashboard() {
 
           {/* Bulk Health — bulking-phase KPIs (sits with Nutrition + Energy Balance) */}
           {phase === 'bulking' && measurements.length >= 3 && (() => {
-            const now = Date.now();
+            const now = nowTs;
             const fourWeeksAgo = now - 28 * 86400000;
             const recentMeasurements = measurements.filter(m => new Date(m.date).getTime() >= fourWeeksAgo);
             const windowData = recentMeasurements.length >= 2 ? recentMeasurements : measurements.slice(-8);
@@ -1320,7 +1346,7 @@ export default function Dashboard() {
             }
 
             const lastWorkoutTs = lastOfNextGroup ? sessionTs(lastOfNextGroup) : null;
-            const hoursSinceWorkout = lastWorkoutTs ? Math.floor((Date.now() - lastWorkoutTs) / 3600000) : 240;
+            const hoursSinceWorkout = lastWorkoutTs ? Math.floor((nowTs - lastWorkoutTs) / 3600000) : 240;
             const daysSinceWorkout = Math.floor(hoursSinceWorkout / 24);
             const recoveryLabel = hoursSinceWorkout < 24 ? `${hoursSinceWorkout}h`
               : hoursSinceWorkout < 72 ? `${daysSinceWorkout}d ${hoursSinceWorkout % 24}h`
@@ -1911,7 +1937,7 @@ export default function Dashboard() {
                 // Limit composition curves to the last 20 weeks — older data
                 // is rarely actionable and just compresses the recent trend.
                 const WINDOW_WEEKS = 20;
-                const cutoffMs = Date.now() - WINDOW_WEEKS * 7 * 86400000;
+                const cutoffMs = nowTs - WINDOW_WEEKS * 7 * 86400000;
                 const bfData = measurements.map((m, i) => m.bodyFat != null && new Date(m.date).getTime() >= cutoffMs ? { week: weeks[i], val: m.bodyFat, date: m.date, newScale: !!m.newScale } : null).filter((d): d is { week: number; val: number; date: string; newScale: boolean } => d !== null);
                 const mmData = measurements.map((m, i) => m.muscleMass != null && new Date(m.date).getTime() >= cutoffMs ? { week: weeks[i], val: m.muscleMass, date: m.date, newScale: !!m.newScale } : null).filter((d): d is { week: number; val: number; date: string; newScale: boolean } => d !== null);
 

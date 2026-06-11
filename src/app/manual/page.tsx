@@ -198,6 +198,28 @@ const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   },
 ];
 
+// Presentational helpers — module scope so they aren't recreated on every
+// render of ManualPage (React purity rule: don't define components in render).
+const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) => (
+  <section id={id} className="mb-10 scroll-mt-24">
+    <h2 className="text-xl font-bold text-white mb-3 pb-2 border-b border-white/10">{title}</h2>
+    <div className="space-y-3 text-[13px] text-white/70 leading-relaxed">{children}</div>
+  </section>
+);
+
+const Box = ({ children, tone = 'info' }: { children: React.ReactNode; tone?: 'info' | 'warn' | 'tip' }) => {
+  const tones = {
+    info: 'bg-cyan-500/[0.06] border-cyan-500/20 text-cyan-200/80',
+    warn: 'bg-yellow-500/[0.06] border-yellow-500/20 text-yellow-200/80',
+    tip: 'bg-green-500/[0.06] border-green-500/20 text-green-200/80',
+  };
+  return <div className={`rounded-lg p-3 border text-[12px] ${tones[tone]}`}>{children}</div>;
+};
+
+const Code = ({ children }: { children: React.ReactNode }) => (
+  <code className="px-1.5 py-0.5 rounded bg-white/[0.06] text-cyan-300/90 font-mono text-[11px]">{children}</code>
+);
+
 export default function ManualPage() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
@@ -240,26 +262,6 @@ export default function ManualPage() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) => (
-    <section id={id} className="mb-10 scroll-mt-24">
-      <h2 className="text-xl font-bold text-white mb-3 pb-2 border-b border-white/10">{title}</h2>
-      <div className="space-y-3 text-[13px] text-white/70 leading-relaxed">{children}</div>
-    </section>
-  );
-
-  const Box = ({ children, tone = 'info' }: { children: React.ReactNode; tone?: 'info' | 'warn' | 'tip' }) => {
-    const tones = {
-      info: 'bg-cyan-500/[0.06] border-cyan-500/20 text-cyan-200/80',
-      warn: 'bg-yellow-500/[0.06] border-yellow-500/20 text-yellow-200/80',
-      tip: 'bg-green-500/[0.06] border-green-500/20 text-green-200/80',
-    };
-    return <div className={`rounded-lg p-3 border text-[12px] ${tones[tone]}`}>{children}</div>;
-  };
-
-  const Code = ({ children }: { children: React.ReactNode }) => (
-    <code className="px-1.5 py-0.5 rounded bg-white/[0.06] text-cyan-300/90 font-mono text-[11px]">{children}</code>
-  );
-
   return (
     <div className="min-h-screen">
       <Navigation />
@@ -294,7 +296,7 @@ export default function ManualPage() {
             <article className="glass-card p-6">
               <Section id="intro" title="Introduction">
                 <p>This manual explains how the calorie and nutrition calculations in this app work, what each card on the dashboard and nutrition page means, and why the numbers are what they are. It&apos;s written for one user (you) so it skips multi-user concerns.</p>
-                <p>Everything is computed live from your stored data: measurements (weekly weigh-ins), nutrition plan items, and Apple Watch / Oura activity feeds. There&apos;s no static "set and forget" target — when you edit a meal item, all downstream numbers recompute on the spot.</p>
+                <p>Everything is computed live from your stored data: measurements (weekly weigh-ins), nutrition plan items, and Apple Watch / Oura activity feeds. There&apos;s no static &ldquo;set and forget&rdquo; target — when you edit a meal item, all downstream numbers recompute on the spot.</p>
                 <Box tone="info">If something looks wrong, the source-of-truth is always your <strong>weekly weight trend</strong>. If the math says one thing but the scale says another over 2-4 weeks, trust the scale and adjust intake accordingly.</Box>
               </Section>
 
@@ -302,7 +304,7 @@ export default function ManualPage() {
                 <p><strong className="text-white">TDEE = Total Daily Energy Expenditure</strong>. The number of kcal you burn per day across BMR + activity + thermic effect of food.</p>
                 <p>The Energy Balance card on the dashboard derives TDEE directly from your <em>real intake vs measured weight change</em> over the trailing 28 days. This is the most reliable method — far better than BMR equations × activity multipliers, which are typically off by 300-500 kcal.</p>
                 <p className="font-mono text-[12px] text-white/80 bg-white/[0.04] p-3 rounded my-2">
-                  weight_change_kg = slope_per_day × window_days  <span className="text-white/40">// from linear regression of all weigh-ins</span><br/>
+                  weight_change_kg = slope_per_day × window_days  <span className="text-white/40">{'// from linear regression of all weigh-ins'}</span><br/>
                   surplus_kcal_per_day = (weight_change_kg × 5500) / days<br/>
                   TDEE = avg_intake_kcal − surplus_kcal_per_day
                 </p>
@@ -335,7 +337,7 @@ export default function ManualPage() {
                   <li>Whey: very Leu/Lys-heavy, short on Phe (4.7 % of its own EAA vs MAP&apos;s 12.9 %)</li>
                   <li>Cottage cheese: short on methionine</li>
                   <li>Rice / bread: short on lysine and methionine</li>
-                  <li>Eggs: well-balanced (a "complete" protein)</li>
+                  <li>Eggs: well-balanced (a &ldquo;complete&rdquo; protein)</li>
                   <li>Spirulina: high in Iso / Val / Phe — close to MAP for all three</li>
                 </ul>
                 <p>An EAA supplement adds the deficient amino acids in pre-broken-down powder form, raising the meal&apos;s NNU. The target is set by the <Code>TARGET_NNU</Code> constant in <Code>src/utils/eaa.ts</Code> — currently <strong>96 %</strong>. That&apos;s the practical sweet spot; raising it to 98 % needs ~3.5× more powder for only ~3 % more NNU.</p>
@@ -351,7 +353,7 @@ export default function ManualPage() {
                 <p><strong className="text-white">How a mix is computed:</strong></p>
                 <ol className="list-decimal ml-5 space-y-1">
                   <li>For each meal in the group, compute the AA gaps to reach <Code>TARGET_NNU</Code> via <Code>calcTargetedAAs</Code></li>
-                  <li>Sum gaps across all meals in the group → "TOTAL PER DAY"</li>
+                  <li>Sum gaps across all meals in the group → &ldquo;TOTAL PER DAY&rdquo;</li>
                   <li>Drop any AA whose total daily gap is below <Code>50 mg × mealCount</Code> (was hardcoded 200 mg before — that quietly killed Tryptophan in per-meal mode)</li>
                   <li>Round to 100 mg / day, divide by mealCount, round to 50 mg / meal</li>
                   <li>Apply the result to each meal in the group and compute the achieved NNU (typically a few % short of <Code>TARGET_NNU</Code> because one uniform dose can&apos;t fit every meal&apos;s gap exactly, and rounding loses ~0.5 %)</li>
@@ -363,7 +365,7 @@ export default function ManualPage() {
               </Section>
 
               <Section id="dashboard" title="4 — Reading the Dashboard">
-                <p><strong>Quick stats (top):</strong> latest weight, BF%, MM, chest, waist, legs, arms. Each shows change vs previous measurement, with color-coded direction (green = good, red = bad). For weight, "good" depends on phase (up=good for bulk, down=good for cut).</p>
+                <p><strong>Quick stats (top):</strong> latest weight, BF%, MM, chest, waist, legs, arms. Each shows change vs previous measurement, with color-coded direction (green = good, red = bad). For weight, &ldquo;good&rdquo; depends on phase (up=good for bulk, down=good for cut).</p>
                 <p><strong>Nutrition Balance:</strong> Fuel gauge shows your daily plan&apos;s surplus/deficit % vs your TDEE target. Green dashed box = the +15% (bulk) or −20% (cut) target zone.</p>
                 <p><strong>Energy Balance:</strong> The headline TDEE number plus 3 columns (Intake / Surplus / Pace). Each shows your actual + the target underneath. Status: ON-TARGET / SLIGHTLY-OFF / OFF-TARGET based on rate vs phase target (bulk +0.4%/wk, cut −0.6%/wk).</p>
                 <p><strong>Bulk Health (only in bulking phase):</strong> 4 KPIs — Rate (%BW/wk), Waist/kg, BF Δ, Arm/kg. Each green/amber/red. Plateau alerts fire if weight stalls 14+ days, waist grows faster than weight, or BF jumps too fast.</p>
@@ -373,7 +375,7 @@ export default function ManualPage() {
               <Section id="nutrition" title="5 — Reading the Nutrition Plan">
                 <p>The page shows training-day plan by default (you can edit rest day separately). Top to bottom:</p>
                 <ol className="list-decimal ml-5 space-y-1">
-                  <li><strong>NNU header</strong> — gradient card with "food only X% → with EAA Y%" + grams per meal</li>
+                  <li><strong>NNU header</strong> — gradient card with &ldquo;food only X% → with EAA Y%&rdquo; + grams per meal</li>
                   <li><strong>Recommended row</strong> — science-based macros, tap each cell for sources and explanations</li>
                   <li><strong>Target row</strong> — your editable goals (tap the number to edit)</li>
                   <li><strong>Actual row</strong> — live sum of meal items + supplements + EAA daily total</li>
@@ -409,7 +411,7 @@ export default function ManualPage() {
                   <li><strong>Energy Balance &amp; Nutrition Balance fuel gauge:</strong> target shifts +15% surplus → −20% deficit (or vice versa). Pace target flips +0.4%/wk gain → −0.6%/wk loss.</li>
                   <li><strong>Recommended macros:</strong> protein 2.25 → 2.4 g/kg, fat 25% → 30% kcal, kcal target shifts (bulk × 1.15 vs cut × 0.8).</li>
                   <li><strong>Stat-card colors:</strong> weight up = green for bulk, red for cut (and vice versa). Same for muscle mass, body fat, waist (BF up is bad in both — flipped at the metric level).</li>
-                  <li><strong>Bulk Health card:</strong> only renders in bulking phase. A future "Cut Health" card would mirror it for cutting.</li>
+                  <li><strong>Bulk Health card:</strong> only renders in bulking phase. A future &ldquo;Cut Health&rdquo; card would mirror it for cutting.</li>
                 </ul>
               </Section>
 
