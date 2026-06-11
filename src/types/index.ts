@@ -11,6 +11,11 @@ export interface Measurement {
   bmr?: number;           // Basal Metabolic Rate (kcal)
   recommendedCalories?: number; // Recommended Calorie Intake (kcal)
   newScale?: boolean;    // First reading on a different scale — BF%/MM/BMR baselines reset here
+  weightOnly?: boolean;  // Mid-week quick weigh-in: only `weight` is meaningful;
+                         // circumference / BF% / MM / etc are 0 / undefined and
+                         // should be skipped by all consumers except the TDEE
+                         // regression (which uses weight only and benefits from
+                         // the extra data point).
   energy?: string;
   hunger?: string;
   tiredness?: string;

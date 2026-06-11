@@ -180,7 +180,7 @@ const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
     items: [
       'Moved from Training page → Dashboard, renamed Weekly TDEE → Energy Balance',
       'Now uses derived TDEE (intake vs weight trend) — most accurate method',
-      'Includes Sunday cheat meal in weekly avg (1,300 kcal − last meal kcal added once/week)',
+      'Includes Sunday cheat meal in weekly avg (800 kcal − last meal kcal added once/week)',
       'Targets shown under each stat (Intake / Surplus / Pace)',
       'Color thresholds tightened: green ±2pp, amber ±2-5pp, red >5pp from target',
     ],
@@ -309,7 +309,7 @@ export default function ManualPage() {
                 <p>The weight change isn&apos;t just <em>last weigh-in − first weigh-in</em>. It&apos;s the slope of a least-squares line fit through every weigh-in in the window, multiplied by the window length. This damps single-day noise (water, glycogen, sodium, BIA error) without slowing reactivity to a real intake change — important during active phase tuning.</p>
                 <p>The 5500 kcal/kg multiplier represents the average energy cost per kg of mixed lean+fat tissue gain. We tried a personalized version that splits the gain into lean (×1800 kcal/kg) and fat (×7700) using BF% measurements, but BIA-scale noise (±0.5pp swings between weigh-ins) made the result unstable. Mixed is the conservative, coach-standard choice.</p>
                 <Box tone="info">
-                  <strong>Sunday cheat meal handling:</strong> The weekly average intake includes a one-time +(1,300 − Dinner kcal) bump on Sunday. So your weekly average kcal is higher than your daily plan kcal by ~60-90 kcal/day.
+                  <strong>Sunday cheat meal handling:</strong> The weekly average intake includes a one-time +(800 − Dinner kcal) bump on Sunday. So your weekly average kcal is higher than your daily plan kcal by ~30-50 kcal/day.
                 </Box>
                 <p><strong>Why intake-based is better:</strong> classical BMR × PAL (Mifflin-St Jeor × 1.55-1.8) for you would give 3,800-4,500 — but your actual TDEE per the weight-trend math is ~2,700-3,100. The classical estimate is wildly off. Your real TDEE only emerges after several weeks of intake + weight data.</p>
               </Section>
@@ -388,7 +388,7 @@ export default function ManualPage() {
                 <p>Three meal types have non-standard treatment:</p>
                 <p><strong className="text-white">During Workout (intra)</strong> — supplement-only meal. Targets: <Code>230 kcal / 10g P / 40g C / 0g F</Code>. No food items. Reasons: gut tolerance limits whole protein under load, fat slows gastric emptying, and the leucine pulse + fast carbs are what matters mid-workout. Excluded from NNU (BCAA-only would distort the AA profile).</p>
                 <p><strong className="text-white">After Workout (post-WO drink)</strong> — has its own individual EAA supplement (calculated separately from the daily mix). The food optimizer is replaced with the dedicated EAA supplement table. Reason: whey-heavy AA profile needs different gap-filling than solid meals.</p>
-                <p><strong className="text-white">Sunday cheat meal</strong> — replaces the last meal of Sunday with a 1,300 kcal cheat. The weekly intake average factors this in: <Code>(daily_kcal × 7 + (1300 − last_meal_kcal)) / 7</Code>. Adds about +60-90 kcal/day to your weekly average.</p>
+                <p><strong className="text-white">Sunday cheat meal</strong> — replaces the last meal of Sunday with an 800 kcal cheat (cap). The weekly intake average factors this in: <Code>(daily_kcal × 7 + (800 − last_meal_kcal)) / 7</Code>. Adds about +30-50 kcal/day to your weekly average.</p>
               </Section>
 
               <Section id="sync" title="7 — Live updates & sync">

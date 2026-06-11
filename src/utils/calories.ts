@@ -228,6 +228,11 @@ export function calcDerivedTDEE(
   leanChangeKg?: number;
   fatChangeKg?: number;
   method: 'personalized' | 'mixed';
+  /** 95 % confidence interval half-width on the TDEE estimate (kcal/day).
+   *  Derived from the regression slope's standard error: tighter when there
+   *  are more weigh-ins and they sit close to the fitted line. Roughly:
+   *    <150 = tight, 150-300 = moderate, >300 = noisy. */
+  tdeeCI95?: number;
 } | null {
   if (!measurements || measurements.length < 2 || !dailyIntakeKcal) return null;
 
@@ -322,6 +327,39 @@ export function calcDerivedTDEE(
   const surplusKcalPerDay = Math.round(surplusKcal / daysSpan);
   const tdee = dailyIntakeKcal - surplusKcalPerDay;
 
+  // 95 % confidence interval on the TDEE estimate. Derived from the OLS
+  // standard error of the slope:
+  //   resid_i  = y_i - (intercept + slope·x_i)
+  //   σ²       = Σ resid² / (n - 2)            (sample residual variance)
+  //   SE(slope) = √(σ² / Σ(x - x̄)²)
+  //   SE(TDEE)  = SE(slope) · 5500             (kcal per kg per day)
+  // For small n we use a Student-t critical value at 95 % two-sided.
+  // Skip when n < 3 (no degrees of freedom for σ̂) or when den is 0.
+  let tdeeCI95: number | undefined;
+  if (n >= 3 && den > 0) {
+    let sse = 0;
+    for (const p of pts) {
+      const fitted = intercept + slopePerDay * p.x;
+      sse += (p.y - fitted) ** 2;
+    }
+    const sigma2 = sse / (n - 2);
+    const seSlope = Math.sqrt(sigma2 / den);
+    // t critical for df = n-2 at α=0.05 (two-sided). Lookup table for the
+    // small-N values that matter; >=30 use the normal-approx 1.96.
+    const tCrit = (() => {
+      const tbl: Record<number, number> = { 1: 12.71, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57, 6: 2.45, 7: 2.36, 8: 2.31, 9: 2.26, 10: 2.23, 15: 2.13, 20: 2.09, 25: 2.06, 30: 2.04 };
+      const df = n - 2;
+      if (tbl[df]) return tbl[df];
+      if (df >= 30) return 1.96;
+      const keys = Object.keys(tbl).map(Number).sort((a, b) => a - b);
+      const upper = keys.find(k => k > df) ?? 30;
+      const lower = [...keys].reverse().find(k => k < df) ?? 1;
+      // Linear interp
+      return tbl[lower] + ((df - lower) / (upper - lower)) * (tbl[upper] - tbl[lower]);
+    })();
+    tdeeCI95 = Math.round(tCrit * seSlope * KCAL_PER_KG_MIXED);
+  }
+
   return {
     tdee: Math.round(tdee),
     weightChangeKg: Math.round(weightChangeKg * 10) / 10,
@@ -332,6 +370,7 @@ export function calcDerivedTDEE(
     leanChangeKg: leanChangeKg != null ? Math.round(leanChangeKg * 10) / 10 : undefined,
     fatChangeKg: fatChangeKg != null ? Math.round(fatChangeKg * 10) / 10 : undefined,
     method,
+    tdeeCI95,
   };
 }
 
@@ -369,7 +408,7 @@ export function calcRecommendedMacros(
   return { kcal, protein, carbs, fat };
 }
 
-const CHEAT_MEAL_KCAL = 1300;
+const CHEAT_MEAL_KCAL = 800;
 // Average daily extras not in the logged meal plan: coffee with milk + small
 // snacks throughout the day. Folded into intake so derived TDEE / surplus
 // calculations reflect what's actually being eaten.

@@ -15,6 +15,19 @@ import BeforeAfterSlider from '@/components/BeforeAfterSlider';
 
 type Phase = 'bulking' | 'cutting';
 
+// Derived-TDEE window anchor. Both the Nutrition Balance and Energy Balance
+// cards must use this so they show the same number. The window grows day by
+// day from this anchor until it exceeds 12 weeks, at which point the older
+// data starts rolling off (anchor effectively walks forward).
+const TDEE_ANCHOR = '2026-04-12';
+const TDEE_ROLL_CAP_DAYS = 84;
+function tdeeEffectiveStart(): string {
+  const rollCap = new Date();
+  rollCap.setDate(rollCap.getDate() - TDEE_ROLL_CAP_DAYS);
+  const rollCapStr = rollCap.toISOString().split('T')[0];
+  return TDEE_ANCHOR > rollCapStr ? TDEE_ANCHOR : rollCapStr;
+}
+
 interface SleepDay {
   day: string;
   score: number;
@@ -139,8 +152,27 @@ export default function Dashboard() {
       getMeasurements().then(all => {
         setMeasurements(all);
         if (all.length > 0) {
-          setLatestMeasurement(all[all.length - 1]);
-          if (all.length > 1) setPreviousMeasurement(all[all.length - 2]);
+          // When the most recent entry is a mid-week weight-only weigh-in, the
+          // dashboard stat cards still need values for BF%, MM, BMR, photos
+          // and circumferences — those should display the last *full*
+          // measurement, with only the weight (and date) updated from the
+          // weigh-in. Diffs compare against the full measurement before that.
+          const reversed = [...all].reverse();
+          const lastFull = reversed.find(m => !m.weightOnly) ?? all[all.length - 1];
+          const lastFullIdx = all.indexOf(lastFull);
+          const prevFull = (() => {
+            for (let i = lastFullIdx - 1; i >= 0; i--) if (!all[i].weightOnly) return all[i];
+            return null;
+          })();
+          const latest = all[all.length - 1];
+          const effectiveLatest: Measurement = latest.weightOnly
+            ? { ...lastFull, weight: latest.weight, date: latest.date, savedAt: latest.savedAt, weightOnly: true }
+            : latest;
+          setLatestMeasurement(effectiveLatest);
+          // Previous = full entry before lastFull. Diffs against the previous
+          // weekly full measurement are the most meaningful headline number.
+          if (prevFull) setPreviousMeasurement(prevFull);
+          else if (all.length > 1) setPreviousMeasurement(all[all.length - 2]);
         }
       });
       getSetting('phase').then(v => { if (v) setPhase(v as Phase); });
@@ -358,9 +390,11 @@ export default function Dashboard() {
                 activitySource = tdee.source;
                 try { localStorage.setItem('nb_cache', JSON.stringify({ key: nbCacheKey, burn: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat, source: activitySource })); } catch {}
               }
-              // Derived TDEE (intake-based) — same source as Energy Balance card.
-              // Falls back to burn estimate if not enough measurements yet.
-              const derived = calcDerivedTDEE(measurements, intake, 28);
+              // Derived TDEE (intake-based) — uses the same anchored window
+              // as the Energy Balance card so both surfaces always agree.
+              // Falls back to the rolling burn estimate if not enough
+              // measurements yet.
+              const derived = calcDerivedTDEE(measurements, intake, 28, undefined, tdeeEffectiveStart());
               const tdeeForTarget = derived ? derived.tdee : dailyBurn;
 
               const weekSessions = trainingSessions.filter(s => {
@@ -401,7 +435,9 @@ export default function Dashboard() {
               const zoneColor = absDiff <= 0.02 ? '#22c55e' : absDiff <= 0.05 ? '#f59e0b' : '#ef4444';
               const zoneLabel = absDiff <= 0.02 ? 'On Target' : absDiff <= 0.05 ? 'Slightly Off' : 'Off Target';
               const surplusDeficit = intake - tdeeForTarget;
-              const surplusPct = Math.round((ratio - 1) * 100);
+              // Unrounded for gauge geometry; rounded only for the headline label.
+              const surplusPctExact = (ratio - 1) * 100;
+              const surplusPct = Math.round(surplusPctExact);
 
               // Bar heights (normalized)
               const maxVal = Math.max(intake, tdeeForTarget);
@@ -447,9 +483,25 @@ export default function Dashboard() {
               // bar's center and the "Maintenance" label aligns with reality.
               // 1pp surplus = 2% bar width with this 50pp range.
               const fuelMin = -25, fuelMax = 25;
-              const fuelPos = Math.max(0, Math.min(100, ((surplusPct - fuelMin) / (fuelMax - fuelMin)) * 100));
+              const fuelPos = Math.max(0, Math.min(100, ((surplusPctExact - fuelMin) / (fuelMax - fuelMin)) * 100));
               const fuelTargetPos = Math.max(0, Math.min(100, ((targetMid - fuelMin) / (fuelMax - fuelMin)) * 100));
               const fuelTargetWidth = 12; // ±3pp target zone (1pp = 2%)
+
+              // 95 % confidence band on the surplus needle. The TDEE CI is
+              // symmetric in *kcal* (TDEE ± CI), so the surplus (intake −
+              // TDEE) is also symmetric in kcal around the point estimate.
+              // Dividing both ends by the point-estimate TDEE produces a
+              // band that is symmetric in % around the needle — visually
+              // correct, no double-counting of the uncertainty.
+              const ciKcal = derived?.tdeeCI95 ?? 0;
+              const fuelCI = ciKcal > 0 && tdeeForTarget > 0 ? (() => {
+                const surplusCenter = intake - tdeeForTarget;
+                const pctLow = ((surplusCenter - ciKcal) / tdeeForTarget) * 100;
+                const pctHigh = ((surplusCenter + ciKcal) / tdeeForTarget) * 100;
+                const posLow = Math.max(0, Math.min(100, ((pctLow - fuelMin) / (fuelMax - fuelMin)) * 100));
+                const posHigh = Math.max(0, Math.min(100, ((pctHigh - fuelMin) / (fuelMax - fuelMin)) * 100));
+                return { posLow, posHigh, pctLow: Math.round(pctLow), pctHigh: Math.round(pctHigh) };
+              })() : null;
               // Phase-aware gradient: green centered on the target, fading
               // through yellow to red at both extremes. Same gradient logic
               // for cutting and bulking — just shifts with the target.
@@ -489,12 +541,31 @@ export default function Dashboard() {
                       <div className="absolute top-1 bottom-1 w-px bg-white/15" style={{ left: '50%' }} />
                       {/* Target zone */}
                       <div className="absolute top-0 bottom-0 rounded" style={{ left: `${fuelTargetPos - fuelTargetWidth / 2}%`, width: `${fuelTargetWidth}%`, background: 'rgba(34,197,94,0.2)', border: '1px dashed rgba(34,197,94,0.4)' }} />
-                      {/* Needle */}
+                      {/* 95% CI band around the needle — wider when the TDEE
+                          regression is noisy. Sits under the needle so the
+                          point estimate is still the visual anchor. */}
+                      {fuelCI && (
+                        <div
+                          className="absolute top-1.5 bottom-1.5 rounded-sm"
+                          style={{
+                            left: `${fuelCI.posLow}%`,
+                            width: `${Math.max(0.5, fuelCI.posHigh - fuelCI.posLow)}%`,
+                            background: `${zoneColor}30`,
+                            border: `1px solid ${zoneColor}60`,
+                          }}
+                        />
+                      )}
+                      {/* Needle (the point estimate sits on top of the band) */}
                       <div className="absolute -top-1 -bottom-1 w-[3px] rounded-sm" style={{ left: `${fuelPos}%`, transform: 'translateX(-50%)', background: zoneColor, boxShadow: `0 0 10px ${zoneColor}80` }} />
                     </div>
                     {/* Readout below the bar — no longer overlaps the markers */}
                     <div className="flex justify-center items-baseline gap-2 mt-2 text-[11px]">
                       <span className="text-base font-bold" style={{ color: zoneColor }}>{surplusPct > 0 ? '+' : ''}{surplusPct}%</span>
+                      {fuelCI && (
+                        <span className="text-[10px] text-white/30 font-mono tabular-nums">
+                          ({fuelCI.pctLow > 0 ? '+' : ''}{fuelCI.pctLow}% – {fuelCI.pctHigh > 0 ? '+' : ''}{fuelCI.pctHigh}%)
+                        </span>
+                      )}
                       <span className="text-white/40">target {targetMid > 0 ? '+' : ''}{targetMid}%</span>
                     </div>
                   </div>
@@ -546,19 +617,16 @@ export default function Dashboard() {
           {/* Energy Balance — derived TDEE from real intake vs weight change */}
           {nutritionPlan && measurements.length >= 2 && (() => {
             const dailyPlanKcal = nutritionPlan.current.trainingDay.macros.kcal;
-            // Weekly average INCLUDES Sunday cheat meal replacement (1300 kcal swap)
+            // Weekly average INCLUDES Sunday cheat meal replacement (800 kcal swap)
             const wk = calcWeeklyIntake(dailyPlanKcal, nutritionPlan.current.trainingDay.meals);
             const intake = wk.weeklyAvgKcal;
             const cheatDiff = wk.cheatMealKcal - wk.lastMealKcal;
 
-            // Anchored start date: when Mark started doing it properly. Window
-            // grows day by day from this anchor; once it exceeds 12 weeks the
-            // anchor effectively rolls forward (older data drops off).
-            const TDEE_ANCHOR = '2026-04-12';
+            // Anchored start date: same constants as Nutrition Balance card.
+            // Window grows day by day from the anchor; once it exceeds the
+            // roll cap (12 weeks) the anchor effectively rolls forward.
             const today = new Date();
-            const rollCap = new Date(today); rollCap.setDate(rollCap.getDate() - 84);
-            const rollCapStr = rollCap.toISOString().split('T')[0];
-            const effectiveStart = TDEE_ANCHOR > rollCapStr ? TDEE_ANCHOR : rollCapStr;
+            const effectiveStart = tdeeEffectiveStart();
 
             const derived = calcDerivedTDEE(measurements, intake, 28, undefined, effectiveStart);
             if (!derived) return null;
@@ -612,6 +680,23 @@ export default function Dashboard() {
                       <span className="text-4xl font-black gradient-text data-value">{derived.tdee.toLocaleString()}</span>
                       <span className="text-xs text-white/40">kcal/day TDEE</span>
                     </div>
+                    {derived.tdeeCI95 != null && (() => {
+                      // Tight = trust the number; wide = wait for more data
+                      // before reacting. Thresholds picked from "what cadence
+                      // of weigh-ins delivers what precision" — 1×/wk lands
+                      // near 300 noisy; 2×/wk near 200; 3+ near 150.
+                      const ci = derived.tdeeCI95!;
+                      const band = ci <= 150 ? { label: 'tight', color: '#22c55e' }
+                        : ci <= 300 ? { label: 'moderate', color: '#f59e0b' }
+                        : { label: 'noisy', color: '#ef4444' };
+                      return (
+                        <div className="flex items-baseline gap-1.5 mt-0.5">
+                          <span className="text-[11px] text-white/40 font-mono tabular-nums">±{ci}</span>
+                          <span className="text-[9px] text-white/30">kcal · 95% CI</span>
+                          <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: band.color }}>{band.label}</span>
+                        </div>
+                      );
+                    })()}
                     <p className="text-[10px] text-white/30 mt-1">
                       derived from {derived.measurementCount} weigh-ins over {derived.daysSpan}d ({derived.weightChangeKg > 0 ? '+' : ''}{derived.weightChangeKg} kg)
                     </p>

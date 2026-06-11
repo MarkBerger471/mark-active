@@ -13,6 +13,9 @@ export default function BodyMetrix() {
   const router = useRouter();
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [showQuickWeight, setShowQuickWeight] = useState(false);
+  const [quickWeightDate, setQuickWeightDate] = useState(new Date().toISOString().split('T')[0]);
+  const [quickWeight, setQuickWeight] = useState('');
   const [editingDate, setEditingDate] = useState<string | null>(null); // tracks inline edit
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
   const [expandedPhotos, setExpandedPhotos] = useState<string | null>(null);
@@ -138,25 +141,32 @@ export default function BodyMetrix() {
 
   const prefillFromLast = async () => {
     const all = await getMeasurements();
+    // Prefill non-weight fields from the most recent *full* measurement, not a
+    // mid-week weight-only entry (which has no subjective values / BF% / etc.)
+    const lastFull = [...all].reverse().find(m => !m.weightOnly) ?? null;
     const last = all.length > 0 ? all[all.length - 1] : null;
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
-    setArms(last ? String(last.arms) : '');
-    setChest(last ? String(last.chest) : '');
-    setWaist(last ? String(last.waist) : '');
-    setLegs(last ? String(last.legs) : '');
+    setArms(lastFull ? String(lastFull.arms) : '');
+    setChest(lastFull ? String(lastFull.chest) : '');
+    setWaist(lastFull ? String(lastFull.waist) : '');
+    setLegs(lastFull ? String(lastFull.legs) : '');
+    // Weight uses the most recent reading regardless of kind — the mid-week
+    // weight is the freshest data point we have.
     setWeight(last ? String(last.weight) : '');
-    setBodyFat(last?.bodyFat != null ? String(last.bodyFat) : '');
-    setMuscleMass(last?.muscleMass != null ? String(last.muscleMass) : '');
-    setBmr(last?.bmr != null ? String(last.bmr) : '');
-    setRecommendedCalories(last?.recommendedCalories != null ? String(last.recommendedCalories) : '');
+    setBodyFat(lastFull?.bodyFat != null ? String(lastFull.bodyFat) : '');
+    setMuscleMass(lastFull?.muscleMass != null ? String(lastFull.muscleMass) : '');
+    setBmr(lastFull?.bmr != null ? String(lastFull.bmr) : '');
+    setRecommendedCalories(lastFull?.recommendedCalories != null ? String(lastFull.recommendedCalories) : '');
     setNewScale(false); // Always reset — only mark explicitly when actually switching scales
-    setHunger(last?.hunger || '');
-    setDigestion(last?.digestion || '');
-    // Count training sessions since last measurement
+    setHunger(lastFull?.hunger || '');
+    setDigestion(lastFull?.digestion || '');
+    // Count training sessions since the last *full* measurement. A mid-week
+    // weight-only entry doesn't represent a new weekly cycle, so trainings
+    // accumulated against it would under-count the week.
     try {
       const sessions = await getTrainingSessions();
-      const sinceDate = last ? last.date : '2000-01-01';
+      const sinceDate = lastFull ? lastFull.date : '2000-01-01';
       const recent = sessions.filter(s => s.date >= sinceDate && s.date <= today);
       const cardioCount = recent.filter(s => s.workoutName === 'Cardio').length;
       const trainingCount = recent.filter(s => s.workoutName !== 'Cardio').length;
@@ -171,8 +181,9 @@ export default function BodyMetrix() {
     if (bulkPhotoRef.current) bulkPhotoRef.current.value = '';
     if (singlePhotoRef.current) singlePhotoRef.current.value = '';
 
-    // Fetch Oura data to prefill sleep, energy, tiredness
-    const startDate = last ? last.date : new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    // Fetch Oura data to prefill sleep, energy, tiredness — averaged over the
+    // window since the last *full* check-in, not since a mid-week weigh-in.
+    const startDate = lastFull ? lastFull.date : new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
     try {
       const res = await fetch(`/api/oura?start_date=${startDate}&end_date=${today}`);
       const json = await res.json();
@@ -203,19 +214,44 @@ export default function BodyMetrix() {
           else if (avgReadiness >= 55) setTiredness('tired');
           else setTiredness('very tired');
         } else {
-          setEnergy(last?.energy || '');
-          setTiredness(last?.tiredness || '');
+          setEnergy(lastFull?.energy || '');
+          setTiredness(lastFull?.tiredness || '');
         }
       } else {
         setSleepHours(7.5);
-        setEnergy(last?.energy || '');
-        setTiredness(last?.tiredness || '');
+        setEnergy(lastFull?.energy || '');
+        setTiredness(lastFull?.tiredness || '');
       }
     } catch {
       setSleepHours(7.5);
-      setEnergy(last?.energy || '');
-      setTiredness(last?.tiredness || '');
+      setEnergy(lastFull?.energy || '');
+      setTiredness(lastFull?.tiredness || '');
     }
+  };
+
+  const handleQuickWeightSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const w = parseFloat(quickWeight);
+    if (!w || w <= 0) return;
+    // Reuse the last full measurement's circumference values so charts that
+    // still treat 0 as "real" don't suddenly dip. Charts that respect the
+    // weightOnly flag will skip these regardless.
+    const lastFull = [...measurements].sort((a, b) => b.date.localeCompare(a.date)).find(m => !m.weightOnly);
+    const measurement: Measurement = {
+      date: quickWeightDate,
+      arms: lastFull?.arms ?? 0,
+      chest: lastFull?.chest ?? 0,
+      waist: lastFull?.waist ?? 0,
+      legs: lastFull?.legs ?? 0,
+      weight: w,
+      weightOnly: true,
+      photos: {},
+    };
+    await saveMeasurement(measurement);
+    setMeasurements(await getMeasurements());
+    setShowQuickWeight(false);
+    setQuickWeight('');
+    setQuickWeightDate(new Date().toISOString().split('T')[0]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -327,7 +363,14 @@ export default function BodyMetrix() {
   // actually have the value. New-scale readings are flagged with a vertical
   // amber marker line.
   const renderChart = (field: 'weight' | 'arms' | 'chest' | 'waist' | 'legs' | 'bodyFat' | 'muscleMass' | 'bmr' | 'recommendedCalories', label: string, unit: string, color: string, gradientId: string) => {
-    const filtered = measurements.filter(m => (m[field] as number | undefined) != null);
+    // For non-weight fields, skip weight-only entries (their other values are
+    // copied from the last full measurement as placeholders and would draw
+    // misleading flat segments). Weight chart keeps every weigh-in — that's
+    // the whole point of the mid-week entry.
+    const filtered = measurements.filter(m => {
+      if (m.weightOnly && field !== 'weight') return false;
+      return (m[field] as number | undefined) != null;
+    });
     if (filtered.length < 2) return null;
 
     const chartWidth = 600;
@@ -555,25 +598,87 @@ export default function BodyMetrix() {
       <main className="main-content p-6 pt-32 md:pt-6 pwa-main">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
             <h1 className="text-3xl font-bold text-white">Body Metrix</h1>
             {!editingDate && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (!showForm) {
-                    prefillFromLast();
-                    setShowForm(true);
-                  } else {
-                    setShowForm(false);
-                  }
-                }}
-                className="btn-primary"
-              >
-                {showForm ? 'Cancel' : '+ Add Entry'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!showQuickWeight) {
+                      // Prefill weight with the most recent reading as a sane starting point.
+                      const last = [...measurements].sort((a, b) => b.date.localeCompare(a.date))[0];
+                      if (last?.weight) setQuickWeight(String(last.weight));
+                      setQuickWeightDate(new Date().toISOString().split('T')[0]);
+                      setShowQuickWeight(true);
+                      setShowForm(false);
+                    } else {
+                      setShowQuickWeight(false);
+                    }
+                  }}
+                  className="btn-secondary text-sm py-2 px-4"
+                >
+                  {showQuickWeight ? 'Cancel' : '+ Weight only'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!showForm) {
+                      prefillFromLast();
+                      setShowForm(true);
+                      setShowQuickWeight(false);
+                    } else {
+                      setShowForm(false);
+                    }
+                  }}
+                  className="btn-primary"
+                >
+                  {showForm ? 'Cancel' : '+ Add Entry'}
+                </button>
+              </div>
             )}
           </div>
+
+          {/* Quick weight-only entry form — for adding a 2nd weigh-in between
+              full measurements. The TDEE regression treats every weight as a
+              data point, so this directly tightens the CI on your TDEE
+              estimate (see Energy Balance card on the dashboard). */}
+          {showQuickWeight && !editingDate && (
+            <form onSubmit={handleQuickWeightSubmit} className="glass-card p-5 mb-6 fade-up">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-white">Mid-week weigh-in</h3>
+                <span className="text-[10px] text-white/30 uppercase tracking-wider">weight only</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={quickWeightDate}
+                    onChange={e => setQuickWeightDate(e.target.value)}
+                    className="glass-input w-full px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Weight (kg)</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.1"
+                    value={quickWeight}
+                    onChange={e => setQuickWeight(e.target.value)}
+                    placeholder="e.g. 113.2"
+                    className="glass-input w-full px-3 py-2 text-sm font-mono tabular-nums no-spinners"
+                    autoFocus
+                  />
+                </div>
+                <button type="submit" className="btn-primary text-sm py-2">Save</button>
+              </div>
+              <p className="text-[10px] text-white/30 mt-3 leading-relaxed">
+                Use this for a 2nd weigh-in mid-week — e.g. Tuesday + Friday mornings, fasted, same conditions. Doesn&apos;t overwrite your weekly full measurement. Doesn&apos;t touch BF%, MM or circumference charts; just feeds the TDEE regression.
+              </p>
+            </form>
+          )}
 
           {/* Add Measurement Form (new entry only, not inline edit) */}
           {showForm && !editingDate && renderMeasurementForm('New Measurement')}
@@ -589,9 +694,24 @@ export default function BodyMetrix() {
               <div className="relative">
                 <div className="space-y-4">
                 {sortedMeasurements.map((m, mIdx) => {
-                  // Find previous measurement (chronologically before this one)
+                  // Find previous measurement (chronologically before this one).
+                  // For non-weight fields we want the previous *full* entry so
+                  // BF%/MM/circumference diffs don't compare against a
+                  // weight-only mid-week entry (which has no such values).
                   const chronologicalIndex = measurements.findIndex(entry => entry.date === m.date);
                   const previous = chronologicalIndex > 0 ? measurements[chronologicalIndex - 1] : null;
+                  const previousFull = (() => {
+                    for (let i = chronologicalIndex - 1; i >= 0; i--) {
+                      if (!measurements[i].weightOnly) return measurements[i];
+                    }
+                    return null;
+                  })();
+                  const previousWeight = (() => {
+                    for (let i = chronologicalIndex - 1; i >= 0; i--) {
+                      if (measurements[i].weight) return measurements[i];
+                    }
+                    return null;
+                  })();
 
                   const isExpanded = expandedEntry === m.date;
 
@@ -603,6 +723,37 @@ export default function BodyMetrix() {
                     );
                   }
 
+                  // Slim card for mid-week weight-only weigh-ins.
+                  if (m.weightOnly) {
+                    const wChange = getChange(m, previousWeight, 'weight');
+                    return (
+                      <div key={m.date} id={`measurement-${m.date}`} className="glass-card p-4 card-animate flex items-center justify-between gap-4" style={{ animationDelay: `${mIdx * 60}ms` }}>
+                        <div className="flex items-center gap-4">
+                          <span className="text-[10px] uppercase tracking-wider text-cyan-400/60 bg-cyan-400/10 border border-cyan-400/20 rounded px-2 py-0.5">mid-week</span>
+                          <span className="text-white/80 font-semibold">{formatDate(m.date)}</span>
+                          <span className="text-2xl font-bold gradient-text data-value">{m.weight}<span className="text-xs text-white/40 ml-1">kg</span></span>
+                          {wChange !== undefined && wChange !== 0 && (
+                            <span className={`text-xs ${wChange < 0 ? 'text-green-400/70' : 'text-red-400/70'}`}>
+                              {wChange > 0 ? '+' : ''}{wChange} kg
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleDelete(m.date)}
+                            className="btn-secondary text-sm px-3 py-1 text-white/40 hover:text-red-400"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Use previousFull for the full-entry card so diffs ignore
+                  // the noise from any intermediate weight-only entries.
+                  void previous;
+                  const prev = previousFull;
                   return (
                   <div key={m.date} id={`measurement-${m.date}`} className="glass-card p-6 card-animate relative" style={{ animationDelay: `${mIdx * 60}ms` }}>
                     <div
@@ -637,7 +788,11 @@ export default function BodyMetrix() {
                       const BIA_FIELDS = new Set(['bodyFat', 'muscleMass', 'bmr', 'recommendedCalories']);
                       const statCard = (stat: { label: string; value: string; field: 'weight' | 'bodyFat' | 'muscleMass' | 'bmr' | 'recommendedCalories' | 'arms' | 'chest' | 'waist' | 'legs'; unit: string; lowerIsBetter?: boolean }) => {
                         const suppressDiff = !!m.newScale && BIA_FIELDS.has(stat.field);
-                        const change = suppressDiff ? undefined : getChange(m, previous, stat.field);
+                        // For weight, compare to the most recent prior weight reading (which can
+                        // be a mid-week weight-only entry). For everything else, compare to the
+                        // previous *full* measurement so we don't ratchet diffs off mid-week noise.
+                        const ref = stat.field === 'weight' ? previousWeight : prev;
+                        const change = suppressDiff ? undefined : getChange(m, ref, stat.field);
                         const isGood = change !== undefined && change !== 0 && (stat.lowerIsBetter ? change < 0 : change > 0);
                         const isBad = change !== undefined && change !== 0 && !isGood;
                         const tint = isGood ? 'from-green-500/8 to-transparent' : isBad ? 'from-red-500/8 to-transparent' : '';

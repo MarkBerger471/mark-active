@@ -366,7 +366,10 @@ export default function TrainingPlanPage() {
     if (isAuthenticated) {
       getTrainingSessions().then(setSessions);
       getMeasurements().then(ms => {
-        setMeasurementDates(ms.map(m => m.date));
+        // Mid-week weight-only weigh-ins don't represent a full check-in; skip
+        // them from the inline session timeline dividers (they'd just clutter
+        // the timeline with extra rows).
+        setMeasurementDates(ms.filter(m => !m.weightOnly).map(m => m.date));
         if (ms.length > 0) {
           setLatestWeight(ms[ms.length - 1].weight);
         }
