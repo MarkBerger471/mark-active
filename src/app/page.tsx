@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 
 import { getMeasurements, getSetting, getSettingRemote, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
 import { Measurement, TrainingSession, NutritionPlan } from '@/types';
-import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE, calcWeeklyIntake, calcTdeeSeries } from '@/utils/calories';
+import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE, calcKalmanTDEE, calcWeeklyIntake, calcTdeeSeries } from '@/utils/calories';
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import Sparkline from '@/components/Sparkline';
@@ -416,12 +416,14 @@ export default function Dashboard() {
                 activitySource = tdee.source;
                 try { localStorage.setItem('nb_cache', JSON.stringify({ key: nbCacheKey, burn: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat, source: activitySource })); } catch {}
               }
-              // Derived TDEE (intake-based) — uses the same anchored window
-              // as the Energy Balance card so both surfaces always agree.
-              // Falls back to the rolling burn estimate if not enough
-              // measurements yet.
+              // TDEE — Kalman state-space estimate (same as the Energy Balance
+              // card so both surfaces always agree), falling back to the OLS
+              // regression, then to the rolling burn estimate.
+              const kalman = calcKalmanTDEE(measurements, intake, tdeeEffectiveStart(), undefined);
               const derived = calcDerivedTDEE(measurements, intake, 28, undefined, tdeeEffectiveStart());
-              const tdeeForTarget = derived ? derived.tdee : dailyBurn;
+              const tdeeForTarget = kalman ? kalman.tdee : (derived ? derived.tdee : dailyBurn);
+              // CI band on the fuel gauge uses the Kalman calibrated interval.
+              const tdeeCI95 = kalman?.tdeeCI95 ?? derived?.tdeeCI95;
 
               const weekSessions = trainingSessions.filter(s => {
                 const d = new Date(); d.setDate(d.getDate() - 6);
@@ -519,7 +521,7 @@ export default function Dashboard() {
               // Dividing both ends by the point-estimate TDEE produces a
               // band that is symmetric in % around the needle — visually
               // correct, no double-counting of the uncertainty.
-              const ciKcal = derived?.tdeeCI95 ?? 0;
+              const ciKcal = tdeeCI95 ?? 0;
               const fuelCI = ciKcal > 0 && tdeeForTarget > 0 ? (() => {
                 const surplusCenter = intake - tdeeForTarget;
                 const pctLow = ((surplusCenter - ciKcal) / tdeeForTarget) * 100;
@@ -657,6 +659,16 @@ export default function Dashboard() {
             const derived = calcDerivedTDEE(measurements, intake, 28, undefined, effectiveStart);
             if (!derived) return null;
 
+            // Primary TDEE: Kalman state-space estimate (optimal de-noising +
+            // drift-aware + calibrated uncertainty). Falls back to the OLS
+            // `derived` number when there aren't enough weigh-ins (n<3). The
+            // OLS `derived` is still used for the weight-trend rate (pace) and
+            // the convergence sparkline.
+            const kalman = calcKalmanTDEE(measurements, intake, effectiveStart, undefined);
+            const tdeeEst = kalman ? kalman.tdee : derived.tdee;
+            const tdeeCI = kalman ? kalman.tdeeCI95 : derived.tdeeCI95;
+            const denoisedWeight = kalman?.weightFiltered;
+
             // Weekly TDEE samples — each uses the same anchored start, just a
             // different end date. Earlier samples have less data → noisier.
             // The line "settling" toward today's value visualises convergence.
@@ -671,12 +683,15 @@ export default function Dashboard() {
               return { date, tdee: r ? r.tdee : null };
             });
 
-            const surplusPct = Math.round((derived.surplusKcalPerDay / derived.tdee) * 100);
+            // Surplus from the primary (Kalman) TDEE so the headline number and
+            // the surplus/recommendation stay internally consistent.
+            const surplusKcalDay = intake - tdeeEst;
+            const surplusPct = Math.round((surplusKcalDay / tdeeEst) * 100);
             // Phase-aware target ranges (10% surplus / 10% deficit):
             // bulk ~+0.25%/wk, cut ~-0.4%/wk.
             const targetMid = phase === 'bulking' ? 0.25 : -0.4;
             const targetSurplusPct = phase === 'bulking' ? 10 : -10;
-            const recommendedIntake = Math.round(derived.tdee * (1 + targetSurplusPct / 100));
+            const recommendedIntake = Math.round(tdeeEst * (1 + targetSurplusPct / 100));
             const intakeDelta = recommendedIntake - intake;
 
             // Status: green if rate within ±0.15% of target, amber within ±0.3%, red otherwise
@@ -685,10 +700,10 @@ export default function Dashboard() {
             const statusColor = status === 'on-target' ? '#22c55e' : status === 'slightly-off' ? '#f59e0b' : '#ef4444';
             const statusLabel = status === 'on-target' ? 'ON TARGET' : status === 'slightly-off' ? 'SLIGHTLY OFF' : 'OFF TARGET';
 
-            const surplusSign = derived.surplusKcalPerDay > 0 ? '+' : '';
+            const surplusSign = surplusKcalDay > 0 ? '+' : '';
             const rateSign = derived.ratePerWeekPct > 0 ? '+' : '';
             const deltaSign = intakeDelta > 0 ? '+' : '';
-            const targetSurplusKcal = Math.round(derived.tdee * (targetSurplusPct / 100));
+            const targetSurplusKcal = Math.round(tdeeEst * (targetSurplusPct / 100));
             const tgtSurplusSign = targetSurplusKcal > 0 ? '+' : '';
             const tgtRateSign = targetMid > 0 ? '+' : '';
 
@@ -703,15 +718,15 @@ export default function Dashboard() {
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-4xl font-black gradient-text data-value">{derived.tdee.toLocaleString()}</span>
+                      <span className="text-4xl font-black gradient-text data-value">{tdeeEst.toLocaleString()}</span>
                       <span className="text-xs text-white/40">kcal/day TDEE</span>
                     </div>
-                    {derived.tdeeCI95 != null && (() => {
+                    {tdeeCI != null && (() => {
                       // Tight = trust the number; wide = wait for more data
                       // before reacting. Thresholds picked from "what cadence
                       // of weigh-ins delivers what precision" — 1×/wk lands
                       // near 300 noisy; 2×/wk near 200; 3+ near 150.
-                      const ci = derived.tdeeCI95!;
+                      const ci = tdeeCI!;
                       const band = ci <= 150 ? { label: 'tight', color: '#22c55e' }
                         : ci <= 300 ? { label: 'moderate', color: '#f59e0b' }
                         : { label: 'noisy', color: '#ef4444' };
@@ -724,7 +739,7 @@ export default function Dashboard() {
                       );
                     })()}
                     <p className="text-[10px] text-white/30 mt-1">
-                      derived from {derived.measurementCount} weigh-ins over {derived.daysSpan}d ({derived.weightChangeKg > 0 ? '+' : ''}{derived.weightChangeKg} kg)
+                      {kalman ? 'Kalman filter' : 'regression'} · {derived.measurementCount} weigh-ins over {derived.daysSpan}d{denoisedWeight != null ? ` · de-noised ${denoisedWeight} kg` : ''}
                     </p>
                   </div>
                   {(() => {
@@ -732,7 +747,7 @@ export default function Dashboard() {
                     if (valid.length < 2) return null;
                     // Today's value is the reference — it uses the most data
                     // and is the best current TDEE estimate.
-                    const referenceTdee = derived.tdee;
+                    const referenceTdee = tdeeEst;
                     const tdeeVals = [...valid.map(s => s.tdee), referenceTdee];
                     const minY = Math.min(...tdeeVals) - 50;
                     const maxY = Math.max(...tdeeVals) + 50;
@@ -794,7 +809,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-[9px] text-white/30 uppercase tracking-wider mb-0.5">Surplus</p>
-                    <p className="text-base font-bold data-value" style={{ color: statusColor }}>{surplusSign}{derived.surplusKcalPerDay}</p>
+                    <p className="text-base font-bold data-value" style={{ color: statusColor }}>{surplusSign}{Math.round(surplusKcalDay)}</p>
                     <p className="text-[9px] text-white/20">kcal/day ({surplusSign}{surplusPct}%)</p>
                     <p className="text-[9px] text-white/30 mt-0.5">target {tgtSurplusSign}{targetSurplusKcal} ({tgtSurplusSign}{targetSurplusPct}%)</p>
                   </div>

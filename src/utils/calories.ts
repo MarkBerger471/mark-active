@@ -374,6 +374,380 @@ export function calcDerivedTDEE(
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Kalman-filter TDEE estimator (state-space / Bayesian).
+//
+// The body-weight time series is modelled as a linear-Gaussian state-space
+// system, for which the Kalman filter is the provably optimal (minimum-MSE)
+// estimator:
+//
+//   State  x = [ W ; T ]   W = true (de-noised) body weight (kg)
+//                          T = TDEE (kcal/day), a slowly-drifting hidden state
+//
+//   Dynamics over a step of dt days with mean daily intake I (kcal):
+//     W_k = W_{k-1} + (I − T_{k-1}) · dt / ρ        ρ = 5500 kcal/kg
+//     T_k = T_{k-1} + (random walk)                 adaptive thermogenesis drift
+//
+//   Observation: the scale reads true weight plus water/glycogen noise:
+//     z_k = W_k + ε,   ε ~ N(0, R)
+//
+// Advantages over windowed OLS:
+//   • optimally separates the slow TDEE signal from fast water noise;
+//   • tracks a *changing* TDEE (OLS assumes it's constant across the window —
+//     false during a cut, where adaptive thermogenesis lowers TDEE);
+//   • emits a self-consistent, calibrated uncertainty (sqrt of the posterior
+//     variance) rather than a bolted-on standard error;
+//   • hyper-parameters (R, the TDEE drift rate) are fitted from the data by
+//     maximum innovation-likelihood — no hand-tuning.
+// ─────────────────────────────────────────────────────────────────────────
+
+const KALMAN_RHO = 5500; // kcal per kg of mixed tissue (same constant as OLS path)
+
+interface KalmanStep {
+  date: string;
+  weight: number;        // observed weigh-in
+  filteredWeight: number; // posterior true-weight estimate
+  filteredWeightSd: number; // posterior true-weight standard deviation
+  tdee: number;          // posterior TDEE estimate after this observation
+  tdeeSd: number;        // posterior TDEE standard deviation
+  innovation: number;    // observed − predicted weight (one-step-ahead)
+  innovationSd: number;  // sqrt of innovation variance S
+}
+
+export interface KalmanTDEE {
+  tdee: number;
+  tdeeCI95: number;      // 1.96 · posterior SD of TDEE
+  weightFiltered: number; // current de-noised weight
+  measurementCount: number;
+  daysSpan: number;
+  rDay: number;          // fitted observation-noise variance (kg²)
+  qTDay: number;         // fitted TDEE drift variance (kcal²/day)
+  series: { date: string; tdee: number; sd: number }[];
+}
+
+// Run the forward filter over a date-sorted list of {date, weight} points with
+// a constant mean daily intake. Returns the per-step trace plus the summed
+// innovation log-likelihood (used to fit the hyper-parameters).
+// Systematic-ish uncertainty in the mean daily intake estimate (kcal/day):
+// cheat-meal estimate, the +100 untracked extras, week-to-week logging
+// variance. This must be modelled as weight process noise — otherwise the
+// filter misattributes intake error to TDEE drift and runs away.
+const KALMAN_INTAKE_SD = 110;
+
+function runKalman(
+  pts: { date: string; weight: number }[],
+  intakeKcal: number,
+  qT: number,    // TDEE random-walk variance, kcal²/day
+  qW: number,    // baseline weight process-noise variance, kg²/day
+  R: number,     // observation-noise variance, kg²
+  tdee0: number, // prior TDEE mean
+): { steps: KalmanStep[]; logLik: number } {
+  // State x = [W, T]; covariance P (2×2, row-major [p00,p01,p10,p11]).
+  let W = pts[0].weight;
+  let T = tdee0;
+  // Initial covariance: weight known to ~observation noise; TDEE very uncertain.
+  let p00 = R, p01 = 0, p10 = 0, p11 = 400 * 400; // TDEE SD prior ±400 kcal
+  const steps: KalmanStep[] = [];
+  let logLik = 0;
+
+  // Seed step (first observation already in W; no innovation).
+  steps.push({ date: pts[0].date, weight: pts[0].weight, filteredWeight: W, filteredWeightSd: Math.sqrt(p00), tdee: T, tdeeSd: Math.sqrt(p11), innovation: 0, innovationSd: Math.sqrt(p00 + R) });
+
+  for (let k = 1; k < pts.length; k++) {
+    const dt = Math.max(0.5, (new Date(pts[k].date).getTime() - new Date(pts[k - 1].date).getTime()) / 86400000);
+
+    // ── Predict ──
+    // F = [[1, -dt/ρ], [0, 1]]; control adds intake energy to weight.
+    const a = -dt / KALMAN_RHO;
+    const Wp = W + a * T + (intakeKcal * dt) / KALMAN_RHO;
+    const Tp = T;
+    // P_pred = F P Fᵀ + Q
+    // F P:
+    const f00 = p00 + a * p10, f01 = p01 + a * p11;
+    const f10 = p10,            f11 = p11;
+    // (F P) Fᵀ  (Fᵀ = [[1,0],[a,1]])
+    let pp00 = f00 + a * f01;
+    let pp01 = f01;
+    let pp10 = f10 + a * f11;
+    let pp11 = f11;
+    // + Q (process noise).
+    //  - weight: baseline biological noise (∝dt) PLUS the weight-prediction
+    //    error from intake uncertainty over this interval, (σ_I·dt/ρ)² (∝dt²).
+    //    The intake term is what stops the filter from blaming intake error on
+    //    a swinging TDEE.
+    //  - TDEE: random-walk drift (∝dt).
+    const intakeW = (KALMAN_INTAKE_SD * dt) / KALMAN_RHO;
+    pp00 += qW * dt + intakeW * intakeW;
+    pp11 += qT * dt;
+    // symmetrise
+    pp01 = pp10 = (pp01 + pp10) / 2;
+
+    // ── Update with observation z = weight (H = [1,0]) ──
+    // Robust update: a weigh-in sitting many SDs off the prediction is almost
+    // certainly water/glycogen/gut noise, not real signal. Inflate that
+    // observation's noise (Huber-style R inflation keyed on the normalized
+    // innovation) so a single bloat-day can't be read as a TDEE swing. Without
+    // this, the two May water-days masquerade as adaptive thermogenesis.
+    const z = pts[k].weight;
+    const yk = z - Wp;             // innovation
+    const S0 = pp00 + R;
+    const nu = Math.abs(yk) / Math.sqrt(S0); // normalized innovation
+    const TAU = 2.0;
+    const Reff = nu > TAU ? R * (nu / TAU) * (nu / TAU) : R;
+    const S = pp00 + Reff;       // innovation variance with robust noise
+    const k0 = pp00 / S;          // Kalman gain (2×1)
+    const k1 = pp10 / S;
+    W = Wp + k0 * yk;
+    T = Tp + k1 * yk;
+    // P = (I - K H) P_pred
+    p00 = (1 - k0) * pp00;
+    p01 = (1 - k0) * pp01;
+    p10 = pp10 - k1 * pp00;
+    p11 = pp11 - k1 * pp01;
+    p01 = p10 = (p01 + p10) / 2;
+
+    // accumulate Gaussian innovation log-likelihood (under the robust noise)
+    logLik += -0.5 * (Math.log(2 * Math.PI * S) + (yk * yk) / S);
+
+    steps.push({ date: pts[k].date, weight: z, filteredWeight: W, filteredWeightSd: Math.sqrt(Math.max(0, p00)), tdee: T, tdeeSd: Math.sqrt(Math.max(0, p11)), innovation: yk, innovationSd: Math.sqrt(S) });
+  }
+
+  return { steps, logLik };
+}
+
+// Estimate observation noise R from the scatter of weigh-ins around a local
+// OLS trend (the water/glycogen noise). Floored so the filter can't become
+// over-confident from a lucky-clean stretch.
+function estimateObservationNoise(pts: { date: string; weight: number }[]): number {
+  const n = pts.length;
+  if (n < 3) return 0.9 * 0.9;
+  const t0 = new Date(pts[0].date).getTime();
+  const xs = pts.map(p => (new Date(p.date).getTime() - t0) / 86400000);
+  const ys = pts.map(p => p.weight);
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
+  const slope = den > 0 ? num / den : 0;
+  const intc = my - slope * mx;
+  let sse = 0;
+  for (let i = 0; i < n; i++) { const f = intc + slope * xs[i]; sse += (ys[i] - f) ** 2; }
+  const variance = sse / (n - 2);
+  return Math.max(0.4 * 0.4, variance); // floor at (0.4 kg)²
+}
+
+/**
+ * Kalman-filter TDEE estimate. Hyper-parameters self-calibrated from the data:
+ *   R  (scale noise)  → measured residual scatter of the weigh-ins;
+ *   qT (TDEE drift)   → chosen by maximum innovation-likelihood over a grid.
+ *
+ * `startDate` anchors the lower bound of the data window (same convention as
+ * calcDerivedTDEE). `tdeePrior` seeds the initial TDEE (falls back to a
+ * naive intake-minus-trend estimate).
+ */
+export function calcKalmanTDEE(
+  measurements: Measurement[],
+  intakeKcal: number,
+  startDate?: string,
+  asOfDate?: string,
+  tdeePrior?: number,
+): KalmanTDEE | null {
+  if (!measurements || !intakeKcal) return null;
+  const endStr = (asOfDate ? new Date(asOfDate + 'T00:00:00') : new Date()).toISOString().split('T')[0];
+  const sorted = [...measurements].filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
+  const pts = sorted
+    .filter(m => (!startDate || m.date >= startDate) && m.date <= endStr)
+    .map(m => ({ date: m.date, weight: m.weight }));
+  if (pts.length < 3) return null;
+
+  const R = estimateObservationNoise(pts);
+  const qW = 0.0015; // weight model-error variance per day (intake + ρ error)
+
+  // Prior TDEE: intake − (OLS weight slope × ρ). Robust starting point.
+  const t0 = new Date(pts[0].date).getTime();
+  const xs = pts.map(p => (new Date(p.date).getTime() - t0) / 86400000);
+  const ys = pts.map(p => p.weight);
+  const n = pts.length;
+  const mx = xs.reduce((s, v) => s + v, 0) / n, my = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
+  const slope = den > 0 ? num / den : 0;
+  const prior = tdeePrior ?? Math.round(intakeKcal - slope * KALMAN_RHO);
+
+  // Fit qT by maximum innovation-likelihood over a physiologically-bounded grid.
+  // σ_T = 0 means a constant TDEE (OLS-equivalent); the upper end bounds how
+  // fast adaptive thermogenesis can realistically move TDEE. If the data don't
+  // support drift, ML picks ~0 and the filter collapses to the optimal
+  // constant-TDEE estimate instead of chasing noise.
+  let bestQ = 0, bestLL = -Infinity;
+  for (const sigmaT of [0, 1.5, 3, 4.5, 6, 8]) {
+    const q = sigmaT * sigmaT;
+    const { logLik } = runKalman(pts, intakeKcal, q, qW, R, prior);
+    if (logLik > bestLL) { bestLL = logLik; bestQ = q; }
+  }
+
+  const { steps } = runKalman(pts, intakeKcal, bestQ, qW, R, prior);
+  const last = steps[steps.length - 1];
+  const daysSpan = Math.round((new Date(pts[n - 1].date).getTime() - t0) / 86400000);
+
+  // Innovation-based covariance scaling (a.k.a. consistency check / NIS).
+  // If the filter's predicted innovation variance S is honest, the normalized
+  // innovation squared (y²/S) averages ~1. When the data is bumpier than the
+  // model thinks (water-day outliers create model-vs-reality gaps the filter
+  // can't see), NIS > 1 and the raw posterior CI is overconfident. Scale the
+  // reported CI by √NIS so the ± number is empirically calibrated — this is
+  // what the backtest's coverage check validates, and it's why you can trust
+  // the interval without checking by hand. Floored at 1 (never shrink).
+  let nisSum = 0, nisN = 0;
+  for (let k = 1; k < steps.length; k++) {
+    const s = steps[k];
+    if (s.innovationSd > 0) { nisSum += (s.innovation / s.innovationSd) ** 2; nisN++; }
+  }
+  const nis = nisN > 0 ? nisSum / nisN : 1;
+  const calScale = Math.sqrt(Math.max(1, nis));
+
+  return {
+    tdee: Math.round(last.tdee),
+    tdeeCI95: Math.round(1.96 * last.tdeeSd * calScale),
+    weightFiltered: Math.round(last.filteredWeight * 10) / 10,
+    measurementCount: n,
+    daysSpan,
+    rDay: Math.round(R * 1000) / 1000,
+    qTDay: bestQ,
+    series: steps.map(s => ({ date: s.date, tdee: Math.round(s.tdee), sd: Math.round(s.tdeeSd * calScale) })),
+  };
+}
+
+export interface KalmanBacktest {
+  horizonDays: number;    // prediction horizon the long-range MAE is measured at
+  count: number;          // number of long-horizon predictions evaluated
+  maeKalman: number;      // Kalman weight-trajectory MAE at the horizon (kg)
+  maeNaive: number;       // "weight stays flat" baseline MAE at the horizon (kg)
+  maeOls: number;         // OLS trend-extrapolation MAE at the horizon (kg)
+  improvementPct: number; // Kalman MAE improvement over naive (%, +ve = better)
+  coverage95: number;     // fraction of actual weights inside the 95% interval (all horizons)
+  coverageCount: number;  // number of points the coverage was measured over
+}
+
+// Fit + run the self-calibrated filter on a training prefix; returns the final
+// filtered state (deduplicated so the estimator and backtest agree exactly).
+function fitKalman(train: { date: string; weight: number }[], intakeKcal: number) {
+  const R = estimateObservationNoise(train);
+  const qW = 0.0015;
+  const t0 = new Date(train[0].date).getTime();
+  const xs = train.map(p => (new Date(p.date).getTime() - t0) / 86400000);
+  const ys = train.map(p => p.weight);
+  const m = train.length;
+  const mx = xs.reduce((s, v) => s + v, 0) / m, my = ys.reduce((s, v) => s + v, 0) / m;
+  let num = 0, den = 0;
+  for (let j = 0; j < m; j++) { num += (xs[j] - mx) * (ys[j] - my); den += (xs[j] - mx) ** 2; }
+  const slope = den > 0 ? num / den : 0;
+  const prior = Math.round(intakeKcal - slope * KALMAN_RHO);
+  let bestQ = 0, bestLL = -Infinity;
+  for (const sigmaT of [0, 1.5, 3, 4.5, 6, 8]) {
+    const q = sigmaT * sigmaT;
+    const { logLik } = runKalman(train, intakeKcal, q, qW, R, prior);
+    if (logLik > bestLL) { bestLL = logLik; bestQ = q; }
+  }
+  const { steps } = runKalman(train, intakeKcal, bestQ, qW, R, prior);
+  // Same NIS calibration scale the live estimator applies.
+  let nisSum = 0, nisN = 0;
+  for (let k = 1; k < steps.length; k++) {
+    if (steps[k].innovationSd > 0) { nisSum += (steps[k].innovation / steps[k].innovationSd) ** 2; nisN++; }
+  }
+  const calScale = Math.sqrt(Math.max(1, nisN > 0 ? nisSum / nisN : 1));
+  return { state: steps[steps.length - 1], R, slope, intc: my - slope * mx, t0, mx, R0: R, calScale };
+}
+
+/**
+ * Walk-forward backtest. Two honest tests of trust:
+ *
+ *  1. Long-horizon accuracy — predict each held-out weigh-in ~3 weeks ahead of
+ *     the training cut, comparing Kalman vs a flat "weight stays put" baseline
+ *     and vs OLS trend extrapolation. We deliberately do NOT score one-step
+ *     prediction: over a few days, weight is dominated by unpredictable water
+ *     noise, so "next ≈ last" is near-optimal *by physics* and tells us nothing
+ *     about TDEE quality. The TDEE estimate only proves its worth over a
+ *     horizon where the cumulative (intake − TDEE) signal outgrows the noise.
+ *
+ *  2. Calibration — across all held-out points, the fraction that land inside
+ *     the model's stated 95 % predictive interval should be ≈95 %. This is what
+ *     lets you trust the ± number without checking by hand.
+ */
+export function backtestKalmanTDEE(
+  measurements: Measurement[],
+  intakeKcal: number,
+  startDate?: string,
+): KalmanBacktest | null {
+  if (!measurements || !intakeKcal) return null;
+  const sorted = [...measurements].filter(m => m.weight).sort((a, b) => a.date.localeCompare(b.date));
+  const all = sorted.filter(m => !startDate || m.date >= startDate).map(m => ({ date: m.date, weight: m.weight }));
+  const warm = 4;
+  if (all.length < warm + 2) return null;
+
+  const HORIZON = 21; // days — long enough that real trend > water noise
+  const ms = (d: string) => new Date(d).getTime();
+
+  let absK = 0, absN = 0, absO = 0, hCount = 0;       // long-horizon accuracy
+  let inside = 0, covCount = 0;                         // calibration (all horizons)
+
+  for (let i = warm; i < all.length - 1; i++) {
+    const train = all.slice(0, i + 1);
+    const fit = fitKalman(train, intakeKcal);
+    const s = fit.state;
+
+    for (let j = i + 1; j < all.length; j++) {
+      const target = all[j];
+      const dt = (ms(target.date) - ms(train[i].date)) / 86400000;
+      if (dt <= 0) continue;
+
+      // Kalman energy-balance forward projection of the de-noised weight.
+      const predW = s.filteredWeight + ((intakeKcal - s.tdee) * dt) / KALMAN_RHO;
+      // Predictive variance of the *observed* weight at the target date:
+      //   • current de-noised-weight posterior variance (the filter isn't
+      //     certain where true weight is right now);
+      //   • TDEE uncertainty projected forward — a wrong TDEE compounds
+      //     linearly into weight over the horizon;
+      //   • intake-estimate uncertainty over the horizon;
+      //   • baseline biological process noise over the horizon;
+      //   • a fresh dose of scale/water noise at the target weigh-in.
+      const wNow = s.filteredWeightSd;
+      const tdeeTerm = (s.tdeeSd * dt) / KALMAN_RHO;
+      const intakeTerm = (KALMAN_INTAKE_SD * dt) / KALMAN_RHO;
+      const predVar = wNow * wNow + tdeeTerm * tdeeTerm + intakeTerm * intakeTerm + 0.0015 * dt + fit.R0;
+      const predSd = Math.sqrt(predVar) * fit.calScale; // apply the same calibration scaling
+
+      // Calibration: count every horizon.
+      if (Math.abs(target.weight - predW) <= 1.96 * predSd) inside++;
+      covCount++;
+
+      // Long-horizon accuracy: only score points near the chosen horizon.
+      if (Math.abs(dt - HORIZON) <= 4) {
+        const naiveW = train[i].weight; // flat
+        const xT = (ms(target.date) - fit.t0) / 86400000;
+        const olsPred = fit.intc + fit.slope * xT;
+        absK += Math.abs(target.weight - predW);
+        absN += Math.abs(target.weight - naiveW);
+        absO += Math.abs(target.weight - olsPred);
+        hCount++;
+      }
+    }
+  }
+
+  if (hCount === 0) return null;
+  const maeK = absK / hCount, maeN = absN / hCount;
+  return {
+    horizonDays: HORIZON,
+    count: hCount,
+    maeKalman: Math.round(maeK * 1000) / 1000,
+    maeNaive: Math.round(maeN * 1000) / 1000,
+    maeOls: Math.round((absO / hCount) * 1000) / 1000,
+    improvementPct: Math.round((1 - maeK / maeN) * 1000) / 10,
+    coverage95: Math.round((inside / covCount) * 1000) / 1000,
+    coverageCount: covCount,
+  };
+}
+
 /**
  * Science-based macro recommendation given bodyweight, TDEE estimate, and phase.
  *
