@@ -23,6 +23,11 @@ const eslintConfig = defineConfig([
       // mismatches. Keep it as a warning so real cascading-render bugs still
       // surface without failing the lint on the intentional cases.
       "react-hooks/set-state-in-effect": "warn",
+      // The React Compiler can't auto-optimize memos that call cross-module
+      // functions it can't prove pure (e.g. the TDEE Kalman model memo). When
+      // that happens it simply falls back to the hand-written useMemo, which
+      // works exactly as intended — so this is advisory, not a real failure.
+      "react-hooks/preserve-manual-memoization": "warn",
     },
   },
 ]);

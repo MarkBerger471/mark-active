@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import Navigation from '@/components/Navigation';
 
 import { getMeasurements, getSetting, getSettingRemote, saveSetting, getTrainingSessions, getNutritionPlan } from '@/utils/storage';
@@ -11,7 +11,16 @@ import { calcSessionCalories, calcRollingTDEE, calcDerivedTDEE, calcKalmanTDEE, 
 import { DumbbellIcon } from '@/components/BackgroundEffects';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import Sparkline from '@/components/Sparkline';
-import BeforeAfterSlider from '@/components/BeforeAfterSlider';
+import dynamic from 'next/dynamic';
+
+// Code-split the heavy, below-the-fold features so they don't weigh down the
+// dashboard's initial chunk / first render. They hydrate a moment after the
+// core stats are on screen.
+const InsulinCard = dynamic(() => import('@/components/InsulinCard'), {
+  ssr: false,
+  loading: () => <div className="glass-card mb-6 h-40 animate-pulse opacity-40" />,
+});
+const BeforeAfterSlider = dynamic(() => import('@/components/BeforeAfterSlider'), { ssr: false });
 
 type Phase = 'bulking' | 'cutting';
 
@@ -21,8 +30,10 @@ type Phase = 'bulking' | 'cutting';
 // data starts rolling off (anchor effectively walks forward).
 const TDEE_ANCHOR = '2026-04-12';
 const TDEE_ROLL_CAP_DAYS = 84;
-function tdeeEffectiveStart(): string {
-  const rollCap = new Date();
+// Pass a stable timestamp (e.g. the per-mount `nowTs`) to keep callers pure —
+// lets useMemo optimize and avoids Date.now() during render.
+function tdeeEffectiveStart(nowMs: number = Date.now()): string {
+  const rollCap = new Date(nowMs);
   rollCap.setDate(rollCap.getDate() - TDEE_ROLL_CAP_DAYS);
   const rollCapStr = rollCap.toISOString().split('T')[0];
   return TDEE_ANCHOR > rollCapStr ? TDEE_ANCHOR : rollCapStr;
@@ -108,6 +119,26 @@ export default function Dashboard() {
 
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(null);
+
+  // Shared TDEE model — the Kalman filter (ML grid-search + filter) and the
+  // regression were recomputed 2× and up to 7× on EVERY render (both cards +
+  // the 5-point sparkline). Memoise once, keyed only on the data that changes
+  // it, so unrelated re-renders (glucose refresh, sleep taps, insulin edits)
+  // don't re-run the filter.
+  const tdeeModel = useMemo(() => {
+    if (!nutritionPlan || measurements.length < 2) return null;
+    const meals = nutritionPlan.current.trainingDay.meals;
+    const intake = calcWeeklyIntake(nutritionPlan.current.trainingDay.macros.kcal, meals).weeklyAvgKcal;
+    const start = tdeeEffectiveStart(nowTs);
+    const kalman = calcKalmanTDEE(measurements, intake, start, undefined);
+    const derived = calcDerivedTDEE(measurements, intake, 28, undefined, start);
+    const series = [4, 3, 2, 1, 0].map(w => {
+      const date = new Date(nowTs - w * 7 * 86400000).toISOString().split('T')[0];
+      return { date, tdee: calcDerivedTDEE(measurements, intake, 28, date, start)?.tdee ?? null };
+    });
+    return { intake, kalman, derived, series, start };
+  }, [measurements, nutritionPlan, nowTs]);
+
   // User-set macro targets from the Nutrition plan (Target row). Falls back to
   // computed defaults below when null (first-load before Firestore returns).
   const [userTargets, setUserTargets] = useState<{ kcal: number; protein: number; carbs: number; fat: number } | null>(() => {
@@ -126,7 +157,7 @@ export default function Dashboard() {
   }, []);
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number; source?: string }>>({});
   const [glucose, setGlucose] = useState<{
-    current: { value: number; valueMmol: number; trend: string; timestamp: string; isHigh: boolean; isLow: boolean } | null;
+    current: { value: number; valueMmol: number; trend: string; trendRaw?: number; timestamp: string; isHigh: boolean; isLow: boolean } | null;
     history: { value: number; valueMmol: number; timestamp: string }[];
     stats: { timeInRange: number; avgGlucose: number; avgMmol: number; estimatedA1c: number; readings: number };
   } | null>(null);
@@ -392,8 +423,7 @@ export default function Dashboard() {
               if (!bmr || !dailyKcal || trainingSessions.length === 0) return null;
               // Weekly-avg intake: plan + Sunday cheat swap + daily extras.
               // Same source as Energy Balance card so both stay in sync.
-              const wkIntakeFull = calcWeeklyIntake(dailyKcal, nutritionPlan!.current.trainingDay.meals);
-              const intake = wkIntakeFull.weeklyAvgKcal;
+              const intake = tdeeModel?.intake ?? calcWeeklyIntake(dailyKcal, nutritionPlan!.current.trainingDay.meals).weeklyAvgKcal;
 
               // Cache TDEE once per day — only recompute if date or plan changes
               // Include sum of activeCalories + bodyWeight + bmr in cache key to avoid stale TDEE
@@ -416,11 +446,11 @@ export default function Dashboard() {
                 activitySource = tdee.source;
                 try { localStorage.setItem('nb_cache', JSON.stringify({ key: nbCacheKey, burn: dailyBurn, training: dailyTrainingAvg, neat: dailyNeat, source: activitySource })); } catch {}
               }
-              // TDEE — Kalman state-space estimate (same as the Energy Balance
-              // card so both surfaces always agree), falling back to the OLS
+              // TDEE — Kalman state-space estimate (memoised, shared with the
+              // Energy Balance card so both agree), falling back to the OLS
               // regression, then to the rolling burn estimate.
-              const kalman = calcKalmanTDEE(measurements, intake, tdeeEffectiveStart(), undefined);
-              const derived = calcDerivedTDEE(measurements, intake, 28, undefined, tdeeEffectiveStart());
+              const kalman = tdeeModel?.kalman ?? null;
+              const derived = tdeeModel?.derived ?? null;
               const tdeeForTarget = kalman ? kalman.tdee : (derived ? derived.tdee : dailyBurn);
               // CI band on the fuel gauge uses the Kalman calibrated interval.
               const tdeeCI95 = kalman?.tdeeCI95 ?? derived?.tdeeCI95;
@@ -647,16 +677,12 @@ export default function Dashboard() {
             const dailyPlanKcal = nutritionPlan.current.trainingDay.macros.kcal;
             // Weekly average INCLUDES Sunday cheat meal replacement (800 kcal swap)
             const wk = calcWeeklyIntake(dailyPlanKcal, nutritionPlan.current.trainingDay.meals);
-            const intake = wk.weeklyAvgKcal;
+            const intake = tdeeModel?.intake ?? wk.weeklyAvgKcal;
             const cheatDiff = wk.cheatMealKcal - wk.lastMealKcal;
+            const effectiveStart = tdeeModel?.start ?? tdeeEffectiveStart();
 
-            // Anchored start date: same constants as Nutrition Balance card.
-            // Window grows day by day from the anchor; once it exceeds the
-            // roll cap (12 weeks) the anchor effectively rolls forward.
-            const today = new Date();
-            const effectiveStart = tdeeEffectiveStart();
-
-            const derived = calcDerivedTDEE(measurements, intake, 28, undefined, effectiveStart);
+            // All memoised (shared with the Nutrition Balance card).
+            const derived = tdeeModel?.derived ?? null;
             if (!derived) return null;
 
             // Primary TDEE: Kalman state-space estimate (optimal de-noising +
@@ -664,24 +690,13 @@ export default function Dashboard() {
             // `derived` number when there aren't enough weigh-ins (n<3). The
             // OLS `derived` is still used for the weight-trend rate (pace) and
             // the convergence sparkline.
-            const kalman = calcKalmanTDEE(measurements, intake, effectiveStart, undefined);
+            const kalman = tdeeModel?.kalman ?? null;
             const tdeeEst = kalman ? kalman.tdee : derived.tdee;
             const tdeeCI = kalman ? kalman.tdeeCI95 : derived.tdeeCI95;
             const denoisedWeight = kalman?.weightFiltered;
 
-            // Weekly TDEE samples — each uses the same anchored start, just a
-            // different end date. Earlier samples have less data → noisier.
-            // The line "settling" toward today's value visualises convergence.
-            const sampleDates: string[] = [];
-            for (let w = 4; w >= 0; w--) {
-              const d = new Date(today);
-              d.setDate(d.getDate() - w * 7);
-              sampleDates.push(d.toISOString().split('T')[0]);
-            }
-            const series = sampleDates.map(date => {
-              const r = calcDerivedTDEE(measurements, intake, 28, date, effectiveStart);
-              return { date, tdee: r ? r.tdee : null };
-            });
+            // Weekly TDEE convergence samples — memoised (5 regressions).
+            const series = tdeeModel?.series ?? [];
 
             // Surplus from the primary (Kalman) TDEE so the headline number and
             // the surplus/recommendation stay internally consistent.
@@ -1121,6 +1136,9 @@ export default function Dashboard() {
               </div>
             );
           })()}
+
+          {/* Insulin bolus calculator — sits directly below glucose */}
+          <InsulinCard glucose={glucose} nutritionPlan={nutritionPlan} nowTs={nowTs} />
 
           {/* Sleep — Concept 1B: Timeline + Day Strip */}
             {sleepData.length > 0 && (() => {

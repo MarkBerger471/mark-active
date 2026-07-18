@@ -1,6 +1,9 @@
-const CACHE_NAME = 'bb-shell-v51';
+const CACHE_NAME = 'bb-shell-v52';
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
-const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan', '/vitals'];
+// Precache the app-shell HTML + the PWA manifest so a repeat/standalone launch
+// paints from cache with zero network wait (stale-while-revalidate below keeps
+// them fresh). Static JS/CSS are hashed and cached cache-first on first fetch.
+const PAGES = ['/', '/login', '/body-metrix', '/training-plan', '/nutrition-plan', '/vitals', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
   if (IS_LOCALHOST) {

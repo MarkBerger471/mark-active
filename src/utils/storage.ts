@@ -1,17 +1,24 @@
 import { Measurement, TrainingDay, NutritionPlan, NutritionPlanVersion, DayPlan, Workout, TrainingSession } from '@/types';
-import { db, storage } from '@/lib/firebase';
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  setDoc,
-  deleteDoc,
-  query,
-  orderBy,
-  writeBatch,
-} from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+
+// Firebase (~360 KB) is lazy-loaded so it never sits on the initial critical
+// path. Every screen renders from IndexedDB immediately; Firestore/Storage are
+// dynamically imported and initialised only when a background sync actually
+// runs — after first paint. Memoised so it loads at most once per session.
+async function loadFb() {
+  const [core, fs, st] = await Promise.all([
+    import('@/lib/firebase'),
+    import('firebase/firestore'),
+    import('firebase/storage'),
+  ]);
+  return {
+    db: core.db, storage: core.storage,
+    collection: fs.collection, doc: fs.doc, getDocs: fs.getDocs, getDoc: fs.getDoc,
+    setDoc: fs.setDoc, deleteDoc: fs.deleteDoc, query: fs.query, orderBy: fs.orderBy,
+    ref: st.ref, uploadString: st.uploadString, getDownloadURL: st.getDownloadURL, deleteObject: st.deleteObject,
+  };
+}
+let _fb: ReturnType<typeof loadFb> | null = null;
+function fb() { return (_fb ??= loadFb()); }
 import {
   getAllMeasurements as idbGetMeasurements,
   putMeasurement as idbPutMeasurement,
@@ -56,6 +63,7 @@ function backgroundRefreshMeasurements() {
   if (typeof window === 'undefined' || !navigator.onLine) return;
   setTimeout(() => (async () => {
     try {
+      const { db, query, collection, orderBy, getDocs, setDoc, doc } = await fb();
       const q = query(collection(db, 'measurements'), orderBy('date', 'asc'));
       const snap = await getDocs(q);
       const remoteItems = snap.docs.map(d => d.data() as Measurement);
@@ -96,6 +104,7 @@ function backgroundRefreshSessions() {
   if (typeof window === 'undefined' || !navigator.onLine) return;
   setTimeout(() => (async () => {
     try {
+      const { db, collection, getDocs, setDoc, doc } = await fb();
       const snap = await getDocs(collection(db, 'trainingSessions'));
       const remoteItems = snap.docs.map(d => d.data() as TrainingSession);
       const localItems = await idbGetSessions();
@@ -134,6 +143,7 @@ function backgroundRefreshNutrition() {
   if (typeof window === 'undefined' || !navigator.onLine) return;
   setTimeout(() => (async () => {
     try {
+      const { db, getDoc, setDoc, doc } = await fb();
       const snap = await getDoc(doc(db, 'nutrition', 'plan'));
       if (snap.exists()) {
         const remoteData = snap.data();
@@ -166,6 +176,7 @@ function backgroundRefreshSetting(key: string) {
   if (typeof window === 'undefined' || !navigator.onLine) return;
   setTimeout(() => (async () => {
     try {
+      const { db, getDoc, setDoc, doc } = await fb();
       const snap = await getDoc(doc(db, 'settings', key));
       const pending = await hasPendingSyncFor('settings', key);
       if (pending) return;
@@ -336,6 +347,7 @@ export async function deleteMeasurement(date: string) {
     const all = await idbGetMeasurements();
     const m = all.find(x => x.date === date);
     if (m?.photos) {
+      const { storage, ref, deleteObject } = await fb();
       for (const angle of Object.keys(m.photos) as Array<keyof typeof m.photos>) {
         try {
           await deleteObject(ref(storage, `photos/${date}/${String(angle)}.jpg`));
@@ -742,6 +754,7 @@ export async function saveNutritionPlan(plan: NutritionPlan) {
 export async function nutritionPlanExistsRemotely(): Promise<boolean> {
   if (typeof window === 'undefined' || !navigator.onLine) return false;
   try {
+    const { db, getDoc, doc } = await fb();
     const snap = await getDoc(doc(db, 'nutrition', 'plan'));
     return snap.exists() && !!snap.data().current;
   } catch {
@@ -755,6 +768,7 @@ export async function nutritionPlanExistsRemotely(): Promise<boolean> {
 export async function getSettingRemote(key: string): Promise<string | null> {
   if (typeof window === 'undefined' || !navigator.onLine) return null;
   try {
+    const { db, getDoc, doc } = await fb();
     const snap = await getDoc(doc(db, 'settings', key));
     if (!snap.exists()) return null;
     const data = snap.data();
@@ -854,6 +868,7 @@ export async function flushSyncQueue() {
   flushing = true;
 
   try {
+    const { db, doc, setDoc, deleteDoc, getDoc, storage, ref, uploadString, getDownloadURL } = await fb();
     // Flush pending data writes
     const entries = await getAllPendingSync();
     const sorted = entries.sort((a, b) => a.timestamp - b.timestamp);
@@ -929,6 +944,7 @@ export async function seedInitialData() {
   // Also check Firestore if online — pull each collection independently
   if (navigator.onLine) {
     let foundAny = false;
+    const { db, getDocs, getDoc, query, collection, orderBy, doc } = await fb();
 
     // Pull measurements
     try {
@@ -1023,4 +1039,37 @@ export async function hashPassword(password: string): Promise<string> {
   const data = encoder.encode(password);
   const hash = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ─── Insulin (Phase 1: settings + event log, stored as settings JSON) ───
+// Mirrors the bloodTests blob pattern: single-user app, Firestore-synced via
+// saveSetting. The log holds dose + rescue events; settings holds ICR/ISF etc.
+import type { InsulinSettings, InsulinEvent } from '@/utils/insulin';
+import { DEFAULT_INSULIN_SETTINGS } from '@/utils/insulin';
+
+export async function getInsulinSettings(): Promise<InsulinSettings> {
+  try {
+    const json = await getSetting('insulin_settings');
+    if (json) return { ...DEFAULT_INSULIN_SETTINGS, ...JSON.parse(json) };
+  } catch {}
+  return { ...DEFAULT_INSULIN_SETTINGS };
+}
+
+export async function saveInsulinSettings(s: InsulinSettings) {
+  await saveSetting('insulin_settings', JSON.stringify(s));
+}
+
+export async function getInsulinLog(): Promise<InsulinEvent[]> {
+  try {
+    const json = await getSetting('insulin_log');
+    if (json) { const arr = JSON.parse(json); if (Array.isArray(arr)) return arr; }
+  } catch {}
+  return [];
+}
+
+export async function saveInsulinLog(events: InsulinEvent[]) {
+  // Keep the log bounded (last ~400 events ≈ many months) to stay well under
+  // the 1 MiB Firestore document limit.
+  const slim = [...events].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 400);
+  await saveSetting('insulin_log', JSON.stringify(slim));
 }
