@@ -223,8 +223,26 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
 
   if (!settings) return null;
   const gc = glucose?.current;
-  const recent = log.slice(0, 6);
+  const recent = log.slice(0, 7);  // last 7 ≈ one day — always shown
+  const older = log.slice(7);      // everything else — behind show/hide
   const locked = proposal?.lockout;
+
+  const fmtTime = (ts: string) => new Date(ts).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const renderEntry = (e: InsulinEvent) => e.kind === 'rescue' ? (
+    <div key={e.id} className="flex items-center justify-between text-[9px]">
+      <span className="text-amber-300/50">{fmtTime(e.timestamp)} · rescue {e.carbs}g</span>
+      <span className="text-white/20">excluded</span>
+    </div>
+  ) : (
+    <div key={e.id} className="flex items-center justify-between text-[9px]">
+      <span className="text-white/45">{fmtTime(e.timestamp)} · {e.mealName} · <strong className="text-white/65">{e.actualUnits}u</strong> @{e.glucoseBefore}</span>
+      {e.verify ? (
+        <span className={e.verify.confounded ? 'text-white/25' : e.verify.status === 'on-target' ? 'text-green-400/70' : e.verify.status === 'high' ? 'text-amber-300/70' : 'text-red-400/70'}>
+          3h {e.verify.glucoseAfter} {e.verify.confounded ? '(conf.)' : e.verify.status === 'on-target' ? '✓' : e.verify.status === 'high' ? '↑' : '↓'}
+        </span>
+      ) : <span className="text-white/20">pending</span>}
+    </div>
+  );
 
   return (
     <div className="glass-card mb-6 fade-up overflow-hidden">
@@ -294,20 +312,29 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
           <div className="text-xs text-white/30">No current glucose reading — can&apos;t propose a dose.</div>
         ) : proposal && (
           <>
-            {/* Proposed hero */}
+            {/* Proposed hero — dose (left) and glucose (right) at equal size */}
             <div className={`mb-1 rounded-2xl border p-4 ${locked ? 'border-red-500/30 bg-red-500/[0.07]' : 'border-cyan-400/15 bg-gradient-to-br from-cyan-500/[0.06] to-blue-600/[0.03]'}`}>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wider text-white/40">Proposed dose</span>
-                <span className="text-[10px] text-white/40">
-                  glucose <strong className="text-white/70">{gc.value}</strong> <span className="text-cyan-300/70">{gc.trend}</span>
-                </span>
-              </div>
-              <div className="flex items-baseline gap-2 mt-0.5">
-                <span className={`text-5xl font-black data-value ${locked ? 'text-red-400' : 'bg-gradient-to-br from-white to-cyan-200 bg-clip-text text-transparent'}`}>{proposal.proposed}</span>
-                <span className="text-sm text-white/40">units</span>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-white/40">Proposed dose</span>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className={`text-5xl font-black data-value leading-none ${locked ? 'text-red-400' : 'bg-gradient-to-br from-white to-cyan-200 bg-clip-text text-transparent'}`}>{proposal.proposed}</span>
+                    <span className="text-sm text-white/40">units</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] uppercase tracking-wider text-white/40">Glucose</span>
+                  {/* Same thresholds as the main glucose card (page.tsx gValColor):
+                      <80 red · ≤120 green · ≤160 amber · >160 red */}
+                  <div className="flex items-baseline justify-end gap-1.5 mt-0.5"
+                    style={{ color: gc.value < 80 ? '#ef4444' : gc.value <= 120 ? '#22c55e' : gc.value <= 160 ? '#f59e0b' : '#ef4444' }}>
+                    <span className="text-5xl font-black data-value tabular-nums leading-none">{gc.value}</span>
+                    <span className="text-lg">{gc.trend}</span>
+                  </div>
+                </div>
               </div>
               {!locked && (
-                <div className="mt-1 text-[9px] text-white/30">
+                <div className="mt-2 text-[9px] text-white/30">
                   {proposal.block}
                   {proposal.breakdown.carbBolus > 0 ? ` · carb ${Math.round(proposal.breakdown.carbBolus)}u` : ''}
                   {proposal.breakdown.correctionBolus > 0 ? ` + corr ${Math.round(proposal.breakdown.correctionBolus)}u` : ''}
@@ -351,7 +378,6 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
               className="w-10 rounded bg-white/5 px-1.5 py-0.5 text-center no-spinners border border-white/5 outline-none focus:border-amber-400/40" />
             <button onClick={saveRescue} className="rounded border border-amber-400/25 px-1.5 py-0.5 text-amber-300/70 hover:text-amber-300">log</button>
           </div>
-          <button onClick={() => setShowHistory(s => !s)} className="text-white/25 hover:text-white/50 uppercase tracking-wider">{showHistory ? 'hide' : 'log'}</button>
         </div>
 
         {/* Learning signal */}
@@ -361,24 +387,17 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
           </div>
         )}
 
-        {/* History (collapsed by default, tiny) */}
-        {showHistory && recent.length > 0 && (
+        {/* History — last 7 (≈ one day) always shown; older behind a toggle */}
+        {log.length > 0 && (
           <div className="mt-2 space-y-1 border-t border-white/5 pt-2">
-            {recent.map(e => e.kind === 'rescue' ? (
-              <div key={e.id} className="flex items-center justify-between text-[9px]">
-                <span className="text-amber-300/50">{new Date(e.timestamp).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} · rescue {e.carbs}g</span>
-                <span className="text-white/20">excluded</span>
-              </div>
-            ) : (
-              <div key={e.id} className="flex items-center justify-between text-[9px]">
-                <span className="text-white/45">{new Date(e.timestamp).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} · {e.mealName} · <strong className="text-white/65">{e.actualUnits}u</strong> @{e.glucoseBefore}</span>
-                {e.verify ? (
-                  <span className={e.verify.confounded ? 'text-white/25' : e.verify.status === 'on-target' ? 'text-green-400/70' : e.verify.status === 'high' ? 'text-amber-300/70' : 'text-red-400/70'}>
-                    3h {e.verify.glucoseAfter} {e.verify.confounded ? '(conf.)' : e.verify.status === 'on-target' ? '✓' : e.verify.status === 'high' ? '↑' : '↓'}
-                  </span>
-                ) : <span className="text-white/20">pending</span>}
-              </div>
-            ))}
+            {recent.map(renderEntry)}
+            {showHistory && older.map(renderEntry)}
+            {older.length > 0 && (
+              <button onClick={() => setShowHistory(s => !s)}
+                className="mt-1 w-full text-center text-[9px] uppercase tracking-wider text-white/25 hover:text-white/50 transition-colors">
+                {showHistory ? '▲ hide older' : `▼ show ${older.length} older`}
+              </button>
+            )}
           </div>
         )}
       </div>

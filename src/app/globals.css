@@ -24,11 +24,20 @@
   --pwa-top-offset: calc(env(safe-area-inset-top, 0px) + 5.6rem);
 }
 
+html {
+  /* Kill the iOS/WKWebView document rubber-band overscroll. In the native
+     (Capacitor) app that elastic bounce drags position:fixed elements — the
+     nav bar — out of place while scrolling. The web PWA already pins the nav;
+     this makes the native app behave identically. */
+  overscroll-behavior: none;
+}
+
 body {
   background: #0f0f1a;
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+  overscroll-behavior: none;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
 

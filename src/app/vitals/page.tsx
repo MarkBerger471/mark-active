@@ -2,12 +2,13 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import Navigation from '@/components/Navigation';
 import { getBloodTests, saveBloodTests, getTrainingSessions, getNutritionPlan, getMeasurements, getSetting, saveSetting } from '@/utils/storage';
 import { BloodTest, BloodTestValue, TrainingSession, NutritionPlan } from '@/types';
 import EmptyState from '@/components/EmptyState';
 import ReactMarkdown from 'react-markdown';
+import { canonicalize, getUnitDef, canonicalUnit, knownUnit, convertToCanonical, fmtValue, type MarkerCategory } from '@/utils/markers';
 
 function MarkerPopup({ title, content, loading, onClose }: { title: string; content: string; loading: boolean; onClose: () => void }) {
   // Remove redundant first line if it's just the marker name repeated
@@ -509,6 +510,8 @@ export default function VitalsPage() {
   const [parsedValues, setParsedValues] = useState<BloodTestValue[]>([]);
   const [expandedTest, setExpandedTest] = useState<string | null>(null);
   const [showComparison, setShowComparison] = useState(false);
+  const [showNormalize, setShowNormalize] = useState(false);
+  const [normalizing, setNormalizing] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [popup, setPopup] = useState<{ title: string; content: string; loading: boolean } | null>(null);
   const explanationCache = useRef<Record<string, string>>({});
@@ -780,8 +783,15 @@ export default function VitalsPage() {
     setParsedValues(prev => prev.filter((_, i) => i !== idx));
   };
 
+  // Canonicalize a value's name on save (known markers only) so new/edited
+  // tests are stored consistently going forward.
+  const canonValue = (v: BloodTestValue): BloodTestValue => {
+    const c = canonicalize(v.name);
+    return c.category !== 'Other' && c.name !== v.name ? { ...v, name: c.name } : v;
+  };
+
   const saveTest = async () => {
-    const cleaned = parsedValues.filter(v => v.name.trim() && !isNaN(v.value));
+    const cleaned = parsedValues.filter(v => v.name.trim() && !isNaN(v.value)).map(canonValue);
     if (cleaned.length === 0) return;
 
     const newTest: BloodTest = {
@@ -810,7 +820,7 @@ export default function VitalsPage() {
 
   const saveEditTest = async () => {
     if (!editingTestId) return;
-    const cleaned = editValues.filter(v => v.name.trim());
+    const cleaned = editValues.filter(v => v.name.trim()).map(canonValue);
     const updated = tests.map(t => t.id === editingTestId ? { ...t, values: cleaned, date: editDate || t.date } : t)
       .sort((a, b) => b.date.localeCompare(a.date));
     setTests(updated);
@@ -860,43 +870,103 @@ export default function VitalsPage() {
     await saveBloodTests(updated);
   };
 
-  // Build comparison data: markers ordered by latest test, then fill from older tests
+  // Build comparison data: markers grouped by CANONICAL identity (so "LDL" and
+  // "LDL-Cholesterol" share one row) and ordered by clinical category, then a
+  // logical within-category order. Ref range / unit prefer the latest test that
+  // has them. Multiple differing units for one marker are flagged (unitMismatch)
+  // rather than converted (unit reconciliation is out of scope).
   const getComparisonData = () => {
-    const markerMap: Record<string, { name: string; unit: string; refMin?: number; refMax?: number }> = {};
-    const orderedKeys: string[] = [];
+    const markerMap: Record<string, {
+      key: string; name: string; category: MarkerCategory; sort: number;
+      hasDef: boolean; displayUnit: string; rawUnits: Set<string>; unknownUnit: boolean;
+      refMin?: number; refMax?: number;
+    }> = {};
 
-    // Start with the latest test's markers in order
-    const latestTest = tests[0];
-    if (latestTest) {
-      for (const v of latestTest.values) {
-        const key = v.name.toLowerCase();
-        if (!markerMap[key]) {
-          markerMap[key] = { name: v.name, unit: v.unit, refMin: v.refMin, refMax: v.refMax };
-          orderedKeys.push(key);
+    // Newest → oldest so the latest test's unit/ref win. When a marker has a
+    // canonical unit, values (and ref range) are converted to it; otherwise the
+    // raw unit is kept and differing units are flagged.
+    for (const test of tests) {
+      for (const v of test.values) {
+        const c = canonicalize(v.name);
+        let m = markerMap[c.key];
+        if (!m) {
+          const canon = canonicalUnit(c.key);
+          m = markerMap[c.key] = {
+            key: c.key, name: c.name, category: c.category, sort: c.sort,
+            hasDef: !!getUnitDef(c.key),
+            displayUnit: canon ?? v.unit,
+            rawUnits: new Set(), unknownUnit: false,
+            refMin: undefined, refMax: undefined,
+          };
+        }
+        if (m.hasDef) {
+          if (v.unit && !knownUnit(m.key, v.unit)) m.unknownUnit = true;
+        } else if (v.unit) {
+          m.rawUnits.add(v.unit);
+        }
+        if (m.refMin == null && v.refMin != null) {
+          const cv = m.hasDef ? convertToCanonical(m.key, v.refMin, v.unit) : null;
+          m.refMin = cv ? fmtValue(cv.value) : v.refMin;
+        }
+        if (m.refMax == null && v.refMax != null) {
+          const cv = m.hasDef ? convertToCanonical(m.key, v.refMax, v.unit) : null;
+          m.refMax = cv ? fmtValue(cv.value) : v.refMax;
         }
       }
     }
 
-    // Then add any markers from older tests that aren't in the latest
-    for (let i = 1; i < tests.length; i++) {
-      for (const v of tests[i].values) {
-        const key = v.name.toLowerCase();
-        if (!markerMap[key]) {
-          markerMap[key] = { name: v.name, unit: v.unit, refMin: v.refMin, refMax: v.refMax };
-          orderedKeys.push(key);
-        }
-        // Update ref range if we have better data
-        if (v.refMin != null) markerMap[key].refMin = markerMap[key].refMin ?? v.refMin;
-        if (v.refMax != null) markerMap[key].refMax = markerMap[key].refMax ?? v.refMax;
+    return Object.values(markerMap)
+      .sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name))
+      .map(m => ({
+        key: m.key,
+        name: m.name,
+        category: m.category,
+        unit: m.displayUnit,
+        refMin: m.refMin,
+        refMax: m.refMax,
+        unitMismatch: m.hasDef ? m.unknownUnit : m.rawUnits.size > 1,
+      }));
+  };
+
+  // --- Marker-name normalization (rewrites stored names to canonical) ---------
+  // Only KNOWN markers are rewritten; unrecognised names are left untouched so
+  // we never mangle something the registry doesn't cover.
+  const renamePreview = () => {
+    const changes: { date: string; from: string; to: string }[] = [];
+    for (const t of tests) {
+      for (const v of t.values) {
+        const c = canonicalize(v.name);
+        if (c.category !== 'Other' && c.name !== v.name) changes.push({ date: t.date, from: v.name, to: c.name });
       }
     }
+    return changes;
+  };
 
-    return orderedKeys.map(key => ({
-      name: markerMap[key].name,
-      unit: markerMap[key].unit,
-      refMin: markerMap[key].refMin,
-      refMax: markerMap[key].refMax,
-    }));
+  const downloadBackup = () => {
+    const blob = new Blob([JSON.stringify(tests, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `blood-tests-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const applyNormalization = async () => {
+    setNormalizing(true);
+    const normalized = tests
+      .map(t => ({
+        ...t,
+        values: t.values.map(v => {
+          const c = canonicalize(v.name);
+          return c.category !== 'Other' && c.name !== v.name ? { ...v, name: c.name } : v;
+        }),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    setTests(normalized);
+    await saveBloodTests(normalized);
+    setNormalizing(false);
+    setShowNormalize(false);
   };
 
   // Derived lifestyle values
@@ -1028,7 +1098,52 @@ export default function VitalsPage() {
                 {showComparison ? 'Hide Comparison' : 'Compare Over Time'}
               </button>
             )}
+            {tests.length >= 1 && (
+              <button
+                onClick={() => setShowNormalize(!showNormalize)}
+                className="text-sm px-4 py-2 rounded-xl border border-white/20 bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+              >
+                {showNormalize ? 'Close' : 'Clean Up Names'}
+              </button>
+            )}
           </div>
+
+          {/* Marker-name normalization: backup → review → apply. Rewrites stored
+              names to canonical form. Non-destructive until you press Apply. */}
+          {showNormalize && (() => {
+            const changes = renamePreview();
+            return (
+              <div className="glass-card p-5 mb-6">
+                <h2 className="text-lg font-semibold text-white mb-1">Clean Up Marker Names</h2>
+                <p className="text-xs text-white/40 mb-4">
+                  Rewrites saved marker names to their canonical form (e.g. “LDL” → “LDL Cholesterol”) so the same marker always lines up over time. Only recognised markers are touched; anything unknown is left exactly as-is. <strong className="text-white/60">Download a backup first.</strong>
+                </p>
+                <div className="flex flex-wrap gap-3 items-center mb-4">
+                  <button onClick={downloadBackup} className="text-sm px-4 py-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-200/90 hover:bg-cyan-400/20 transition-all">↓ Download backup (JSON)</button>
+                  <button
+                    onClick={applyNormalization}
+                    disabled={normalizing || changes.length === 0}
+                    className="btn-primary text-sm px-5 py-2 disabled:opacity-40"
+                  >
+                    {normalizing ? 'Saving…' : changes.length === 0 ? 'Nothing to change' : `Apply ${changes.length} change${changes.length === 1 ? '' : 's'}`}
+                  </button>
+                  <span className="text-xs text-white/30">{changes.length === 0 ? 'All names already canonical.' : `${changes.length} value${changes.length === 1 ? '' : 's'} across your tests will be renamed.`}</span>
+                </div>
+                {changes.length > 0 && (
+                  <div className="max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-black/20 divide-y divide-white/5">
+                    {changes.map((c, i) => (
+                      <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                        <span className="text-white/25 w-16 shrink-0">{new Date(c.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
+                        <span className="text-white/50 line-through">{c.from}</span>
+                        <span className="text-white/30">→</span>
+                        <span className="text-cyan-200/90 font-medium">{c.to}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Lifestyle Dashboard */}
           <div className="glass-card p-5 mb-6">
@@ -1344,45 +1459,64 @@ export default function VitalsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {getComparisonData().map(marker => (
-                    <tr key={marker.name} className="border-t border-white/5">
-                      <td className="py-1.5 pr-4 text-white/60">{marker.name}</td>
-                      <td className="py-1.5 pr-4 text-white/20 text-right text-xs whitespace-nowrap">
-                        {marker.refMin != null && marker.refMax != null ? `${marker.refMin}–${marker.refMax}` : ''}
-                        {marker.unit ? ` ${marker.unit}` : ''}
-                      </td>
-                      {[...tests].reverse().map((test, colIdx, reversed) => {
-                        const val = test.values.find(v => v.name.toLowerCase() === marker.name.toLowerCase());
-                        if (!val) return <td key={test.id} className="py-1.5 px-2 text-right text-white/15">—</td>;
+                  {getComparisonData().map((marker, idx, arr) => {
+                    const showCat = idx === 0 || arr[idx - 1].category !== marker.category;
+                    return (
+                    <Fragment key={marker.key}>
+                      {showCat && (
+                        <tr>
+                          <td colSpan={tests.length + 2} className="pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/50">{marker.category}</td>
+                        </tr>
+                      )}
+                      <tr className="border-t border-white/5">
+                        <td className="py-1.5 pr-4 text-white/60">
+                          {marker.name}
+                          {marker.unitMismatch && <span title="Units differ across tests — values may not be directly comparable" className="ml-1 text-amber-400/70 text-[9px]">⚠</span>}
+                        </td>
+                        <td className="py-1.5 pr-4 text-white/20 text-right text-xs whitespace-nowrap">
+                          {marker.refMin != null && marker.refMax != null ? `${marker.refMin}–${marker.refMax}` : ''}
+                          {marker.unit ? ` ${marker.unit}` : ''}
+                        </td>
+                        {[...tests].reverse().map((test, colIdx, reversed) => {
+                          const val = test.values.find(v => canonicalize(v.name).key === marker.key);
+                          if (!val) return <td key={test.id} className="py-1.5 px-2 text-right text-white/15">—</td>;
 
-                        const isLow = marker.refMin != null && val.value < marker.refMin;
-                        const isHigh = marker.refMax != null && val.value > marker.refMax;
-                        const color = isLow ? 'text-yellow-400' : isHigh ? 'text-red-400' : 'text-white/70';
-                        const glowStyle = isLow ? { textShadow: '0 0 6px rgba(245,158,11,1), 0 0 15px rgba(245,158,11,0.5)' } : isHigh ? { textShadow: '0 0 6px rgba(239,68,68,1), 0 0 15px rgba(239,68,68,0.5)' } : {};
+                          // Convert to the marker's canonical unit for comparison/display.
+                          const conv = convertToCanonical(marker.key, val.value, val.unit);
+                          const shown = conv ? fmtValue(conv.value) : val.value;
 
-                        // Show diff only on the last column (newest), compared to previous
-                        const isLastCol = colIdx === reversed.length - 1;
-                        const prevTest = isLastCol && colIdx > 0 ? reversed[colIdx - 1] : null;
-                        const prevVal = prevTest?.values.find(v => v.name.toLowerCase() === marker.name.toLowerCase());
-                        const diff = prevVal ? val.value - prevVal.value : null;
+                          const isLow = marker.refMin != null && shown < marker.refMin;
+                          const isHigh = marker.refMax != null && shown > marker.refMax;
+                          const color = isLow ? 'text-yellow-400' : isHigh ? 'text-red-400' : 'text-white/70';
+                          const glowStyle = isLow ? { textShadow: '0 0 6px rgba(245,158,11,1), 0 0 15px rgba(245,158,11,0.5)' } : isHigh ? { textShadow: '0 0 6px rgba(239,68,68,1), 0 0 15px rgba(239,68,68,0.5)' } : {};
 
-                        // Don't show diff for text values
-                        const displayValue = val.textValue || val.value;
-                        const showDiff = !val.textValue && diff != null && diff !== 0;
+                          // Show diff only on the last column (newest), compared to previous
+                          const isLastCol = colIdx === reversed.length - 1;
+                          const prevTest = isLastCol && colIdx > 0 ? reversed[colIdx - 1] : null;
+                          const prevVal = prevTest?.values.find(v => canonicalize(v.name).key === marker.key);
+                          const prevConv = prevVal ? convertToCanonical(marker.key, prevVal.value, prevVal.unit) : null;
+                          const prevShown = prevVal ? (prevConv ? fmtValue(prevConv.value) : prevVal.value) : null;
+                          const diff = prevShown != null ? shown - prevShown : null;
 
-                        return (
-                          <td key={test.id} className={`py-1.5 px-2 text-right font-mono text-xs ${val.textValue ? 'text-white/50 font-sans' : color}`} style={val.textValue ? {} : glowStyle}>
-                            {displayValue}
-                            {showDiff && (
-                              <span className={`ml-1 text-[9px] ${diff! > 0 ? 'text-green-400/60' : 'text-red-400/60'}`}>
-                                {diff! > 0 ? '+' : ''}{Math.round(diff! * 10) / 10}
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                          // Don't show diff for text values
+                          const displayValue = val.textValue || shown;
+                          const showDiff = !val.textValue && diff != null && diff !== 0;
+
+                          return (
+                            <td key={test.id} className={`py-1.5 px-2 text-right font-mono text-xs ${val.textValue ? 'text-white/50 font-sans' : color}`} style={val.textValue ? {} : glowStyle}>
+                              {displayValue}
+                              {showDiff && (
+                                <span className={`ml-1 text-[9px] ${diff! > 0 ? 'text-green-400/60' : 'text-red-400/60'}`}>
+                                  {diff! > 0 ? '+' : ''}{Math.round(diff! * 10) / 10}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
               </div>

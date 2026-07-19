@@ -75,8 +75,10 @@ export default function Navigation() {
 
       </nav>
 
-      {/* Mobile top bar */}
-      <nav className="md:hidden fixed top-0 left-0 right-0 z-50 flex justify-center px-4 pt-[env(safe-area-inset-top,8px)]">
+      {/* Mobile top bar — translateZ(0) puts it on its own compositing layer so
+          the iOS WKWebView keeps it pinned during momentum scroll (otherwise a
+          fixed element can drift while scrolling in the native app). */}
+      <nav className="md:hidden fixed top-0 left-0 right-0 z-50 flex justify-center px-4 pt-[env(safe-area-inset-top,8px)] [transform:translateZ(0)] [will-change:transform]">
         <div className="glass-strong rounded-2xl max-w-5xl w-full">
           <div className="flex justify-around items-center py-1.5 px-2">
             {navItems.map((item) => {
