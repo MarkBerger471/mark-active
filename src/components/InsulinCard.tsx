@@ -33,6 +33,14 @@ function mealHour(name: string): number | null {
 
 const isIntra = (n: string) => /during workout|intra/i.test(n);
 
+// Correction = insulin to bring down a high glucose, no meal/carbs. Repeatable
+// (unlike meals, which are once-per-day).
+const CORRECTION = 'Correction';
+// Local calendar-day key for the "once per day" rule.
+const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
+type PickerMeal = { name: string; carbs: number; hour: number | null; timed: boolean; correction: boolean; done: boolean };
+
 // Horizontal snap scroll wheel for whole-unit selection.
 function UnitScroller({ value, max, onChange }: { value: number; max: number; onChange: (v: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -123,20 +131,54 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, glucose, nowTs]);
 
-  const meals = useMemo(() => {
-    if (!nutritionPlan) return [] as { name: string; carbs: number; hour: number | null }[];
-    return nutritionPlan.current.trainingDay.meals
-      .map(m => ({ name: m.name, carbs: mealCarbs(m), hour: mealHour(m.name) }))
-      .filter(m => m.carbs > 0 || isIntra(m.name));
-  }, [nutritionPlan]);
+  // Meals already logged today (excludes Correction, which is repeatable).
+  const todayKey = localDay(new Date(nowTs));
+  const doneToday = useMemo(() => {
+    const s = new Set<string>();
+    for (const dz of doses) if (dz.mealName !== CORRECTION && localDay(new Date(dz.timestamp)) === todayKey) s.add(dz.mealName);
+    return s;
+  }, [doses, todayKey]);
 
-  useEffect(() => {
-    if (selectedMeal || meals.length === 0) return;
+  // Picker list = Correction chip first, then the plan meals (with done flags).
+  const meals = useMemo<PickerMeal[]>(() => {
+    if (!nutritionPlan) return [];
+    const plan = nutritionPlan.current.trainingDay.meals
+      .map(m => {
+        const hour = mealHour(m.name);
+        return { name: m.name, carbs: mealCarbs(m), hour, timed: hour != null, correction: false, done: doneToday.has(m.name) };
+      })
+      .filter(m => m.carbs > 0 || isIntra(m.name));
+    const correction: PickerMeal = { name: CORRECTION, carbs: 0, hour: null, timed: false, correction: true, done: false };
+    return [correction, ...plan];
+  }, [nutritionPlan, doneToday]);
+
+  // The "next" meal = earliest not-yet-done TIMED meal that's current/upcoming
+  // (within 2h grace of its scheduled time). Floating workout meals aren't in
+  // the auto-sequence. When everything's done → Correction.
+  const nextMealName = useMemo(() => {
     const d = new Date(nowTs); const nowH = d.getHours() + d.getMinutes() / 60;
-    let best = meals[0].name, bestDiff = Infinity;
-    for (const m of meals) { if (m.hour == null) continue; const diff = Math.abs(m.hour - nowH); if (diff < bestDiff) { bestDiff = diff; best = m.name; } }
-    setSelectedMeal(best);
-  }, [meals, nowTs, selectedMeal]);
+    const timedNotDone = meals.filter(m => m.timed && !m.done).sort((a, b) => (a.hour! - b.hour!));
+    const next = timedNotDone.find(m => m.hour! >= nowH - 2) ?? timedNotDone[0];
+    return next?.name ?? CORRECTION;
+  }, [meals, nowTs]);
+
+  // Auto-advance the marker to the next meal whenever it changes (i.e. after a
+  // meal is logged). Manual taps hold until the next auto-change.
+  const lastAutoRef = useRef<string>('');
+  useEffect(() => {
+    if (nextMealName && nextMealName !== lastAutoRef.current) {
+      lastAutoRef.current = nextMealName;
+      setSelectedMeal(nextMealName);
+    }
+  }, [nextMealName]);
+
+  // Keep the selected meal centred in the horizontal strip.
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const c = stripRef.current; if (!c) return;
+    const btn = c.querySelector('[data-sel="1"]') as HTMLElement | null;
+    if (btn) c.scrollTo({ left: btn.offsetLeft - (c.clientWidth - btn.offsetWidth) / 2, behavior: 'smooth' });
+  }, [selectedMeal, meals]);
 
   const meal = meals.find(m => m.name === selectedMeal);
   const now = new Date(nowTs);
@@ -220,15 +262,29 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
           </div>
         )}
 
-        {/* MEAL picker — big, scrollable */}
-        <div className="mb-4 flex gap-2 overflow-x-auto snap-x snap-mandatory [&::-webkit-scrollbar]:hidden pb-1" style={{ scrollbarWidth: 'none' }}>
+        {/* MEAL picker — big, scrollable; auto-centres on the next meal.
+            Done meals are greyed + non-selectable (no meal twice a day).
+            "⚡ Correction" is always available and repeatable. */}
+        <div ref={stripRef} className="mb-4 flex gap-2 overflow-x-auto snap-x snap-mandatory [&::-webkit-scrollbar]:hidden pb-1" style={{ scrollbarWidth: 'none' }}>
           {meals.map(m => {
             const on = m.name === selectedMeal;
+            const isCorr = m.correction;
+            const done = m.done;
             return (
-              <button key={m.name} onClick={() => setSelectedMeal(m.name)}
-                className={`snap-center shrink-0 rounded-2xl border px-4 py-2.5 text-left transition-all ${on ? 'border-cyan-300/40 bg-gradient-to-br from-cyan-500/20 to-blue-600/10 shadow-[0_2px_20px_rgba(34,211,238,0.12)]' : 'border-white/[0.06] bg-white/[0.03]'}`}>
-                <div className={`text-sm font-bold leading-tight ${on ? 'text-white' : 'text-white/45'}`}>{m.name}</div>
-                <div className={`text-[10px] ${on ? 'text-cyan-200/70' : 'text-white/30'}`}>{m.carbs} g carbs</div>
+              <button key={m.name} data-sel={on ? '1' : '0'} disabled={done}
+                onClick={() => !done && setSelectedMeal(m.name)}
+                className={`snap-center shrink-0 rounded-2xl border px-4 py-2.5 text-left transition-all ${
+                  done ? 'border-white/[0.04] bg-white/[0.015] opacity-50 cursor-default'
+                  : on
+                    ? (isCorr ? 'border-amber-300/40 bg-gradient-to-br from-amber-500/20 to-orange-600/10 shadow-[0_2px_20px_rgba(251,191,36,0.12)]'
+                              : 'border-cyan-300/40 bg-gradient-to-br from-cyan-500/20 to-blue-600/10 shadow-[0_2px_20px_rgba(34,211,238,0.12)]')
+                    : 'border-white/[0.06] bg-white/[0.03]'}`}>
+                <div className={`text-sm font-bold leading-tight ${on ? (isCorr ? 'text-amber-100' : 'text-white') : 'text-white/45'}`}>
+                  {isCorr ? '⚡ Correction' : m.name}
+                </div>
+                <div className={`text-[10px] ${on ? (isCorr ? 'text-amber-200/70' : 'text-cyan-200/70') : 'text-white/30'}`}>
+                  {done ? '✓ done' : isCorr ? 'high glucose' : `${m.carbs} g carbs`}
+                </div>
               </button>
             );
           })}
@@ -252,8 +308,10 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
               </div>
               {!locked && (
                 <div className="mt-1 text-[9px] text-white/30">
-                  {proposal.block} · carb {Math.round(proposal.breakdown.carbBolus)}u
+                  {proposal.block}
+                  {proposal.breakdown.carbBolus > 0 ? ` · carb ${Math.round(proposal.breakdown.carbBolus)}u` : ''}
                   {proposal.breakdown.correctionBolus > 0 ? ` + corr ${Math.round(proposal.breakdown.correctionBolus)}u` : ''}
+                  {proposal.breakdown.carbBolus === 0 && proposal.breakdown.correctionBolus === 0 ? ' · nothing to dose' : ''}
                   {proposal.breakdown.trendAdjPct !== 0 ? ` · trend ${proposal.breakdown.trendAdjPct > 0 ? '+' : ''}${proposal.breakdown.trendAdjPct}%` : ''}
                   {proposal.breakdown.iob > 0 ? ` · −${Math.round(proposal.breakdown.iob)}u IOB` : ''}
                   {` · ICR ${proposal.breakdown.icr} · ISF ${proposal.breakdown.isf}`}

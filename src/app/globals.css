@@ -17,13 +17,11 @@
 :root {
   --background: #0f0f1a;
   --foreground: #f1f5f9;
-  --pwa-top-offset: 8rem; /* pt-32 */
-}
-
-@media all and (display-mode: standalone) {
-  :root {
-    --pwa-top-offset: 10rem;
-  }
+  /* Clearance below the fixed mobile nav pill. Includes the device safe-area
+     (notch / Dynamic Island) so the page headline can never collide with the
+     nav, on any device, in the browser, PWA, or the native (Capacitor) app.
+     ~5.6rem covers the pill height; env() adds the safe area on top. */
+  --pwa-top-offset: calc(env(safe-area-inset-top, 0px) + 5.6rem);
 }
 
 body {
