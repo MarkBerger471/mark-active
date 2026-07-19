@@ -98,6 +98,9 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const [showHistory, setShowHistory] = useState(false);
   const [rescueCarbs, setRescueCarbs] = useState<string>('');
   const [saved, setSaved] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editMeal, setEditMeal] = useState('');
+  const [editUnits, setEditUnits] = useState(0);
 
   useEffect(() => {
     getInsulinSettings().then(setSettings);
@@ -203,7 +206,22 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     return doses.filter(d => new Date(d.timestamp).getTime() >= cutoff)
       .reduce((s, d) => s + (d.actualUnits || 0), 0) / 14;
   }, [doses, nowTs]);
-  const tddCheck = settings ? tddSanityCheck(settings, avgDailyBolus) : null;
+  // Expected daily bolus straight from the plan: Σ (meal carbs ÷ block ICR).
+  // Uses your real meal carbs, so the TDD check is accurate without weeks of
+  // logging. (Corrections aren't included — the carb bolus dominates the total.)
+  const planBolus = useMemo(() => {
+    if (!settings) return 0;
+    return meals.reduce((s, m) => {
+      if (m.correction || m.carbs <= 0) return s;
+      const icr = (m.hour != null && m.hour < settings.cutoverHour) ? settings.icrMorning : settings.icrEvening;
+      return s + (icr > 0 ? m.carbs / icr : 0);
+    }, 0);
+  }, [meals, settings]);
+  // Priority: your manual override → plan estimate → 14-day logged average.
+  const bolusSource: 'manual' | 'plan' | 'log' =
+    settings && (settings.typicalBolus || 0) > 0 ? 'manual' : planBolus > 0 ? 'plan' : 'log';
+  const effectiveBolus = bolusSource === 'manual' ? settings!.typicalBolus : bolusSource === 'plan' ? planBolus : avgDailyBolus;
+  const tddCheck = settings ? tddSanityCheck(settings, effectiveBolus) : null;
 
   const saveDose = useCallback(async () => {
     if (!settings || !glucose?.current || !meal || !proposal) return;
@@ -229,6 +247,22 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     if (!settings) return; const next = { ...settings, ...patch }; setSettings(next); saveInsulinSettings(next);
   };
 
+  // Log editing — relabel / re-unit / delete a past entry.
+  const deleteEntry = useCallback(async (id: string) => {
+    const next = log.filter(e => e.id !== id);
+    setLog(next); await saveInsulinLog(next);
+    setEditId(cur => (cur === id ? null : cur));
+  }, [log]);
+  const openEdit = (e: InsulinDose) => { setEditId(e.id); setEditMeal(e.mealName); setEditUnits(e.actualUnits); };
+  const saveEntryEdit = useCallback(async () => {
+    if (!editId) return;
+    const next = log.map(e => (e.id === editId && e.kind === 'dose') ? { ...e, mealName: editMeal, actualUnits: editUnits } : e);
+    setLog(next); await saveInsulinLog(next); setEditId(null);
+  }, [editId, editMeal, editUnits, log]);
+
+  // Reliable select-all on focus (iOS number inputs ignore .select(); text does).
+  const selectAll = (el: HTMLInputElement) => setTimeout(() => { try { el.select(); } catch {} }, 0);
+
   if (!settings) return null;
   const gc = glucose?.current;
   const recent = log.slice(0, 7);  // last 7 ≈ one day — always shown
@@ -236,21 +270,50 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const locked = proposal?.lockout;
 
   const fmtTime = (ts: string) => new Date(ts).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  const renderEntry = (e: InsulinEvent) => e.kind === 'rescue' ? (
-    <div key={e.id} className="flex items-center justify-between text-[9px]">
-      <span className="text-amber-300/50">{fmtTime(e.timestamp)} · rescue {e.carbs}g</span>
-      <span className="text-white/20">excluded</span>
-    </div>
-  ) : (
-    <div key={e.id} className="flex items-center justify-between text-[9px]">
-      <span className="text-white/45">{fmtTime(e.timestamp)} · {e.mealName} · <strong className="text-white/65">{e.actualUnits}u</strong> @{e.glucoseBefore}</span>
-      {e.verify ? (
-        <span className={e.verify.confounded ? 'text-white/25' : e.verify.status === 'on-target' ? 'text-green-400/70' : e.verify.status === 'high' ? 'text-amber-300/70' : 'text-red-400/70'}>
-          3h {e.verify.glucoseAfter} {e.verify.confounded ? '(conf.)' : e.verify.status === 'on-target' ? '✓' : e.verify.status === 'high' ? '↑' : '↓'}
-        </span>
-      ) : <span className="text-white/20">pending</span>}
-    </div>
-  );
+  const mealOptions = meals.map(m => m.name);
+  const renderEntry = (e: InsulinEvent) => {
+    // Inline editor for a dose row (relabel meal + change units).
+    if (editId === e.id && e.kind === 'dose') {
+      const opts = mealOptions.includes(editMeal) ? mealOptions : [editMeal, ...mealOptions];
+      return (
+        <div key={e.id} className="flex items-center gap-1.5 text-[9px] py-0.5">
+          <span className="text-white/30 shrink-0">{fmtTime(e.timestamp)}</span>
+          <select value={editMeal} onChange={ev => setEditMeal(ev.target.value)}
+            className="min-w-0 flex-1 rounded bg-white/5 px-1 py-0.5 text-white/80 border border-white/10 outline-none">
+            {opts.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <input type="text" inputMode="decimal" value={editUnits} onFocus={ev => selectAll(ev.currentTarget)}
+            onChange={ev => setEditUnits(parseFloat(ev.target.value) || 0)}
+            className="w-9 rounded bg-white/5 px-1 py-0.5 text-right text-white/80 border border-white/10 outline-none no-spinners" />
+          <span className="text-white/30">u</span>
+          <button onClick={saveEntryEdit} className="rounded border border-cyan-400/30 px-1.5 py-0.5 text-cyan-300/80">save</button>
+          <button onClick={() => setEditId(null)} className="text-white/30 px-1">✕</button>
+        </div>
+      );
+    }
+    return e.kind === 'rescue' ? (
+      <div key={e.id} className="flex items-center justify-between gap-2 text-[9px]">
+        <span className="text-amber-300/50">{fmtTime(e.timestamp)} · rescue {e.carbs}g</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-white/20">excluded</span>
+          <button onClick={() => deleteEntry(e.id)} className="text-red-400/40 hover:text-red-400/80">✕</button>
+        </div>
+      </div>
+    ) : (
+      <div key={e.id} className="flex items-center justify-between gap-2 text-[9px]">
+        <span className="text-white/45 min-w-0 truncate">{fmtTime(e.timestamp)} · {e.mealName} · <strong className="text-white/65">{e.actualUnits}u</strong> @{e.glucoseBefore}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {e.verify ? (
+            <span className={e.verify.confounded ? 'text-white/25' : e.verify.status === 'on-target' ? 'text-green-400/70' : e.verify.status === 'high' ? 'text-amber-300/70' : 'text-red-400/70'}>
+              3h {e.verify.glucoseAfter} {e.verify.confounded ? '(conf.)' : e.verify.status === 'on-target' ? '✓' : e.verify.status === 'high' ? '↑' : '↓'}
+            </span>
+          ) : <span className="text-white/20">pending</span>}
+          <button onClick={() => openEdit(e)} className="text-white/30 hover:text-cyan-300/70">✎</button>
+          <button onClick={() => deleteEntry(e.id)} className="text-red-400/40 hover:text-red-400/80">✕</button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="glass-card mb-6 fade-up overflow-hidden">
@@ -281,7 +344,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
               ] as [string, keyof InsulinSettings][]).map(([label, key]) => (
                 <label key={key} className="flex items-center justify-between gap-1 text-white/40">
                   <span className="truncate">{label}</span>
-                  <input type="number" step="1" value={settings[key]}
+                  <input type="text" inputMode="decimal" value={settings[key]} onFocus={e => selectAll(e.currentTarget)}
                     onChange={e => updateSetting({ [key]: parseFloat(e.target.value) || 0 } as Partial<InsulinSettings>)}
                     className="w-11 rounded bg-white/5 px-1.5 py-0.5 text-right font-mono tabular-nums text-white/80 no-spinners border border-white/5 focus:border-cyan-400/40 outline-none" />
                 </label>
@@ -290,14 +353,20 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
 
             {/* Basal + TDD sanity check — CONTEXT ONLY, never used for dosing. */}
             <div className="rounded-xl border border-white/8 bg-black/20 p-3 text-[10px]">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-4 flex-wrap">
                 <label className="flex items-center gap-2 text-white/50">
-                  <span>Basal (units/day)</span>
-                  <input type="number" step="1" value={settings.basalDose || 0}
+                  <span>Basal u/day</span>
+                  <input type="text" inputMode="decimal" value={settings.basalDose || 0} onFocus={e => selectAll(e.currentTarget)}
                     onChange={e => updateSetting({ basalDose: parseFloat(e.target.value) || 0 })}
                     className="w-14 rounded bg-white/5 px-1.5 py-0.5 text-right font-mono tabular-nums text-white/80 no-spinners border border-white/5 focus:border-cyan-400/40 outline-none" />
                 </label>
-                {tddCheck && <span className="text-white/30">TDD ~{tddCheck.tdd.toFixed(0)}u · basal {tddCheck.basalPct.toFixed(0)}%</span>}
+                <label className="flex items-center gap-2 text-white/50">
+                  <span>Bolus u/day</span>
+                  <input type="text" inputMode="decimal" value={settings.typicalBolus || 0} onFocus={e => selectAll(e.currentTarget)}
+                    onChange={e => updateSetting({ typicalBolus: parseFloat(e.target.value) || 0 })}
+                    className="w-14 rounded bg-white/5 px-1.5 py-0.5 text-right font-mono tabular-nums text-white/80 no-spinners border border-white/5 focus:border-cyan-400/40 outline-none" />
+                </label>
+                {tddCheck && <span className="text-white/30 ml-auto">TDD ~{tddCheck.tdd.toFixed(0)}u · basal {tddCheck.basalPct.toFixed(0)}%</span>}
               </div>
               {!tddCheck ? (
                 <div className="mt-1 text-white/25">Enter your daily basal to cross-check ICR/ISF against the TDD rules. Basal is never part of the dose math.</div>
@@ -311,6 +380,12 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                       {tddCheck.notes.map((n, i) => <li key={i} className={tddCheck.reliable ? 'text-amber-300/60' : 'text-white/30'}>{tddCheck.reliable ? '⚠ ' : ''}{n}</li>)}
                     </ul>
                   ) : <span className="text-green-400/50">Looks consistent with the TDD rules.</span>}
+                  {bolusSource === 'plan' && (
+                    <div className="mt-1 text-white/25">Bolus/day estimated from your meal plan (Σ carbs ÷ ICR). Enter a value in Bolus u/day to override.</div>
+                  )}
+                  {bolusSource === 'log' && (
+                    <div className="mt-1 text-white/25">Bolus/day estimated from logged doses (needs ~2 weeks of full logging). Enter your typical daily bolus above for an accurate check now.</div>
+                  )}
                 </div>
               )}
             </div>

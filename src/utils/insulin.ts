@@ -33,6 +33,9 @@ export interface InsulinSettings {
                         // NEVER part of the bolus math (basal is background
                         // insulin; subtracting it from a meal bolus would
                         // under-dose). 0 = not set.
+  typicalBolus: number; // typical total bolus units/day for the TDD check.
+                        // 0 = derive from the logged doses (needs ~2 weeks of
+                        // complete logging to be accurate). CONTEXT ONLY.
 }
 
 // Seeded conservatively (biased toward under-dosing) from the user's ISF via
@@ -50,6 +53,7 @@ export const DEFAULT_INSULIN_SETTINGS: InsulinSettings = {
   diaHours: 4,
   checkAfterHours: 3,
   basalDose: 0,
+  typicalBolus: 0,
 };
 
 // Rough plausibility cross-check on ICR/ISF from the classic total-daily-dose

@@ -32,6 +32,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: '#0a0a0a',
   viewportFit: 'cover',
+  // Allow pinch-zoom (disabled by default in the native WKWebView).
+  initialScale: 1,
+  minimumScale: 1,
+  maximumScale: 5,
+  userScalable: true,
 };
 
 export default function RootLayout({
