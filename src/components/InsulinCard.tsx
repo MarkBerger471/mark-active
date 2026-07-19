@@ -45,6 +45,25 @@ const toLocalInput = (iso: string) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
+// Unique id per log entry — the old `d${nowTs}` scheme reused the (fixed)
+// mount timestamp, so every entry logged in a session collided, which broke
+// edit/delete/keys.
+const uid = (prefix: 'd' | 'r') => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+// Repair a loaded log so every entry has a unique id (fixes the historical
+// duplicate-id data written by the old scheme). Returns whether anything moved.
+function ensureUniqueIds(log: InsulinEvent[]): { log: InsulinEvent[]; changed: boolean } {
+  const seen = new Set<string>();
+  let changed = false;
+  const out = log.map(e => {
+    let id = e.id;
+    if (!id || seen.has(id)) { id = uid(e.kind === 'rescue' ? 'r' : 'd'); changed = true; }
+    seen.add(id);
+    return id === e.id ? e : { ...e, id };
+  });
+  return { log: out, changed };
+}
+
 type PickerMeal = { name: string; carbs: number; hour: number | null; timed: boolean; correction: boolean; done: boolean };
 
 // Horizontal snap scroll wheel for whole-unit selection.
@@ -111,7 +130,11 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
 
   useEffect(() => {
     getInsulinSettings().then(setSettings);
-    getInsulinLog().then(setLog);
+    getInsulinLog().then(l => {
+      const { log: fixed, changed } = ensureUniqueIds(l);
+      setLog(fixed);
+      if (changed) saveInsulinLog(fixed); // one-time repair of duplicate ids
+    });
   }, []);
 
   const doses = useMemo(() => log.filter((e): e is InsulinDose => e.kind === 'dose'), [log]);
@@ -234,7 +257,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     if (!settings || !glucose?.current || !meal || !proposal) return;
     const gc = glucose.current;
     const dose: InsulinDose = {
-      id: `d${nowTs}`, kind: 'dose', timestamp: now.toISOString(), mealName: meal.name, mealCarbs: meal.carbs,
+      id: uid('d'), kind: 'dose', timestamp: new Date().toISOString(), mealName: meal.name, mealCarbs: meal.carbs,
       glucoseBefore: gc.value, trendBefore: gc.trendRaw, block: proposal.block,
       proposedUnits: proposal.proposed, actualUnits, breakdown: proposal.breakdown,
     };
@@ -246,7 +269,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
 
   const saveRescue = useCallback(async () => {
     const c = parseFloat(rescueCarbs); if (!c || c <= 0) return;
-    const ev: RescueEvent = { id: `r${nowTs}`, kind: 'rescue', timestamp: new Date().toISOString(), carbs: c };
+    const ev: RescueEvent = { id: uid('r'), kind: 'rescue', timestamp: new Date().toISOString(), carbs: c };
     const next = [ev, ...log]; setLog(next); await saveInsulinLog(next); setRescueCarbs('');
   }, [rescueCarbs, log, nowTs]);
 
