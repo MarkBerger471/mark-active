@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { NutritionPlan, NutritionMeal } from '@/types';
 import {
-  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR,
+  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, tddSanityCheck,
   type InsulinSettings, type InsulinDose, type RescueEvent, type InsulinEvent,
 } from '@/utils/insulin';
 import { getInsulinSettings, saveInsulinSettings, getInsulinLog, saveInsulinLog } from '@/utils/storage';
@@ -197,6 +197,14 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const iob = settings ? calcIOB(doses, now, settings.diaHours) : 0;
   const empirical = useMemo(() => settings ? estimateEmpiricalICR(doses, settings) : {}, [doses, settings]);
 
+  // Average daily bolus over the last 14 days → total daily dose sanity check.
+  const avgDailyBolus = useMemo(() => {
+    const cutoff = nowTs - 14 * 86400000;
+    return doses.filter(d => new Date(d.timestamp).getTime() >= cutoff)
+      .reduce((s, d) => s + (d.actualUnits || 0), 0) / 14;
+  }, [doses, nowTs]);
+  const tddCheck = settings ? tddSanityCheck(settings, avgDailyBolus) : null;
+
   const saveDose = useCallback(async () => {
     if (!settings || !glucose?.current || !meal || !proposal) return;
     const gc = glucose.current;
@@ -263,20 +271,49 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
       <div className="px-5 pb-4">
         {/* Settings (compact) */}
         {showSettings && (
-          <div className="mb-4 grid grid-cols-3 gap-x-3 gap-y-1.5 rounded-xl border border-white/8 bg-black/20 p-3 text-[10px]">
-            {([
-              ['ICR AM', 'icrMorning'], ['ICR PM', 'icrEvening'], ['cutover h', 'cutoverHour'],
-              ['ISF AM', 'isfMorning'], ['ISF PM', 'isfEvening'], ['max u', 'maxDose'],
-              ['tgt low', 'targetLow'], ['tgt mid', 'targetMid'], ['tgt high', 'targetHigh'],
-              ['DIA h', 'diaHours'], ['check h', 'checkAfterHours'],
-            ] as [string, keyof InsulinSettings][]).map(([label, key]) => (
-              <label key={key} className="flex items-center justify-between gap-1 text-white/40">
-                <span className="truncate">{label}</span>
-                <input type="number" step="1" value={settings[key]}
-                  onChange={e => updateSetting({ [key]: parseFloat(e.target.value) || 0 } as Partial<InsulinSettings>)}
-                  className="w-11 rounded bg-white/5 px-1.5 py-0.5 text-right font-mono tabular-nums text-white/80 no-spinners border border-white/5 focus:border-cyan-400/40 outline-none" />
-              </label>
-            ))}
+          <div className="mb-4 space-y-2">
+            <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 rounded-xl border border-white/8 bg-black/20 p-3 text-[10px]">
+              {([
+                ['ICR AM', 'icrMorning'], ['ICR PM', 'icrEvening'], ['cutover h', 'cutoverHour'],
+                ['ISF AM', 'isfMorning'], ['ISF PM', 'isfEvening'], ['max u', 'maxDose'],
+                ['tgt low', 'targetLow'], ['tgt mid', 'targetMid'], ['tgt high', 'targetHigh'],
+                ['DIA h', 'diaHours'], ['check h', 'checkAfterHours'],
+              ] as [string, keyof InsulinSettings][]).map(([label, key]) => (
+                <label key={key} className="flex items-center justify-between gap-1 text-white/40">
+                  <span className="truncate">{label}</span>
+                  <input type="number" step="1" value={settings[key]}
+                    onChange={e => updateSetting({ [key]: parseFloat(e.target.value) || 0 } as Partial<InsulinSettings>)}
+                    className="w-11 rounded bg-white/5 px-1.5 py-0.5 text-right font-mono tabular-nums text-white/80 no-spinners border border-white/5 focus:border-cyan-400/40 outline-none" />
+                </label>
+              ))}
+            </div>
+
+            {/* Basal + TDD sanity check — CONTEXT ONLY, never used for dosing. */}
+            <div className="rounded-xl border border-white/8 bg-black/20 p-3 text-[10px]">
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-white/50">
+                  <span>Basal (units/day)</span>
+                  <input type="number" step="1" value={settings.basalDose || 0}
+                    onChange={e => updateSetting({ basalDose: parseFloat(e.target.value) || 0 })}
+                    className="w-14 rounded bg-white/5 px-1.5 py-0.5 text-right font-mono tabular-nums text-white/80 no-spinners border border-white/5 focus:border-cyan-400/40 outline-none" />
+                </label>
+                {tddCheck && <span className="text-white/30">TDD ~{tddCheck.tdd.toFixed(0)}u · basal {tddCheck.basalPct.toFixed(0)}%</span>}
+              </div>
+              {!tddCheck ? (
+                <div className="mt-1 text-white/25">Enter your daily basal to cross-check ICR/ISF against the TDD rules. Basal is never part of the dose math.</div>
+              ) : (
+                <div className="mt-1.5 text-white/35 leading-relaxed">
+                  {tddCheck.reliable && (
+                    <span><span className="text-cyan-300/50">Sanity check (not used for dosing):</span> 500-rule ICR ~{tddCheck.expectedICR.toFixed(1)} g/u · 1800-rule ISF ~{tddCheck.expectedISF.toFixed(0)} mg/dL/u. </span>
+                  )}
+                  {tddCheck.notes.length > 0 ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {tddCheck.notes.map((n, i) => <li key={i} className={tddCheck.reliable ? 'text-amber-300/60' : 'text-white/30'}>{tddCheck.reliable ? '⚠ ' : ''}{n}</li>)}
+                    </ul>
+                  ) : <span className="text-green-400/50">Looks consistent with the TDD rules.</span>}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

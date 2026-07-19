@@ -31,6 +31,10 @@ export interface Measurement {
     back?: string;
   };
   lastModified?: number;
+  deleted?: boolean;     // soft-delete tombstone: filtered from all reads, but
+                         // syncs like a normal record so the delete propagates
+                         // to every device (a hard delete gets re-pushed by
+                         // replicas that still hold the row).
 }
 
 export interface TrainingDay {

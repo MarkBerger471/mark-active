@@ -25,6 +25,11 @@ Files: `src/utils/insulin.ts` (pure math + types), `src/components/InsulinCard.t
   window they touch is flagged confounded.
 - **Info-only learning signal** (`estimateEmpiricalICR`): shows what the data
   implies the ICR should be per block, but does **not** change settings.
+- **Basal (context only, added 2026-07-19):** optional daily basal input drives a
+  total-daily-dose plausibility cross-check (`tddSanityCheck` — 500-rule ICR,
+  1800-rule ISF, basal ≈ 40–60 % of TDD) that flags settings sitting far outside
+  the ballpark. Basal is **never** part of the bolus math (it is background
+  insulin; subtracting it from a meal bolus would under-dose).
 
 **Seeded params (all editable):** ICR AM 7 / PM 12 g·u⁻¹ (from 500-rule, biased
 safe), ISF AM 20 / PM 40 mg·dL⁻¹·u⁻¹ (Mark's values), target 80–120 (correct
@@ -68,10 +73,78 @@ with graduated trust and Mark's control over how much autonomy it has.
   lunch 15:00, dinner, intra-drink) where the data supports distinct values.
 - The floating intra-workout meal keys off its *actual* logged time.
 
-### 3. Exercise-sensitivity adjustment
-- The app already has `trainingSessions`. Learn how much a workout (and its
-  size/recency) raises insulin sensitivity → auto-trim the dose for meals near
-  training. Highest value for the intra-workout drink.
+### 3. Exercise-sensitivity adjustment (activity-aware dosing)
+
+**Why it matters.** Activity is one of the largest modifiers of insulin need:
+- *Aerobic / endurance* raises insulin sensitivity and drives largely
+  insulin-independent muscle glucose uptake (GLUT4) → glucose falls, insulin need
+  drops **during and after**. Sensitivity stays elevated ~24–48 h, so the night
+  after an afternoon/evening session is a classic nocturnal-low window.
+- *Intense / heavy resistance / competitive stress* can do the **opposite**
+  acutely — catecholamines + cortisol raise glucose. So activity does **not**
+  always mean "less insulin," and the design must not assume it does.
+
+The goal is to **reduce hypo risk around training by trimming aggressiveness** —
+never to add insulin automatically.
+
+**Signals available today.**
+- Daily **active calories + step count** — Apple Watch and Oura, already synced
+  (`health-activity` collection + Oura feed) and cached on the dashboard.
+- **Training log** (`trainingSessions`) — cardio vs lifting, and, where logged,
+  session time + duration.
+- Oura **readiness / HRV** as a coarse recovery proxy.
+
+**Gap that matters:** the current feeds are **day-level aggregates**. The
+sensitivity effect is strongly *time-dependent* (a session 1 h before a meal ≠
+6 h before), and the app does not yet know a workout's timing relative to a
+specific dose. So the first version must be **coarse and conservative**.
+
+**Design — one-directional, bounded trim.**
+1. Derive an **activity load** for the window: today's active calories / steps vs
+   the user's own rolling baseline (e.g. 28-day median), plus a "workout within
+   N h" flag from the training log.
+2. Map load → a sensitivity factor that can **only reduce insulin** (or raise the
+   target), never increase it:
+   - trim the *carb bolus* and/or *correction* by up to a capped % (endo-set,
+     e.g. ≤ 25 %), scaled by how far activity exceeds baseline and how recent the
+     session was; and/or
+   - raise the correction **target** for a defined post-exercise window (e.g.
+     +20 mg/dL for M hours after cardio).
+3. Apply a **longer trailing window** for the post-exercise tail (rest of day +
+   overnight after an afternoon/evening session).
+4. **Resistance / HIIT transient hyperglycemia:** never auto-*increase* the dose —
+   at most suppress the trim (floor at zero) and show a warning.
+
+**Safety rails (non-negotiable).**
+- **One-directional** — can only lower the dose / raise the target vs the Phase-1
+  baseline; never adds insulin.
+- **Bounded magnitude** — hard cap on max trim % (endo-set).
+- **Fail-safe** — no / stale activity data → no trim (default to baseline).
+- **Never overrides Phase-1 guards** — lockout, max cap, IOB, stale/falling
+  warnings all still apply on top.
+- **Suggest-and-approve** until earned; auto-apply only after validation + endo
+  sign-off.
+- **Transparent** — every proposal shows the trim and its reason ("−15 % carb
+  bolus: activity 1.8× baseline, cardio 2 h ago").
+
+**Validation before auto-apply.** Backtest against logged doses + 3-hour outcomes
+(same method as the ICR/ISF learner and the TDEE backtest): would trimmed doses
+have landed closer to target on high-activity days *without* inducing lows? Enable
+auto only when trimmed-dose predictions are reliably on-target and never
+systematically low.
+
+**Data upgrades that would help.**
+- Capture **workout timing** relative to doses (explicit "trained at HH:MM" or
+  intraday activity) so the trim can be peri-meal, not whole-day.
+- Distinguish **aerobic vs resistance** from the workout name to handle the
+  transient-hyperglycemia case.
+
+**Questions for the endocrinologist.**
+- Max trim %, and the activity thresholds that should trigger it.
+- Prefer **trimming the dose** vs **raising the target** (or both), and for how
+  long post-exercise.
+- How to treat resistance / HIIT days (suppress trim, or warn only?).
+- Overnight handling after afternoon/evening sessions.
 
 ### 4. Better IOB + personal insulin duration
 - Replace linear IOB with a proper Fiasp activity curve (bilinear/exponential).

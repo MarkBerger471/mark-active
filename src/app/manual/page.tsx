@@ -9,6 +9,53 @@ import Navigation from '@/components/Navigation';
 // change ships (formula change, food DB correction, UX change, etc).
 const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   {
+    date: '2026-07-19',
+    title: 'Vitals: marker canonicalization, unit conversion, comparison deltas',
+    items: [
+      'Canonical marker registry (src/utils/markers.ts) aligns name variants — "LDL" and "LDL-Cholesterol" now share one comparison row. Markers are grouped by clinical category (Hematology → Metabolic → Lipids → Liver → Kidney → …) in a logical within-category order, with category subheaders',
+      'Unit reconciliation: each marker has a canonical unit + conversion factors. Values and reference ranges are converted for display (e.g. cholesterol mmol/L → mg/dL); your stored raw values are never rewritten. Cell counts (RBC / WBC / platelets) are rescued by magnitude, so a raw count like 5,030,000 shows as 5.03 ×10⁶/µL regardless of the unit string',
+      'HbA1c (mmol/mol ↔ % is non-linear) and BUN-in-mmol/L (ambiguous vs urea) are deliberately not auto-converted — flagged instead of guessed',
+      'Comparison delta now looks back to the most recent prior test that actually measured the marker (skips gaps), and is coloured by clinical meaning — moving toward the reference range = green, away = red — not by the +/- sign',
+      '"Clean Up Names" panel: download backup → preview every rename → apply. Rewrites stored names to canonical form; new/edited tests auto-canonicalize on save',
+    ],
+  },
+  {
+    date: '2026-07-19',
+    title: 'Insulin bolus calculator (Fiasp) — Phase 1',
+    items: [
+      'New dashboard card. Proposes a whole-unit dose = carbs/ICR + (glucose − target)/ISF ± trend − IOB, capped and floored. Separate AM/PM ICR + ISF blocks with a noon cutover',
+      'Meal selector auto-picks the next meal by time of day and meals already done, prevents logging the same meal twice a day, and adds a ⚡ Correction chip to dose a high glucose with no meal',
+      'Guards: low-glucose lockout, max-dose cap, insulin-on-board (Fiasp DIA ~4 h), stale-reading and falling-glucose warnings',
+      'Logs the actual units given (scroll to set), auto-verifies 3 h later from CGM history (on-target / high / low), excludes rescue-carb events from learning, and shows an empirical ICR estimate as guidance',
+      'Glucose shown as large as the dose and colour-matched to the main glucose card; the log always shows the last 7 entries with older ones behind a toggle',
+      'Decision-support only — applies YOUR clinician-informed parameters + standard bolus math + built-in guards. It never invents dosing; verify every proposal with your endocrinologist',
+    ],
+  },
+  {
+    date: '2026-07-19',
+    title: 'Body Metrix: deleted measurements no longer come back',
+    items: [
+      'Delete now writes a soft-delete tombstone that propagates through the normal last-write-wins sync, instead of a hard delete that any other device still holding the row would re-push. The tombstone is filtered from every read; re-adding the same date overwrites it',
+    ],
+  },
+  {
+    date: '2026-07-19',
+    title: 'Mobile nav + glucose polish',
+    items: [
+      'Nav bar no longer overlaps the page headline (offset now tracks the device safe-area) and stays fixed in the native app while scrolling; faster "click and go" taps',
+      'Main glucose value now uses the same colour thresholds as the insulin card (<80 red · ≤120 green · ≤160 amber · >160 red)',
+    ],
+  },
+  {
+    date: '2026-06-11',
+    title: 'Mid-week weigh-ins + TDEE confidence interval',
+    items: [
+      'Optional Tuesday / Friday weight-only weigh-ins. They add data points that tighten the TDEE estimate — used by the weight-trend regression only, and skipped by every consumer that needs circumference / BF% / MM (which weight-only entries don’t have)',
+      'The TDEE / Energy Balance number now carries a ± confidence interval; more weigh-ins narrow it',
+      'Sunday cheat meal capped at 800 kcal',
+    ],
+  },
+  {
     date: '2026-06-06',
     title: 'NNU: hardcoded 258 g in protein popover replaced with dynamic value',
     items: [
@@ -250,9 +297,11 @@ export default function ManualPage() {
     { id: 'dashboard', label: '4 — Reading the Dashboard' },
     { id: 'nutrition', label: '5 — Reading the Nutrition Plan' },
     { id: 'meals', label: '6 — Special meal rules' },
-    { id: 'sync', label: '7 — Live updates & sync' },
-    { id: 'phase', label: '8 — Phase switching (bulk/cut)' },
-    { id: 'refs', label: '9 — Sources & references' },
+    { id: 'vitals', label: '7 — Blood tests & vitals' },
+    { id: 'insulin', label: '8 — Insulin calculator' },
+    { id: 'sync', label: '9 — Live updates & sync' },
+    { id: 'phase', label: '10 — Phase switching (bulk/cut)' },
+    { id: 'refs', label: '11 — Sources & references' },
     { id: 'changelog', label: 'Changelog' },
   ];
 
@@ -269,7 +318,7 @@ export default function ManualPage() {
         <div className="max-w-5xl mx-auto">
           <div className="mb-6">
             <h1 className="text-3xl font-bold text-white">User Manual</h1>
-            <p className="text-xs text-white/40 mt-1">How the calorie + nutrition logic works · last updated 2026-06-06</p>
+            <p className="text-xs text-white/40 mt-1">How the calorie + nutrition logic works · last updated 2026-07-19</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-6">
@@ -313,6 +362,7 @@ export default function ManualPage() {
                 <Box tone="info">
                   <strong>Sunday cheat meal handling:</strong> The weekly average intake includes a one-time +(800 − Dinner kcal) bump on Sunday. So your weekly average kcal is higher than your daily plan kcal by ~30-50 kcal/day.
                 </Box>
+                <Box tone="tip"><strong>Confidence interval &amp; mid-week weigh-ins:</strong> the TDEE number carries a ± range — the regression&apos;s uncertainty given how many (and how scattered) your weigh-ins are. Optional <strong>Tuesday / Friday weight-only</strong> weigh-ins add data points that narrow that interval. They feed the weight-trend regression only; every consumer that needs circumference / BF% / MM ignores them (those fields are empty on a quick weigh-in).</Box>
                 <p><strong>Why intake-based is better:</strong> classical BMR × PAL (Mifflin-St Jeor × 1.55-1.8) for you would give 3,800-4,500 — but your actual TDEE per the weight-trend math is ~2,700-3,100. The classical estimate is wildly off. Your real TDEE only emerges after several weeks of intake + weight data.</p>
               </Section>
 
@@ -393,7 +443,40 @@ export default function ManualPage() {
                 <p><strong className="text-white">Sunday cheat meal</strong> — replaces the last meal of Sunday with an 800 kcal cheat (cap). The weekly intake average factors this in: <Code>(daily_kcal × 7 + (800 − last_meal_kcal)) / 7</Code>. Adds about +30-50 kcal/day to your weekly average.</p>
               </Section>
 
-              <Section id="sync" title="7 — Live updates & sync">
+              <Section id="vitals" title="7 — Blood tests & vitals">
+                <p>The Vitals page stores your blood-test panels over time. Paste a lab report (or add markers manually); the app parses the values, units, and reference ranges, and <strong>Compare Over Time</strong> lays every panel out as a table — markers down the side, test dates across the top.</p>
+
+                <p><strong className="text-white">Names are canonicalized.</strong> Labs name the same analyte differently (&ldquo;LDL&rdquo;, &ldquo;LDL-Cholesterol&rdquo;, &ldquo;Cholesterol LDL&rdquo;). A registry (<Code>src/utils/markers.ts</Code>) maps every variant to one canonical marker, so they always share a single row. Rows are grouped by clinical <strong>category</strong> — Hematology → Glucose &amp; Metabolic → Lipids → Liver → Kidney → Electrolytes → Iron → Thyroid → Hormones → Vitamins → Inflammation → Tumor markers → Other — each with a subheader, in the conventional panel order. Anything the registry doesn&apos;t recognise keeps its own name and sorts into &ldquo;Other&rdquo; (never wrongly merged).</p>
+
+                <p><strong className="text-white">Units are reconciled for display.</strong> Each marker has a canonical unit and conversion factors. Values <em>and</em> reference ranges are converted before they&apos;re shown and compared (e.g. cholesterol <Code>mmol/L → mg/dL</Code>), so a trend across labs that reported different units is still correct. Cell counts (RBC / WBC / platelets) are also rescued by <em>magnitude</em> — a raw count like 5,030,000 becomes 5.03 ×10⁶/µL no matter how the unit was written.</p>
+                <Box tone="info">Conversion is <strong>display-only</strong> — your stored raw values are never rewritten. A marker whose units genuinely can&apos;t be reconciled shows a small ⚠. <strong>HbA1c</strong> (mmol/mol ↔ % is non-linear) and <strong>BUN in mmol/L</strong> (ambiguous vs urea) are deliberately left unconverted rather than guessed.</Box>
+
+                <p><strong className="text-white">The delta</strong> on the newest column compares against the most recent <em>prior</em> test that actually measured that marker — so even a long-ago value produces a delta across gaps. Its colour reflects clinical meaning, not the arithmetic sign: <span className="text-green-400/80">green</span> when the value moves toward / into the reference range (improvement), <span className="text-red-400/80">red</span> when it moves further out, neutral when both readings are in range. This handles &ldquo;high is bad&rdquo; and &ldquo;low is bad&rdquo; markers automatically.</p>
+
+                <p><strong className="text-white">Clean Up Names</strong> (button on the Vitals page) rewrites your <em>stored</em> marker names to canonical form. It&apos;s gated for safety: download a JSON backup → review every <Code>old → new</Code> change in the preview → then Apply. New and edited tests canonicalize on save automatically.</p>
+                <Box tone="warn">Apply writes to your live Firestore data (localhost and the deployed app share the same database). Download the backup and review the preview first.</Box>
+              </Section>
+
+              <Section id="insulin" title="8 — Insulin calculator">
+                <Box tone="warn"><strong>Decision-support only.</strong> This card applies <em>your</em> clinician-informed parameters + standard bolus math + built-in safety guards. It never invents dosing. Every proposal is a suggestion to verify — not a substitute for your endocrinologist.</Box>
+                <p>The card (below the glucose card on the dashboard) proposes a <strong>whole-unit</strong> Fiasp dose for the selected meal, from your current CGM glucose:</p>
+                <p className="font-mono text-[12px] text-white/80 bg-white/[0.04] p-3 rounded my-2">
+                  dose = carbs / ICR<span className="text-white/40">{'  // carb bolus'}</span><br/>
+                  &nbsp;&nbsp;&nbsp;+ (glucose − target) / ISF<span className="text-white/40">{'  // correction'}</span><br/>
+                  &nbsp;&nbsp;&nbsp;± trend adjustment − insulin-on-board<br/>
+                  &nbsp;&nbsp;&nbsp;→ clamped to [0, max dose], rounded to whole units
+                </p>
+                <ul className="list-disc ml-5 space-y-1">
+                  <li><strong>ICR / ISF</strong> (carb ratio / correction factor) have separate <strong>AM and PM</strong> values with a noon cutover — you&apos;re more insulin-resistant in the morning.</li>
+                  <li><strong>Meal selector</strong> auto-marks the <em>next</em> meal by time of day and what you&apos;ve already logged, keeps it centred, and won&apos;t let you log the same meal twice a day. The <strong>⚡ Correction</strong> chip doses a high glucose with no meal (repeatable).</li>
+                  <li><strong>Guards:</strong> low-glucose lockout, max-dose cap, insulin-on-board subtraction (Fiasp DIA ~4 h), and warnings for a stale reading or fast-falling glucose.</li>
+                  <li><strong>Logging:</strong> scroll to set the <em>actual</em> units you gave, then the big Log button records it. Three hours later the app checks your CGM and marks the dose on-target / high / low; if you ate rescue carbs in between, that entry is excluded from learning.</li>
+                  <li><strong>Learning:</strong> an empirical ICR estimate appears from your logged outcomes — as guidance to review with your doctor, never auto-applied.</li>
+                  <li><strong>Setup</strong> (top-right) edits ICR, ISF, target range, DIA, max dose, cutover hour, and the check-after window.</li>
+                </ul>
+              </Section>
+
+              <Section id="sync" title="9 — Live updates & sync">
                 <p>All numbers in the app are computed <strong>live</strong> from the current data — there&apos;s no manual recalculate step. Edit a meal item → the per-meal NNU pill, the daily EAA supplement breakdown, the Recommended row, and the Actual row all update on the spot.</p>
                 <p>Data is stored in <strong>Firestore</strong> (cross-device source of truth) and mirrored to <strong>IndexedDB</strong> (local cache, makes the PWA work offline). When you save:</p>
                 <ol className="list-decimal ml-5 space-y-1">
@@ -402,10 +485,11 @@ export default function ManualPage() {
                   <li>Other devices pull on next mount + background refresh</li>
                 </ol>
                 <p>If you edit on Device A, then open Device B, B will fetch from Firestore directly on mount and overwrite local cache if remote is newer (last-write-wins by lastModified timestamp).</p>
+                <Box tone="info"><strong>Deletes use tombstones.</strong> Because each device keeps its own local copy, a plain delete could be re-uploaded by another device that still had the row — so deleted measurements used to reappear. A delete now writes a hidden &ldquo;deleted&rdquo; record with the newest timestamp, which wins the sync everywhere and is filtered from every view. Re-adding the same date overwrites it.</Box>
                 <Box tone="warn"><strong>Race condition note:</strong> if you&apos;re editing on two devices at the same time, the last save wins. Don&apos;t do simultaneous edits.</Box>
               </Section>
 
-              <Section id="phase" title="8 — Phase switching (bulk/cut)">
+              <Section id="phase" title="10 — Phase switching (bulk/cut)">
                 <p>Toggle phase via the dashboard. Effects:</p>
                 <ul className="list-disc ml-5 space-y-1">
                   <li><strong>Energy Balance &amp; Nutrition Balance fuel gauge:</strong> target shifts +15% surplus → −20% deficit (or vice versa). Pace target flips +0.4%/wk gain → −0.6%/wk loss.</li>
@@ -415,7 +499,7 @@ export default function ManualPage() {
                 </ul>
               </Section>
 
-              <Section id="refs" title="9 — Sources & references">
+              <Section id="refs" title="11 — Sources & references">
                 <p>Inline citations in the Recommended-macro popups link to specific papers. Full list:</p>
                 <ul className="list-disc ml-5 space-y-1 text-[12px]">
                   <li>Jäger R. et al. <em>ISSN Position Stand: Protein and exercise.</em> J Int Soc Sports Nutr 14, 20 (2017)</li>

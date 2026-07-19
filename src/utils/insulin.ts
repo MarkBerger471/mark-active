@@ -28,6 +28,11 @@ export interface InsulinSettings {
   maxDose: number;      // hard cap on a single proposed dose (units)
   diaHours: number;     // duration of insulin action for IOB (Fiasp ≈ 4h)
   checkAfterHours: number; // verify glucose this long after a dose (e.g. 3h)
+  basalDose: number;    // long-acting basal units/day — CONTEXT ONLY. Feeds the
+                        // TDD plausibility cross-check + endo report. It is
+                        // NEVER part of the bolus math (basal is background
+                        // insulin; subtracting it from a meal bolus would
+                        // under-dose). 0 = not set.
 }
 
 // Seeded conservatively (biased toward under-dosing) from the user's ISF via
@@ -44,7 +49,47 @@ export const DEFAULT_INSULIN_SETTINGS: InsulinSettings = {
   maxDose: 15,
   diaHours: 4,
   checkAfterHours: 3,
+  basalDose: 0,
 };
+
+// Rough plausibility cross-check on ICR/ISF from the classic total-daily-dose
+// rules — GUIDANCE ONLY, never used in the dose calculation:
+//   TDD  = basal + average daily bolus
+//   ICR  ≈ 500 / TDD   (500-rule, g carb per unit)
+//   ISF  ≈ 1800 / TDD  (1800-rule for rapid-acting, mg/dL per unit)
+//   basal ≈ 40–60 % of TDD
+// Flags settings that sit far outside these ballparks so the user can sanity-
+// check them with their endocrinologist.
+export interface TddCheck {
+  tdd: number;
+  basalPct: number;
+  expectedICR: number;
+  expectedISF: number;
+  reliable: boolean;   // false when no bolus data yet (TDD would be basal-only)
+  notes: string[];
+}
+
+export function tddSanityCheck(settings: InsulinSettings, avgDailyBolus: number): TddCheck | null {
+  const basal = settings.basalDose || 0;
+  if (basal <= 0) return null;
+  const bolus = Math.max(0, avgDailyBolus);
+  const tdd = basal + bolus;
+  const basalPct = (basal / tdd) * 100;
+  const expectedICR = 500 / tdd;
+  const expectedISF = 1800 / tdd;
+  if (bolus <= 0) {
+    return { tdd, basalPct, expectedICR, expectedISF, reliable: false,
+      notes: ['No recent bolus logged yet — TDD is basal-only, so the ICR/ISF cross-check is skipped.'] };
+  }
+  const icrAvg = (settings.icrMorning + settings.icrEvening) / 2;
+  const isfAvg = (settings.isfMorning + settings.isfEvening) / 2;
+  const notes: string[] = [];
+  if (basalPct < 30) notes.push(`Basal is ${Math.round(basalPct)}% of TDD (typical 40–60%) — basal may be low or bolus high.`);
+  else if (basalPct > 65) notes.push(`Basal is ${Math.round(basalPct)}% of TDD (typical 40–60%) — basal may be high or bolus low.`);
+  if (icrAvg > expectedICR * 1.5 || icrAvg < expectedICR * 0.6) notes.push(`Your ICR (avg ~${icrAvg.toFixed(0)} g/u) is far from the 500-rule estimate (~${expectedICR.toFixed(1)} g/u).`);
+  if (isfAvg > expectedISF * 1.6 || isfAvg < expectedISF * 0.6) notes.push(`Your ISF (avg ~${isfAvg.toFixed(0)} mg/dL/u) is far from the 1800-rule estimate (~${expectedISF.toFixed(0)}).`);
+  return { tdd, basalPct, expectedICR, expectedISF, reliable: true, notes };
+}
 
 export interface InsulinDose {
   id: string;

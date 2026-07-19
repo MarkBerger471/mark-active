@@ -378,3 +378,32 @@ export function fmtValue(x: number): number {
   const d = a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3;
   return Number(x.toFixed(d));
 }
+
+// Some labs report cell counts as RAW values per µL (RBC ~5,000,000;
+// WBC ~5,000; platelets ~300,000) instead of the scaled canonical form
+// (×10⁶ or ×10³/µL) — often with an odd or missing unit string. When a value
+// is far above any physiological canonical range, rescale it by magnitude.
+// This is unambiguous: raw and scaled forms differ by 1e3–1e6, never overlap.
+const COUNT_SCALE: Record<string, { over: number; div: number }> = {
+  'rbc': { over: 1000, div: 1e6 },            // canonical ~3–7,  raw ~millions
+  'wbc': { over: 300, div: 1e3 },             // canonical ~2–20, raw ~thousands
+  'platelet count': { over: 3000, div: 1e3 }, // canonical ~100–450, raw ~hundred-thousands
+};
+
+/** True when this marker uses magnitude-based count rescue. */
+export function isMagnitudeScaled(markerKey: string): boolean {
+  return markerKey in COUNT_SCALE;
+}
+
+/** Rescue a raw cell count to canonical scale by magnitude (no-op otherwise). */
+export function plausibleValue(markerKey: string, value: number): number {
+  const s = COUNT_SCALE[markerKey];
+  return s && Math.abs(value) >= s.over ? value / s.div : value;
+}
+
+/** Full normalization of a raw value to canonical scale: unit conversion (when
+ *  the unit is recognised) followed by the magnitude rescue for cell counts. */
+export function toCanonicalValue(markerKey: string, value: number, rawUnit: string): number {
+  const conv = convertToCanonical(markerKey, value, rawUnit);
+  return plausibleValue(markerKey, conv ? conv.value : value);
+}

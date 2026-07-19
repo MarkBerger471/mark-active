@@ -8,7 +8,7 @@ import { getBloodTests, saveBloodTests, getTrainingSessions, getNutritionPlan, g
 import { BloodTest, BloodTestValue, TrainingSession, NutritionPlan } from '@/types';
 import EmptyState from '@/components/EmptyState';
 import ReactMarkdown from 'react-markdown';
-import { canonicalize, getUnitDef, canonicalUnit, knownUnit, convertToCanonical, fmtValue, type MarkerCategory } from '@/utils/markers';
+import { canonicalize, getUnitDef, canonicalUnit, knownUnit, toCanonicalValue, isMagnitudeScaled, fmtValue, type MarkerCategory } from '@/utils/markers';
 
 function MarkerPopup({ title, content, loading, onClose }: { title: string; content: string; loading: boolean; onClose: () => void }) {
   // Remove redundant first line if it's just the marker name repeated
@@ -900,17 +900,16 @@ export default function VitalsPage() {
           };
         }
         if (m.hasDef) {
-          if (v.unit && !knownUnit(m.key, v.unit)) m.unknownUnit = true;
+          // A recognised-unit or magnitude-scaled marker is always resolvable.
+          if (v.unit && !knownUnit(m.key, v.unit) && !isMagnitudeScaled(m.key)) m.unknownUnit = true;
         } else if (v.unit) {
           m.rawUnits.add(v.unit);
         }
         if (m.refMin == null && v.refMin != null) {
-          const cv = m.hasDef ? convertToCanonical(m.key, v.refMin, v.unit) : null;
-          m.refMin = cv ? fmtValue(cv.value) : v.refMin;
+          m.refMin = m.hasDef ? fmtValue(toCanonicalValue(m.key, v.refMin, v.unit)) : v.refMin;
         }
         if (m.refMax == null && v.refMax != null) {
-          const cv = m.hasDef ? convertToCanonical(m.key, v.refMax, v.unit) : null;
-          m.refMax = cv ? fmtValue(cv.value) : v.refMax;
+          m.refMax = m.hasDef ? fmtValue(toCanonicalValue(m.key, v.refMax, v.unit)) : v.refMax;
         }
       }
     }
@@ -1481,22 +1480,44 @@ export default function VitalsPage() {
                           const val = test.values.find(v => canonicalize(v.name).key === marker.key);
                           if (!val) return <td key={test.id} className="py-1.5 px-2 text-right text-white/15">—</td>;
 
-                          // Convert to the marker's canonical unit for comparison/display.
-                          const conv = convertToCanonical(marker.key, val.value, val.unit);
-                          const shown = conv ? fmtValue(conv.value) : val.value;
+                          // Normalize to the marker's canonical scale (unit
+                          // conversion + magnitude rescue for cell counts).
+                          const shown = fmtValue(toCanonicalValue(marker.key, val.value, val.unit));
 
                           const isLow = marker.refMin != null && shown < marker.refMin;
                           const isHigh = marker.refMax != null && shown > marker.refMax;
                           const color = isLow ? 'text-yellow-400' : isHigh ? 'text-red-400' : 'text-white/70';
                           const glowStyle = isLow ? { textShadow: '0 0 6px rgba(245,158,11,1), 0 0 15px rgba(245,158,11,0.5)' } : isHigh ? { textShadow: '0 0 6px rgba(239,68,68,1), 0 0 15px rgba(239,68,68,0.5)' } : {};
 
-                          // Show diff only on the last column (newest), compared to previous
+                          // Diff on the newest column vs the most recent PRIOR
+                          // test that actually measured this marker — skipping
+                          // gaps, so even a long-ago measurement still shows a delta.
                           const isLastCol = colIdx === reversed.length - 1;
-                          const prevTest = isLastCol && colIdx > 0 ? reversed[colIdx - 1] : null;
-                          const prevVal = prevTest?.values.find(v => canonicalize(v.name).key === marker.key);
-                          const prevConv = prevVal ? convertToCanonical(marker.key, prevVal.value, prevVal.unit) : null;
-                          const prevShown = prevVal ? (prevConv ? fmtValue(prevConv.value) : prevVal.value) : null;
+                          let prevVal: BloodTestValue | undefined;
+                          if (isLastCol) {
+                            for (let j = colIdx - 1; j >= 0; j--) {
+                              const pv = reversed[j].values.find(v => canonicalize(v.name).key === marker.key);
+                              if (pv) { prevVal = pv; break; }
+                            }
+                          }
+                          const prevShown = prevVal ? fmtValue(toCanonicalValue(marker.key, prevVal.value, prevVal.unit)) : null;
                           const diff = prevShown != null ? shown - prevShown : null;
+
+                          // Colour the delta by CLINICAL meaning, not by sign:
+                          // distance outside the reference range shrinking = green
+                          // (improvement), growing = red (worse), unchanged/in-range
+                          // or no range = neutral. Handles both "high is bad" and
+                          // "low is bad" markers automatically.
+                          const deviation = (v: number) =>
+                            marker.refMin != null && v < marker.refMin ? marker.refMin - v
+                            : marker.refMax != null && v > marker.refMax ? v - marker.refMax
+                            : 0;
+                          let diffColor = 'text-white/40';
+                          if (diff != null && diff !== 0 && (marker.refMin != null || marker.refMax != null)) {
+                            const dNow = deviation(shown), dPrev = deviation(prevShown!);
+                            if (dNow < dPrev) diffColor = 'text-green-400/70';
+                            else if (dNow > dPrev) diffColor = 'text-red-400/70';
+                          }
 
                           // Don't show diff for text values
                           const displayValue = val.textValue || shown;
@@ -1506,7 +1527,7 @@ export default function VitalsPage() {
                             <td key={test.id} className={`py-1.5 px-2 text-right font-mono text-xs ${val.textValue ? 'text-white/50 font-sans' : color}`} style={val.textValue ? {} : glowStyle}>
                               {displayValue}
                               {showDiff && (
-                                <span className={`ml-1 text-[9px] ${diff! > 0 ? 'text-green-400/60' : 'text-red-400/60'}`}>
+                                <span className={`ml-1 text-[9px] ${diffColor}`}>
                                   {diff! > 0 ? '+' : ''}{Math.round(diff! * 10) / 10}
                                 </span>
                               )}

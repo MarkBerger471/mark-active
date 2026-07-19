@@ -22,7 +22,6 @@ function fb() { return (_fb ??= loadFb()); }
 import {
   getAllMeasurements as idbGetMeasurements,
   putMeasurement as idbPutMeasurement,
-  deleteMeasurementLocal as idbDeleteMeasurement,
   bulkPutMeasurements,
   getAllTrainingSessions as idbGetSessions,
   putTrainingSession as idbPutSession,
@@ -261,7 +260,7 @@ export async function getMeasurements(): Promise<Measurement[]> {
   try {
     const local = await idbGetMeasurements();
     backgroundRefreshMeasurements();
-    return local;
+    return local.filter(m => !m.deleted); // hide soft-delete tombstones
   } catch (e) {
     console.error('getMeasurements error:', e);
     return [];
@@ -355,12 +354,20 @@ export async function deleteMeasurement(date: string) {
       }
     }
   } catch {}
-  await idbDeleteMeasurement(date);
+  // Soft-delete via a tombstone instead of a hard delete. A hard delete removes
+  // the Firestore doc, but any other replica that still holds this row reads
+  // "missing remotely" as "needs upload" and re-pushes it — so the deleted row
+  // kept coming back. A tombstone ({ deleted: true } with the newest
+  // lastModified) wins the normal last-write-wins sync, propagates the delete to
+  // every device, and is filtered out of every read.
+  const tombstone = { date, deleted: true, lastModified: Date.now() } as Measurement;
+  await idbPutMeasurement(tombstone);
   await addPendingSync({
     collection: 'measurements',
     docId: date,
-    operation: 'delete',
-    timestamp: Date.now(),
+    operation: 'set',
+    data: tombstone,
+    timestamp: tombstone.lastModified!,
   });
   flushSyncQueue();
 }
