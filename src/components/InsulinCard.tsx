@@ -38,6 +38,12 @@ const isIntra = (n: string) => /during workout|intra/i.test(n);
 const CORRECTION = 'Correction';
 // Local calendar-day key for the "once per day" rule.
 const localDay = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+// ISO timestamp → local "YYYY-MM-DDTHH:mm" for a <input type="datetime-local">.
+const toLocalInput = (iso: string) => {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 
 type PickerMeal = { name: string; carbs: number; hour: number | null; timed: boolean; correction: boolean; done: boolean };
 
@@ -101,6 +107,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const [editId, setEditId] = useState<string | null>(null);
   const [editMeal, setEditMeal] = useState('');
   const [editUnits, setEditUnits] = useState(0);
+  const [editTime, setEditTime] = useState('');
 
   useEffect(() => {
     getInsulinSettings().then(setSettings);
@@ -253,12 +260,16 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     setLog(next); await saveInsulinLog(next);
     setEditId(cur => (cur === id ? null : cur));
   }, [log]);
-  const openEdit = (e: InsulinDose) => { setEditId(e.id); setEditMeal(e.mealName); setEditUnits(e.actualUnits); };
+  const openEdit = (e: InsulinDose) => { setEditId(e.id); setEditMeal(e.mealName); setEditUnits(e.actualUnits); setEditTime(toLocalInput(e.timestamp)); };
   const saveEntryEdit = useCallback(async () => {
     if (!editId) return;
-    const next = log.map(e => (e.id === editId && e.kind === 'dose') ? { ...e, mealName: editMeal, actualUnits: editUnits } : e);
+    const ts = editTime ? new Date(editTime).toISOString() : undefined;
+    const next = log
+      .map(e => (e.id === editId && e.kind === 'dose')
+        ? { ...e, mealName: editMeal, actualUnits: editUnits, ...(ts ? { timestamp: ts } : {}) } : e)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     setLog(next); await saveInsulinLog(next); setEditId(null);
-  }, [editId, editMeal, editUnits, log]);
+  }, [editId, editMeal, editUnits, editTime, log]);
 
   // Reliable select-all on focus (iOS number inputs ignore .select(); text does).
   const selectAll = (el: HTMLInputElement) => setTimeout(() => { try { el.select(); } catch {} }, 0);
@@ -276,18 +287,24 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     if (editId === e.id && e.kind === 'dose') {
       const opts = mealOptions.includes(editMeal) ? mealOptions : [editMeal, ...mealOptions];
       return (
-        <div key={e.id} className="flex items-center gap-1.5 text-[9px] py-0.5">
-          <span className="text-white/30 shrink-0">{fmtTime(e.timestamp)}</span>
-          <select value={editMeal} onChange={ev => setEditMeal(ev.target.value)}
-            className="min-w-0 flex-1 rounded bg-white/5 px-1 py-0.5 text-white/80 border border-white/10 outline-none">
-            {opts.map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <input type="text" inputMode="decimal" value={editUnits} onFocus={ev => selectAll(ev.currentTarget)}
-            onChange={ev => setEditUnits(parseFloat(ev.target.value) || 0)}
-            className="w-9 rounded bg-white/5 px-1 py-0.5 text-right text-white/80 border border-white/10 outline-none no-spinners" />
-          <span className="text-white/30">u</span>
-          <button onClick={saveEntryEdit} className="rounded border border-cyan-400/30 px-1.5 py-0.5 text-cyan-300/80">save</button>
-          <button onClick={() => setEditId(null)} className="text-white/30 px-1">✕</button>
+        <div key={e.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-1.5 space-y-1 text-[9px]">
+          <div className="flex items-center gap-1.5">
+            <span className="text-white/30 shrink-0">time</span>
+            <input type="datetime-local" value={editTime} onChange={ev => setEditTime(ev.target.value)}
+              className="min-w-0 flex-1 rounded bg-white/5 px-1 py-0.5 text-white/80 border border-white/10 outline-none" />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <select value={editMeal} onChange={ev => setEditMeal(ev.target.value)}
+              className="min-w-0 flex-1 rounded bg-white/5 px-1 py-0.5 text-white/80 border border-white/10 outline-none">
+              {opts.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <input type="text" inputMode="decimal" value={editUnits} onFocus={ev => selectAll(ev.currentTarget)}
+              onChange={ev => setEditUnits(parseFloat(ev.target.value) || 0)}
+              className="w-9 rounded bg-white/5 px-1 py-0.5 text-right text-white/80 border border-white/10 outline-none no-spinners" />
+            <span className="text-white/30">u</span>
+            <button onClick={saveEntryEdit} className="rounded border border-cyan-400/30 px-1.5 py-0.5 text-cyan-300/80">save</button>
+            <button onClick={() => setEditId(null)} className="text-white/30 px-1">✕</button>
+          </div>
         </div>
       );
     }
