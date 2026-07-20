@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { NutritionPlan, NutritionMeal } from '@/types';
 import {
-  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, learnedICRs, tddSanityCheck,
+  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, estimateEmpiricalISF, learnedICRs, learnedISFs, tddSanityCheck,
   type InsulinSettings, type InsulinDose, type RescueEvent, type InsulinEvent,
 } from '@/utils/insulin';
 import { getInsulinSettings, saveInsulinSettings, getInsulinLog, saveInsulinLog } from '@/utils/storage';
@@ -222,14 +222,20 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     () => (settings?.learningMode ? learnedICRs(doses, settings) : {}),
     [settings, doses],
   );
+  const learnedIsf = useMemo(
+    () => (settings?.learningMode ? learnedISFs(doses, settings) : {}),
+    [settings, doses],
+  );
   const effectiveSettings = useMemo(() => {
     if (!settings || !settings.learningMode) return settings;
     return {
       ...settings,
       icrMorning: learned.morning?.icr ?? settings.icrMorning,
       icrEvening: learned.evening?.icr ?? settings.icrEvening,
+      isfMorning: learnedIsf.morning?.isf ?? settings.isfMorning,
+      isfEvening: learnedIsf.evening?.isf ?? settings.isfEvening,
     };
-  }, [settings, learned]);
+  }, [settings, learned, learnedIsf]);
 
   const proposal = useMemo(() => {
     if (!effectiveSettings || !glucose?.current || !meal) return null;
@@ -244,16 +250,20 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
 
   const iob = settings ? calcIOB(doses, now, settings.diaHours) : 0;
   const empirical = useMemo(() => settings ? estimateEmpiricalICR(doses, settings) : {}, [doses, settings]);
+  const empiricalIsf = useMemo(() => settings ? estimateEmpiricalISF(doses, settings) : {}, [doses, settings]);
 
-  // Average daily bolus over the last 14 days → total daily dose sanity check.
-  const avgDailyBolus = useMemo(() => {
-    const cutoff = nowTs - 14 * 86400000;
-    return doses.filter(d => new Date(d.timestamp).getTime() >= cutoff)
-      .reduce((s, d) => s + (d.actualUnits || 0), 0) / 14;
+  // Actual average daily bolus: total logged units over the last 7 days ÷ the
+  // number of distinct days that actually have a dose — so a day you forgot to
+  // log can't drag it down, and it reflects reality incl. corrections.
+  const actualDailyBolus = useMemo(() => {
+    const cutoff = nowTs - 7 * 86400000;
+    const recent = doses.filter(d => new Date(d.timestamp).getTime() >= cutoff);
+    const days = new Set(recent.map(d => localDay(new Date(d.timestamp)))).size;
+    const sum = recent.reduce((s, d) => s + (d.actualUnits || 0), 0);
+    return { avg: days ? sum / days : 0, days };
   }, [doses, nowTs]);
   // Expected daily bolus straight from the plan: Σ (meal carbs ÷ block ICR).
-  // Uses your real meal carbs, so the TDD check is accurate without weeks of
-  // logging. (Corrections aren't included — the carb bolus dominates the total.)
+  // Used until there's real logged data. (Corrections aren't included.)
   const planBolus = useMemo(() => {
     if (!settings) return 0;
     return meals.reduce((s, m) => {
@@ -262,10 +272,15 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
       return s + (icr > 0 ? m.carbs / icr : 0);
     }, 0);
   }, [meals, settings]);
-  // Priority: your manual override → plan estimate → 14-day logged average.
-  const bolusSource: 'manual' | 'plan' | 'log' =
-    settings && (settings.typicalBolus || 0) > 0 ? 'manual' : planBolus > 0 ? 'plan' : 'log';
-  const effectiveBolus = bolusSource === 'manual' ? settings!.typicalBolus : bolusSource === 'plan' ? planBolus : avgDailyBolus;
+  // Priority: your manual override → your actual logged average (needs ≥2 days
+  // of data) → the plan estimate.
+  const bolusSource: 'manual' | 'actual' | 'plan' | 'none' =
+    settings && (settings.typicalBolus || 0) > 0 ? 'manual'
+    : actualDailyBolus.days >= 2 ? 'actual'
+    : planBolus > 0 ? 'plan' : 'none';
+  const effectiveBolus = bolusSource === 'manual' ? settings!.typicalBolus
+    : bolusSource === 'actual' ? actualDailyBolus.avg
+    : bolusSource === 'plan' ? planBolus : 0;
   const tddCheck = settings ? tddSanityCheck(settings, effectiveBolus) : null;
 
   const saveDose = useCallback(async () => {
@@ -435,11 +450,11 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                       {tddCheck.notes.map((n, i) => <li key={i} className={tddCheck.reliable ? 'text-amber-300/60' : 'text-white/30'}>{tddCheck.reliable ? '⚠ ' : ''}{n}</li>)}
                     </ul>
                   ) : <span className="text-green-400/50">Looks consistent with the TDD rules.</span>}
-                  {bolusSource === 'plan' && (
-                    <div className="mt-1 text-white/25">Bolus/day estimated from your meal plan (Σ carbs ÷ ICR). Enter a value in Bolus u/day to override.</div>
+                  {bolusSource === 'actual' && (
+                    <div className="mt-1 text-white/25">Bolus/day = your logged doses averaged over the last 7 days ({actualDailyBolus.days} day{actualDailyBolus.days === 1 ? '' : 's'} with data). Enter a value in Bolus u/day to override.</div>
                   )}
-                  {bolusSource === 'log' && (
-                    <div className="mt-1 text-white/25">Bolus/day estimated from logged doses (needs ~2 weeks of full logging). Enter your typical daily bolus above for an accurate check now.</div>
+                  {bolusSource === 'plan' && (
+                    <div className="mt-1 text-white/25">Bolus/day estimated from your meal plan (Σ carbs ÷ ICR) — log a couple of days of doses and it switches to your actual average. Enter a value to override.</div>
                   )}
                 </div>
               )}
@@ -449,7 +464,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                 outcomes. Suggestion only; never auto-doses. */}
             <label className="flex items-start gap-2 rounded-xl border border-white/8 bg-black/20 p-3 text-[10px] cursor-pointer">
               <input type="checkbox" checked={settings.learningMode} onChange={e => updateSetting({ learningMode: e.target.checked })} className="mt-0.5 accent-cyan-500" />
-              <span className="text-white/45"><strong className="text-white/70">Learning mode (beta)</strong> — nudges the suggested ICR from your verified 3-hour outcomes (bounded ±30 % from your seed, suggestion only — you still log your own units). Review with your doctor.</span>
+              <span className="text-white/45"><strong className="text-white/70">Learning mode (beta)</strong> — nudges the suggested ICR &amp; ISF from your verified 3-hour outcomes (bounded ±30 % from your seed, suggestion only — you still log your own units). ISF learns from correction-only events. Review with your doctor.</span>
             </label>
           </div>
         )}
@@ -555,15 +570,29 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
         </div>
 
         {/* Learning signal */}
-        {(empirical.morning || empirical.evening) && (
-          <div className={`mt-1.5 text-[9px] leading-relaxed ${settings.learningMode ? 'text-cyan-300/70' : 'text-cyan-300/40'}`}>
-            {settings.learningMode ? 'Learning ON · ' : 'Learning · '}
-            {settings.learningMode && learned.morning ? `AM ICR ${learned.morning.seed}→${learned.morning.icr} (${learned.morning.n})` : empirical.morning ? `AM data → ICR ~${empirical.morning.icr} (${empirical.morning.n})` : ''}
-            {(empirical.morning) && (empirical.evening) ? ' · ' : ''}
-            {settings.learningMode && learned.evening ? `PM ${learned.evening.seed}→${learned.evening.icr} (${learned.evening.n})` : empirical.evening ? `PM ~${empirical.evening.icr} (${empirical.evening.n})` : ''}
-            {settings.learningMode ? ' — applied to the suggestion (bounded ±30 %). ' : ' — '}review with your doctor before changing.
-          </div>
-        )}
+        {(() => {
+          const lm = settings.learningMode;
+          const blk = (
+            label: string,
+            licr?: { seed: number; icr: number; n: number }, lisf?: { seed: number; isf: number; n: number },
+            eicr?: { icr: number; n: number }, eisf?: { isf: number; n: number },
+          ) => {
+            const parts: string[] = [];
+            if (lm && licr) parts.push(`ICR ${licr.seed}→${licr.icr} (${licr.n})`); else if (eicr) parts.push(`ICR ~${eicr.icr} (${eicr.n})`);
+            if (lm && lisf) parts.push(`ISF ${lisf.seed}→${lisf.isf} (${lisf.n})`); else if (eisf) parts.push(`ISF ~${eisf.isf} (${eisf.n})`);
+            return parts.length ? `${label} ${parts.join(' · ')}` : '';
+          };
+          const str = [
+            blk('AM', learned.morning, learnedIsf.morning, empirical.morning, empiricalIsf.morning),
+            blk('PM', learned.evening, learnedIsf.evening, empirical.evening, empiricalIsf.evening),
+          ].filter(Boolean).join(' · ');
+          if (!str) return null;
+          return (
+            <div className={`mt-1.5 text-[9px] leading-relaxed ${lm ? 'text-cyan-300/70' : 'text-cyan-300/40'}`}>
+              {lm ? 'Learning ON · ' : 'Learning · '}{str}{lm ? ' — applied to the suggestion (bounded ±30 %). ' : ' — '}review with your doctor before changing.
+            </div>
+          );
+        })()}
 
         {/* History — last 7 (≈ one day) always shown; older behind a toggle */}
         {log.length > 0 && (
