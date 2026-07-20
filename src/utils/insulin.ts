@@ -321,15 +321,29 @@ export function estimateEmpiricalICR(
 }
 
 export interface LearnedICR { icr: number; seed: number; n: number; }
+export interface LearnedISF { isf: number; seed: number; n: number; }
+
+function medianOf(arr: number[]): number | undefined {
+  if (arr.length === 0) return undefined;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// Shrink a data estimate toward the seed by data weight, then hard-bound near
+// the seed. Shared by ICR + ISF learning.
+//   learned = seed + (dataMedian − seed)·n/(n+K),  clamped to seed·[1±maxDev]
+function shrinkToward(seed: number, dataMedian: number, n: number, K: number, maxDev: number): number {
+  const shrunk = seed + (dataMedian - seed) * (n / (n + K));
+  return Math.round(Math.min(seed * (1 + maxDev), Math.max(seed * (1 - maxDev), shrunk)) * 10) / 10;
+}
 
 /**
  * Bayesian-shrinkage ICR per block for the SUGGESTED dose. Blends the seed with
  * the clean verified outcomes (from estimateEmpiricalICR), weighted by how many
- * there are, and hard-bounds the result near the seed:
- *   learned = seed + (dataMedian − seed) · n/(n+K),  clamped to seed·[1±maxDev]
- * With little data it barely moves from the seed (a single noisy day can't swing
- * it); it shifts toward the data as clean outcomes accumulate. Suggestion only —
- * never auto-doses, and it never touches ISF or the safety guards.
+ * there are, hard-bounded near the seed. Barely moves on thin data; shifts toward
+ * the data as clean outcomes accumulate. Suggestion only — never auto-doses, and
+ * never touches the safety guards.
  */
 export function learnedICRs(
   doses: InsulinDose[],
@@ -344,9 +358,52 @@ export function learnedICRs(
     const seed = block === 'morning' ? settings.icrMorning : settings.icrEvening;
     const e = emp[block];
     if (!e || e.n <= 0 || seed <= 0) return;
-    const shrunk = seed + (e.icr - seed) * (e.n / (e.n + K));
-    const bounded = Math.min(seed * (1 + maxDev), Math.max(seed * (1 - maxDev), shrunk));
-    out[block] = { icr: Math.round(bounded * 10) / 10, seed, n: e.n };
+    out[block] = { icr: shrinkToward(seed, e.icr, e.n, K, maxDev), seed, n: e.n };
+  });
+  return out;
+}
+
+/**
+ * Implied ISF from CORRECTION-dominated verified outcomes only: glucose started
+ * high (> targetHigh) with carbs ≈ 0, so the 3h change is (mostly) the insulin's
+ * own drop rather than a carb+correction mix.  impliedISF = (before − after)/units.
+ * Meals (carbs > 0) are excluded — their dose blends carb + correction and would
+ * contaminate the estimate.
+ */
+export function estimateEmpiricalISF(
+  doses: InsulinDose[],
+  settings: InsulinSettings,
+): { morning?: { isf: number; n: number }; evening?: { isf: number; n: number } } {
+  const perBlock: Record<TimeBlock, number[]> = { morning: [], evening: [] };
+  for (const d of doses) {
+    if (!d.verify || d.verify.confounded) continue;
+    if (d.actualUnits <= 0 || d.mealCarbs > 0) continue;         // correction-only
+    if (d.glucoseBefore <= settings.targetHigh) continue;        // must have been high
+    const impliedIsf = (d.glucoseBefore - d.verify.glucoseAfter) / d.actualUnits;
+    if (impliedIsf > 0 && impliedIsf < 200) perBlock[d.block].push(impliedIsf);
+  }
+  const out: { morning?: { isf: number; n: number }; evening?: { isf: number; n: number } } = {};
+  const mm = medianOf(perBlock.morning); if (mm != null) out.morning = { isf: Math.round(mm * 10) / 10, n: perBlock.morning.length };
+  const me = medianOf(perBlock.evening); if (me != null) out.evening = { isf: Math.round(me * 10) / 10, n: perBlock.evening.length };
+  return out;
+}
+
+/** Bayesian-shrinkage ISF per block for the SUGGESTED dose (see
+ *  estimateEmpiricalISF). Same bounded shrinkage as learnedICRs. Suggestion only. */
+export function learnedISFs(
+  doses: InsulinDose[],
+  settings: InsulinSettings,
+  opts?: { priorK?: number; maxDev?: number },
+): { morning?: LearnedISF; evening?: LearnedISF } {
+  const K = opts?.priorK ?? 6;
+  const maxDev = opts?.maxDev ?? 0.30;
+  const emp = estimateEmpiricalISF(doses, settings);
+  const out: { morning?: LearnedISF; evening?: LearnedISF } = {};
+  (['morning', 'evening'] as TimeBlock[]).forEach(block => {
+    const seed = block === 'morning' ? settings.isfMorning : settings.isfEvening;
+    const e = emp[block];
+    if (!e || e.n <= 0 || seed <= 0) return;
+    out[block] = { isf: shrinkToward(seed, e.isf, e.n, K, maxDev), seed, n: e.n };
   });
   return out;
 }
