@@ -4,6 +4,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import BackgroundEffects from "@/components/BackgroundEffects";
 import PWAProvider from "@/components/PWAProvider";
 import PageTransition from "@/components/PageTransition";
+import ViewportZoomReset from "@/components/ViewportZoomReset";
 import "./globals.css";
 
 const inter = Inter({
@@ -52,6 +53,7 @@ export default function RootLayout({
       <body className="min-h-screen">
         <BackgroundEffects />
         <PWAProvider />
+        <ViewportZoomReset />
         <AuthProvider><PageTransition>{children}</PageTransition></AuthProvider>
       </body>
     </html>
