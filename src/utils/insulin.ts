@@ -36,6 +36,9 @@ export interface InsulinSettings {
   typicalBolus: number; // typical total bolus units/day for the TDD check.
                         // 0 = derive from the logged doses (needs ~2 weeks of
                         // complete logging to be accurate). CONTEXT ONLY.
+  learningMode: boolean; // opt-in: apply the bounded shrinkage-learned ICR to
+                         // the SUGGESTED dose. Never auto-doses — you still log
+                         // your own units. Off by default.
 }
 
 // Seeded conservatively (biased toward under-dosing) from the user's ISF via
@@ -54,6 +57,7 @@ export const DEFAULT_INSULIN_SETTINGS: InsulinSettings = {
   checkAfterHours: 3,
   basalDose: 0,
   typicalBolus: 0,
+  learningMode: false,
 };
 
 // Rough plausibility cross-check on ICR/ISF from the classic total-daily-dose
@@ -313,5 +317,36 @@ export function estimateEmpiricalICR(
   const out: { morning?: { icr: number; n: number }; evening?: { icr: number; n: number } } = {};
   const mm = median(perBlock.morning); if (mm != null) out.morning = { icr: Math.round(mm * 10) / 10, n: perBlock.morning.length };
   const me = median(perBlock.evening); if (me != null) out.evening = { icr: Math.round(me * 10) / 10, n: perBlock.evening.length };
+  return out;
+}
+
+export interface LearnedICR { icr: number; seed: number; n: number; }
+
+/**
+ * Bayesian-shrinkage ICR per block for the SUGGESTED dose. Blends the seed with
+ * the clean verified outcomes (from estimateEmpiricalICR), weighted by how many
+ * there are, and hard-bounds the result near the seed:
+ *   learned = seed + (dataMedian − seed) · n/(n+K),  clamped to seed·[1±maxDev]
+ * With little data it barely moves from the seed (a single noisy day can't swing
+ * it); it shifts toward the data as clean outcomes accumulate. Suggestion only —
+ * never auto-doses, and it never touches ISF or the safety guards.
+ */
+export function learnedICRs(
+  doses: InsulinDose[],
+  settings: InsulinSettings,
+  opts?: { priorK?: number; maxDev?: number },
+): { morning?: LearnedICR; evening?: LearnedICR } {
+  const K = opts?.priorK ?? 6;          // prior strength (pseudo-count of the seed)
+  const maxDev = opts?.maxDev ?? 0.30;  // never move more than ±30 % from the seed
+  const emp = estimateEmpiricalICR(doses, settings);
+  const out: { morning?: LearnedICR; evening?: LearnedICR } = {};
+  (['morning', 'evening'] as TimeBlock[]).forEach(block => {
+    const seed = block === 'morning' ? settings.icrMorning : settings.icrEvening;
+    const e = emp[block];
+    if (!e || e.n <= 0 || seed <= 0) return;
+    const shrunk = seed + (e.icr - seed) * (e.n / (e.n + K));
+    const bounded = Math.min(seed * (1 + maxDev), Math.max(seed * (1 - maxDev), shrunk));
+    out[block] = { icr: Math.round(bounded * 10) / 10, seed, n: e.n };
+  });
   return out;
 }

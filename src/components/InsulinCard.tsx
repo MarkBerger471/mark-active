@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { NutritionPlan, NutritionMeal } from '@/types';
 import {
-  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, tddSanityCheck,
+  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, learnedICRs, tddSanityCheck,
   type InsulinSettings, type InsulinDose, type RescueEvent, type InsulinEvent,
 } from '@/utils/insulin';
 import { getInsulinSettings, saveInsulinSettings, getInsulinLog, saveInsulinLog } from '@/utils/storage';
@@ -216,14 +216,29 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const meal = meals.find(m => m.name === selectedMeal);
   const now = new Date(nowTs);
 
+  // Learning mode (opt-in): bounded, shrinkage-learned ICR feeds the SUGGESTION
+  // only. When off, effectiveSettings === settings (no change to the dose math).
+  const learned = useMemo(
+    () => (settings?.learningMode ? learnedICRs(doses, settings) : {}),
+    [settings, doses],
+  );
+  const effectiveSettings = useMemo(() => {
+    if (!settings || !settings.learningMode) return settings;
+    return {
+      ...settings,
+      icrMorning: learned.morning?.icr ?? settings.icrMorning,
+      icrEvening: learned.evening?.icr ?? settings.icrEvening,
+    };
+  }, [settings, learned]);
+
   const proposal = useMemo(() => {
-    if (!settings || !glucose?.current || !meal) return null;
+    if (!effectiveSettings || !glucose?.current || !meal) return null;
     const gc = glucose.current;
     const ageMin = (nowTs - new Date(gc.timestamp).getTime()) / 60000;
     const rescueInLastHour = rescues.some(r => nowTs - new Date(r.timestamp).getTime() < 3600000);
-    return calcBolus({ glucose: gc.value, glucoseAgeMin: ageMin, trendRaw: gc.trendRaw, mealCarbs: meal.carbs, now, recentDoses: doses, rescueInLastHour, settings });
+    return calcBolus({ glucose: gc.value, glucoseAgeMin: ageMin, trendRaw: gc.trendRaw, mealCarbs: meal.carbs, now, recentDoses: doses, rescueInLastHour, settings: effectiveSettings });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, glucose, meal, doses, rescues, nowTs, refreshTick]);
+  }, [effectiveSettings, glucose, meal, doses, rescues, nowTs, refreshTick]);
 
   useEffect(() => { if (proposal) setActualUnits(proposal.proposed); }, [proposal?.proposed, selectedMeal]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -384,7 +399,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
               ] as [string, keyof InsulinSettings][]).map(([label, key]) => (
                 <label key={key} className="flex items-center justify-between gap-1 text-white/40">
                   <span className="truncate">{label}</span>
-                  <input type="text" inputMode="decimal" value={settings[key]} onFocus={e => selectAll(e.currentTarget)}
+                  <input type="text" inputMode="decimal" value={settings[key] as number} onFocus={e => selectAll(e.currentTarget)}
                     onChange={e => updateSetting({ [key]: parseFloat(e.target.value) || 0 } as Partial<InsulinSettings>)}
                     className="w-11 rounded bg-white/5 px-1.5 py-0.5 text-right font-mono tabular-nums text-white/80 no-spinners border border-white/5 focus:border-cyan-400/40 outline-none" />
                 </label>
@@ -429,6 +444,13 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                 </div>
               )}
             </div>
+
+            {/* Learning mode (opt-in) — nudges the suggested ICR from verified
+                outcomes. Suggestion only; never auto-doses. */}
+            <label className="flex items-start gap-2 rounded-xl border border-white/8 bg-black/20 p-3 text-[10px] cursor-pointer">
+              <input type="checkbox" checked={settings.learningMode} onChange={e => updateSetting({ learningMode: e.target.checked })} className="mt-0.5 accent-cyan-500" />
+              <span className="text-white/45"><strong className="text-white/70">Learning mode (beta)</strong> — nudges the suggested ICR from your verified 3-hour outcomes (bounded ±30 % from your seed, suggestion only — you still log your own units). Review with your doctor.</span>
+            </label>
           </div>
         )}
 
@@ -534,8 +556,12 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
 
         {/* Learning signal */}
         {(empirical.morning || empirical.evening) && (
-          <div className="mt-1.5 text-[9px] text-cyan-300/40 leading-relaxed">
-            Learning · {empirical.morning ? `AM data → ICR ~${empirical.morning.icr} (${empirical.morning.n})` : ''}{empirical.morning && empirical.evening ? ' · ' : ''}{empirical.evening ? `PM ~${empirical.evening.icr} (${empirical.evening.n})` : ''} — review with your doctor before changing.
+          <div className={`mt-1.5 text-[9px] leading-relaxed ${settings.learningMode ? 'text-cyan-300/70' : 'text-cyan-300/40'}`}>
+            {settings.learningMode ? 'Learning ON · ' : 'Learning · '}
+            {settings.learningMode && learned.morning ? `AM ICR ${learned.morning.seed}→${learned.morning.icr} (${learned.morning.n})` : empirical.morning ? `AM data → ICR ~${empirical.morning.icr} (${empirical.morning.n})` : ''}
+            {(empirical.morning) && (empirical.evening) ? ' · ' : ''}
+            {settings.learningMode && learned.evening ? `PM ${learned.evening.seed}→${learned.evening.icr} (${learned.evening.n})` : empirical.evening ? `PM ~${empirical.evening.icr} (${empirical.evening.n})` : ''}
+            {settings.learningMode ? ' — applied to the suggestion (bounded ±30 %). ' : ' — '}review with your doctor before changing.
           </div>
         )}
 

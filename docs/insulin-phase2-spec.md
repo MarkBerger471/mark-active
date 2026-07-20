@@ -30,6 +30,16 @@ Files: `src/utils/insulin.ts` (pure math + types), `src/components/InsulinCard.t
   1800-rule ISF, basal ≈ 40–60 % of TDD) that flags settings sitting far outside
   the ballpark. Basal is **never** part of the bolus math (it is background
   insulin; subtracting it from a meal bolus would under-dose).
+- **Learning mode — opt-in ICR, shipped early 2026-07-20 (`learnedICRs`):** at
+  Mark's request (he doses on his own judgement; the app only suggests), a
+  conservative subset of component 1 is live ahead of the full Phase 2. A
+  **Bayesian-shrinkage ICR per block** blends the seed with clean verified 3h
+  outcomes, weighted by count, **hard-bounded to seed·[1 ± 30 %]**. With little
+  data it barely moves from the seed; it sharpens as clean outcomes accrue. It
+  feeds the **SUGGESTED** dose only (never auto-doses), touches **ICR only** (ISF
+  stays at seed), keeps every Phase-1 guard, and is **off by default** (a setup
+  toggle). Still to come for full Phase 2: adaptive ISF, per-meal blocks,
+  calibrated confidence bands, backtested auto-apply, and endo sign-off.
 
 **Seeded params (all editable):** ICR AM 7 / PM 12 g·u⁻¹ (from 500-rule, biased
 safe), ISF AM 20 / PM 40 mg·dL⁻¹·u⁻¹ (Mark's values), target 80–120 (correct
