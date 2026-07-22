@@ -131,7 +131,7 @@ export async function GET(req: Request) {
 
   try {
     const res = await sendApns(token, aps);
-    return NextResponse.json({ sent: res.status === 200, apnsStatus: res.status, apnsBody: res.body });
+    return NextResponse.json({ sent: res.status === 200, apnsStatus: res.status, apnsBody: res.body, contentState });
   } catch (e) {
     return NextResponse.json({ error: 'apns send failed', detail: String(e) }, { status: 502 });
   }
