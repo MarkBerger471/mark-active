@@ -224,6 +224,16 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const meal = meals.find(m => m.name === selectedMeal);
   const now = new Date(nowTs);
 
+  // Most recent past dose for the selected meal — a reference: what you gave
+  // last time, and how it turned out once the insulin had acted (glucose at the
+  // 3h check, in-target / high / low).
+  const lastForMeal = useMemo(() => {
+    if (!meal) return null;
+    return doses
+      .filter(d => d.mealName === meal.name)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0] ?? null;
+  }, [doses, meal]);
+
   // Learning mode (opt-in): bounded, shrinkage-learned ICR feeds the SUGGESTION
   // only. When off, effectiveSettings === settings (no change to the dose math).
   const learned = useMemo(
@@ -474,7 +484,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                 outcomes. Suggestion only; never auto-doses. */}
             <label className="flex items-start gap-2 rounded-xl border border-white/8 bg-black/20 p-3 text-[10px] cursor-pointer">
               <input type="checkbox" checked={settings.learningMode} onChange={e => updateSetting({ learningMode: e.target.checked })} className="mt-0.5 accent-cyan-500" />
-              <span className="text-white/45"><strong className="text-white/70">Learning mode (beta)</strong> — nudges the suggested ICR &amp; ISF from your verified 3-hour outcomes (bounded ±30 % from your seed, suggestion only — you still log your own units). ISF learns from correction-only events. Review with your doctor.</span>
+              <span className="text-white/45"><strong className="text-white/70">Learning mode</strong> — nudges the suggested ICR &amp; ISF from your verified 3-hour outcomes (bounded ±30 % from your seed; you still set your own units). ISF learns from correction-only events.</span>
             </label>
           </div>
         )}
@@ -543,6 +553,21 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                   {` · ICR ${proposal.breakdown.icr} · ISF ${proposal.breakdown.isf}`}
                 </div>
               )}
+              {/* Reference: last time you dosed this meal + how it landed after
+                  the insulin had acted (glucose at the 3h check). */}
+              {lastForMeal && (
+                <div className="mt-2 pt-2 border-t border-white/[0.06] text-[10px] text-white/45 flex items-center justify-between gap-2">
+                  <span>
+                    Last {meal?.correction ? 'correction' : 'time'}: <strong className="text-white/70">{lastForMeal.actualUnits}u</strong>
+                    <span className="text-white/30"> @{lastForMeal.glucoseBefore} · {new Date(lastForMeal.timestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                  </span>
+                  {lastForMeal.verify ? (
+                    <span className={lastForMeal.verify.confounded ? 'text-white/30' : lastForMeal.verify.status === 'on-target' ? 'text-green-400/80' : lastForMeal.verify.status === 'high' ? 'text-amber-300/80' : 'text-red-400/80'}>
+                      → {lastForMeal.verify.glucoseAfter}{lastForMeal.verify.confounded ? ' (conf.)' : lastForMeal.verify.status === 'on-target' ? ' in target' : lastForMeal.verify.status === 'high' ? ' too high' : ' too low'}
+                    </span>
+                  ) : <span className="text-white/25">outcome pending</span>}
+                </div>
+              )}
             </div>
 
             {/* Warnings */}
@@ -599,7 +624,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
           if (!str) return null;
           return (
             <div className={`mt-1.5 text-[9px] leading-relaxed ${lm ? 'text-cyan-300/70' : 'text-cyan-300/40'}`}>
-              {lm ? 'Learning ON · ' : 'Learning · '}{str}{lm ? ' — applied to the suggestion (bounded ±30 %). ' : ' — '}review with your doctor before changing.
+              {lm ? 'Learning ON · ' : 'Learning · '}{str}{lm ? ' — applied to the suggestion (bounded ±30 %).' : ` — turn on Learning mode in setup to apply this.`}
             </div>
           );
         })()}

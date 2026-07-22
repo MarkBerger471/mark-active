@@ -210,21 +210,20 @@ export function calcBolus(opts: {
   const stale = glucoseAgeMin > 15;
   if (stale) warnings.push(`Glucose reading is ${Math.round(glucoseAgeMin)} min old — refresh before dosing.`);
 
-  // ── LOW-GLUCOSE LOCKOUT: never propose a correction/meal bolus into a low. ──
+  // Low glucose: never CORRECT into a low, but if a meal is being logged still
+  // show its carb-coverage dose (you're about to eat) — just flag the low.
   const fallingFast = trendRaw === 1;
-  const lockout = glucose < settings.targetLow || (glucose < settings.targetMid && fallingFast);
-  if (lockout) {
-    warnings.unshift(`Glucose ${glucose} — treat the low first. No bolus proposed.`);
-    return {
-      proposed: 0, block, lockout: true, stale,
-      breakdown: { carbBolus: 0, correctionBolus: 0, trendAdjPct: 0, iob: 0, icr, isf },
-      warnings,
-    };
-  }
+  const low = glucose < settings.targetLow || (glucose < settings.targetMid && fallingFast);
 
   const carbBolus = mealCarbs > 0 ? mealCarbs / icr : 0;
-  // Correct only when clearly above range; correct toward the mid target.
-  const correctionBolus = glucose > settings.targetHigh ? (glucose - settings.targetMid) / isf : 0;
+  // Correct only when clearly above range (and never into a low); toward mid.
+  const correctionBolus = (!low && glucose > settings.targetHigh) ? (glucose - settings.targetMid) / isf : 0;
+
+  if (low) {
+    warnings.unshift(carbBolus > 0
+      ? `Glucose ${glucose} is low — correction skipped; only the meal's carb dose is shown. Treat the low too.`
+      : `Glucose ${glucose} is low — nothing to dose. Treat the low.`);
+  }
 
   const { pct: trendPct, warn: trendWarn } = trendAdjustment(trendRaw);
   if (trendWarn) warnings.push(trendWarn);
@@ -237,14 +236,17 @@ export function calcBolus(opts: {
 
   if (proposed > settings.maxDose) {
     proposed = settings.maxDose;
-    warnings.push(`Hit your ${settings.maxDose}u safety cap — verify carefully / split with your doctor's guidance.`);
+    warnings.push(`Hit your ${settings.maxDose}u cap — verify carefully.`);
   }
   if (rescueInLastHour) {
-    warnings.push('Recent rescue carbs — this event will be excluded from learning so it doesn\'t skew your ratios.');
+    warnings.push('Recent rescue carbs — this event is excluded from learning so it doesn\'t skew your ratios.');
   }
 
+  // Lockout only when low AND there's nothing to safely propose (no carbs).
+  const lockout = low && carbBolus <= 0;
+
   return {
-    proposed, block, lockout: false, stale,
+    proposed, block, lockout, stale,
     breakdown: {
       carbBolus: Math.round(carbBolus * 10) / 10,
       correctionBolus: Math.round(correctionBolus * 10) / 10,
