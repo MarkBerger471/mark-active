@@ -2,6 +2,7 @@ import UIKit
 import Capacitor
 import ActivityKit
 import SwiftUI
+import WidgetKit
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -21,6 +22,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // keeps the existing one otherwise) and register its push token so the
         // server can update it in the background.
         startGlucoseActivity()
+        // Refresh the shared App Group cache from the server and reload the
+        // widgets, so home/lock widgets sync to the same latest reading.
+        refreshSharedGlucose()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {}
@@ -77,6 +81,28 @@ extension AppDelegate {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["updateToken": token])
         _ = try? await URLSession.shared.data(for: req)
+    }
+
+    // Fetch latest glucose + insulin, write them to the shared App Group cache,
+    // and reload the widgets so every surface reads the same reading.
+    private func fetchData(_ s: String) async -> Data? {
+        guard let url = URL(string: s) else { return nil }
+        return (try? await URLSession.shared.data(from: url))?.0
+    }
+
+    private func refreshSharedGlucose() {
+        let base = "https://mark-active.netlify.app"
+        Task {
+            async let g = fetchData("\(base)/api/glucose")
+            async let i = fetchData("\(base)/api/insulin-summary")
+            let (gData, iData) = await (g, i)
+            if let store = UserDefaults(suiteName: "group.com.markberger.markactive") {
+                if let gData { store.set(gData, forKey: "glucoseJSON") }
+                if let iData { store.set(iData, forKey: "insulinJSON") }
+                store.set(Date().timeIntervalSince1970, forKey: "cachedAt")
+            }
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 }
 

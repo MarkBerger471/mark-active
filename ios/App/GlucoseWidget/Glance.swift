@@ -99,17 +99,37 @@ struct Glance: Codable, Hashable {
 // MARK: - Loader
 
 enum GlanceLoader {
-    static func fetch() async -> Glance? {
-        async let g = fetchGlucose()
-        async let i = fetchInsulin()
-        let (glucose, insulin) = await (g, i)
-        guard let cur = glucose?.current else { return nil }
+    // If the shared cache is fresher than this, use it (so every surface agrees
+    // without re-fetching). Libre updates ~every 5 min, so 120s is safe.
+    private static let cacheFreshSeconds: TimeInterval = 120
 
+    static func fetch() async -> Glance? {
+        // 1) Fresh shared cache → use it so app + widgets show the same value.
+        if let c = SharedStore.read(), c.age < cacheFreshSeconds {
+            let g = c.glucose.flatMap { try? JSONDecoder().decode(GlucoseResponse.self, from: $0) }
+            let i = c.insulin.flatMap { try? JSONDecoder().decode(InsulinResponse.self, from: $0) }
+            if let glance = build(g, i) { return glance }
+        }
+        // 2) Network, then update the shared cache for the other surfaces.
+        async let gd = fetchData(GlanceConfig.glucoseURL)
+        async let idata = fetchData(GlanceConfig.insulinURL)
+        let (glucoseData, insulinData) = await (gd, idata)
+        SharedStore.write(glucose: glucoseData, insulin: insulinData)
+        let g = glucoseData.flatMap { try? JSONDecoder().decode(GlucoseResponse.self, from: $0) }
+        let i = insulinData.flatMap { try? JSONDecoder().decode(InsulinResponse.self, from: $0) }
+        return build(g, i)
+    }
+
+    private static func fetchData(_ url: URL) async -> Data? {
+        do { let (d, _) = try await URLSession.shared.data(from: url); return d } catch { return nil }
+    }
+
+    private static func build(_ glucose: GlucoseResponse?, _ insulin: InsulinResponse?) -> Glance? {
+        guard let cur = glucose?.current else { return nil }
         let fourHoursAgo = Date().addingTimeInterval(-4 * 3600)
         let hist = (glucose?.history ?? [])
             .map { Glance.HistPoint(value: $0.value, date: Date(timeIntervalSince1970: $0.epoch / 1000)) }
             .filter { $0.date >= fourHoursAgo }
-
         let iso = ISO8601DateFormatter()
         return Glance(
             value: cur.value, mmol: cur.valueMmol, trend: cur.trend,
@@ -122,14 +142,5 @@ enum GlanceLoader {
             lastDoseMeal: insulin?.lastDose?.meal,
             lastDoseDate: insulin?.lastDose.flatMap { iso.date(from: $0.timestamp) },
             history: hist)
-    }
-
-    private static func fetchGlucose() async -> GlucoseResponse? {
-        do { let (d, _) = try await URLSession.shared.data(from: GlanceConfig.glucoseURL)
-             return try JSONDecoder().decode(GlucoseResponse.self, from: d) } catch { return nil }
-    }
-    private static func fetchInsulin() async -> InsulinResponse? {
-        do { let (d, _) = try await URLSession.shared.data(from: GlanceConfig.insulinURL)
-             return try JSONDecoder().decode(InsulinResponse.self, from: d) } catch { return nil }
     }
 }
