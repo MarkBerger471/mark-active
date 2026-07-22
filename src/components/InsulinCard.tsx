@@ -127,6 +127,14 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const [editMeal, setEditMeal] = useState('');
   const [editUnits, setEditUnits] = useState(0);
   const [editTime, setEditTime] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Refresh with optical feedback: spin the icon + flash for ~700ms.
+  const doRefresh = useCallback(() => {
+    setRefreshTick(t => t + 1);
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 700);
+  }, []);
 
   useEffect(() => {
     getInsulinSettings().then(setSettings);
@@ -395,7 +403,9 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
             <span className="text-base">💉</span> Insulin <span className="text-[10px] font-normal text-cyan-300/50 tracking-wider uppercase">Fiasp</span>
           </h2>
           <div className="flex items-center gap-2.5 text-[9px] uppercase tracking-wider text-white/25">
-            <button onClick={() => setRefreshTick(t => t + 1)} className="hover:text-cyan-300/80 transition-colors">↻ refresh</button>
+            <button onClick={doRefresh} className={`flex items-center gap-1 transition-all active:scale-90 ${refreshing ? 'text-cyan-300' : 'hover:text-cyan-300/80'}`}>
+              <span className={`inline-block ${refreshing ? 'animate-spin' : ''}`}>↻</span> refresh
+            </button>
             <button onClick={() => setShowSettings(s => !s)} className="hover:text-white/60 transition-colors">{showSettings ? 'close' : 'setup'}</button>
           </div>
         </div>
