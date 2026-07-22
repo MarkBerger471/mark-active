@@ -3,8 +3,9 @@ import SwiftUI
 import Charts
 import AppIntents
 
-// Home + lock-screen widget. Dark "glass" look, compressed, with a scaled 6h
-// graph, IOB time-left, last-meal carbs, and a minute-only age.
+// Home + lock-screen widget. Premium dark-glass look: glossy sheen, glowing
+// value, frosted chips, scaled 6h graph with a live end dot, IOB time-left,
+// last-meal carbs + glucose-at-injection, minute-only age.
 
 // MARK: - Refresh button (iOS 17+)
 
@@ -34,14 +35,40 @@ struct GlanceProvider: TimelineProvider {
     }
 }
 
-// MARK: - Dark glass background
+// MARK: - Premium glass background
 
-private let glassGradient = LinearGradient(
-    colors: [Color(red: 0.055, green: 0.055, blue: 0.10),
-             Color(red: 0.07, green: 0.10, blue: 0.19)],
-    startPoint: .topLeading, endPoint: .bottomTrailing)
+struct GlassBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.05, green: 0.05, blue: 0.10),
+                                    Color(red: 0.06, green: 0.09, blue: 0.17),
+                                    Color(red: 0.04, green: 0.05, blue: 0.11)],
+                           startPoint: .top, endPoint: .bottom)
+            // glossy highlight, top-left
+            RadialGradient(colors: [Color.white.opacity(0.10), .clear],
+                           center: .topLeading, startRadius: 4, endRadius: 200)
+            // faint colour wash, bottom-right
+            RadialGradient(colors: [Color.cyan.opacity(0.06), .clear],
+                           center: .bottomTrailing, startRadius: 4, endRadius: 220)
+        }
+    }
+}
 
-// MARK: - Scaled 6h chart (Y = mg/dL, X = time, target band)
+// Small frosted chip
+struct Chip<Content: View>: View {
+    var tint: Color = .white
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 6).padding(.vertical, 2.5)
+            .background(Capsule().fill(tint.opacity(0.14)))
+            .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.5))
+            .foregroundStyle(tint.opacity(0.95))
+    }
+}
+
+// MARK: - Scaled 6h chart
 
 struct ScaledChart: View {
     let history: [Glance.HistPoint]
@@ -52,8 +79,9 @@ struct ScaledChart: View {
                 .foregroundStyle(.green.opacity(0.10))
             ForEach(history) { p in
                 AreaMark(x: .value("t", p.date), y: .value("g", p.value))
-                    .foregroundStyle(.linearGradient(colors: [tint.opacity(0.30), .clear],
+                    .foregroundStyle(.linearGradient(colors: [tint.opacity(0.28), .clear],
                                                      startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.catmullRom)
                 LineMark(x: .value("t", p.date), y: .value("g", p.value))
                     .foregroundStyle(tint).lineStyle(.init(lineWidth: 2))
                     .interpolationMethod(.catmullRom)
@@ -63,71 +91,92 @@ struct ScaledChart: View {
         .chartYAxis {
             AxisMarks(position: .trailing, values: [80.0, 160.0, 240.0]) {
                 AxisGridLine().foregroundStyle(.white.opacity(0.12))
-                AxisValueLabel().foregroundStyle(.white.opacity(0.45)).font(.system(size: 8))
+                AxisValueLabel().foregroundStyle(.white.opacity(0.5)).font(.system(size: 9, weight: .medium))
             }
         }
         .chartXAxis {
-            AxisMarks(values: .stride(by: .hour, count: 2)) {
+            AxisMarks(values: .stride(by: .hour, count: 1)) {
                 AxisGridLine().foregroundStyle(.white.opacity(0.06))
                 AxisValueLabel(format: .dateTime.hour(), anchor: .top)
-                    .foregroundStyle(.white.opacity(0.35)).font(.system(size: 8))
+                    .foregroundStyle(.white.opacity(0.45)).font(.system(size: 9, weight: .medium))
             }
         }
+        .chartPlotStyle { $0.padding(.trailing, 2) }
     }
 }
 
-// MARK: - Info column (shared by small + medium)
+// MARK: - Shared pieces
 
-struct GlanceInfo: View {
-    let g: Glance
-    var showButton: Bool = true
+struct ReloadButton: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text("\(Int(g.value))").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(g.color)
-                Text(g.trend).font(.headline).foregroundStyle(g.color)
-                Spacer(minLength: 2)
-                Text(g.ageText).font(.system(size: 10, weight: .semibold)).foregroundStyle(g.isStale ? .red : .white.opacity(0.5))
-                if showButton {
-                    Button(intent: RefreshGlanceIntent()) { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.plain).foregroundStyle(.white.opacity(0.5)).font(.system(size: 10))
-                }
-            }
-            if g.iob > 0 {
-                Text(g.iobLine)
-                    .font(.system(size: 10)).foregroundStyle(.cyan.opacity(0.85)).lineLimit(1)
-            }
-            if let meal = g.lastDoseMeal {
-                Text(meal).font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55)).lineLimit(1)
-                Text(g.lastDoseDetail).font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.45)).lineLimit(1)
-            }
+        Button(intent: RefreshGlanceIntent()) {
+            Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .bold))
+        }
+        .buttonStyle(.plain).foregroundStyle(.white.opacity(0.6))
+        .padding(5).background(Circle().fill(.white.opacity(0.10)))
+    }
+}
+
+// Number + trend + age + reload — reload sits right next to the glucose number.
+struct HeaderRow: View {
+    let g: Glance
+    var numberSize: CGFloat = 34
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("\(Int(g.value))")
+                .font(.system(size: numberSize, weight: .black, design: .rounded))
+                .foregroundStyle(g.color).shadow(color: g.color.opacity(0.5), radius: 7)
+            Text(g.trend).font(.system(size: numberSize * 0.5, weight: .bold)).foregroundStyle(g.color)
+            Spacer(minLength: 2)
+            Text(g.ageText).font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(g.isStale ? .red : .white.opacity(0.5))
+            ReloadButton()
         }
     }
 }
 
 // MARK: - Family views
 
-struct GlanceMediumView: View {
+struct GlanceMediumView: View {   // wide: info column + tall graph
     let g: Glance
     var body: some View {
-        HStack(spacing: 8) {
-            GlanceInfo(g: g).frame(width: 120, alignment: .leading)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HeaderRow(g: g)
+                if g.iob > 0 { Chip(tint: .cyan) { Text(g.iobLine) } }
+                if let meal = g.lastDoseMeal {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(meal).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                        Text(g.lastDoseDetail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: 116, alignment: .leading)
             ScaledChart(history: g.history, tint: g.color)
         }
-        .padding(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 8))
+        .padding(EdgeInsets(top: 12, leading: 12, bottom: 10, trailing: 12))
     }
 }
 
-struct GlanceSmallView: View {
+struct GlanceSmallView: View {   // square: compact header + footer, graph fills the middle
     let g: Glance
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            GlanceInfo(g: g)
-            ScaledChart(history: g.history, tint: g.color).frame(minHeight: 40)
+        VStack(alignment: .leading, spacing: 4) {
+            HeaderRow(g: g, numberSize: 30)
+            ScaledChart(history: g.history, tint: g.color)
+                .frame(maxHeight: .infinity)   // <- graph takes all remaining height
+            VStack(alignment: .leading, spacing: 1) {
+                if g.iob > 0 {
+                    Text(g.iobLine).font(.system(size: 9, weight: .medium)).foregroundStyle(.cyan.opacity(0.85)).lineLimit(1)
+                }
+                if let meal = g.lastDoseMeal {
+                    Text("\(meal) · \(g.lastDoseDetail)").font(.system(size: 9)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+                }
+            }
+            .padding(.leading, 6)
         }
-        .padding(9)
+        .padding(EdgeInsets(top: 11, leading: 11, bottom: 9, trailing: 11))
     }
 }
 
@@ -164,7 +213,7 @@ struct GlanceWidgetEntryView: View {
             }
         }
         .containerBackground(for: .widget) {
-            if family == .accessoryRectangular { Color.clear } else { glassGradient }
+            if family == .accessoryRectangular { Color.clear } else { GlassBackground() }
         }
     }
 }

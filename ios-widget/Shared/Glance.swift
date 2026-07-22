@@ -92,8 +92,8 @@ struct Glance: Codable, Hashable {
         value: 112, mmol: 6.2, trend: "→", readingDate: Date(), iob: 2.4, diaHours: 4,
         lastDoseUnits: 8, lastDoseCarbs: 54, lastDoseMeal: "Lunch 15:00",
         lastDoseDate: Date().addingTimeInterval(-3600),
-        history: (0..<24).map { i in .init(value: 100 + Double((i * 11) % 60) - 25,
-                                            date: Date().addingTimeInterval(Double(i - 24) * 900)) })
+        history: (0..<16).map { i in .init(value: 100 + Double((i * 11) % 60) - 25,
+                                            date: Date().addingTimeInterval(Double(i - 16) * 900)) })
 }
 
 // MARK: - Loader
@@ -105,10 +105,10 @@ enum GlanceLoader {
         let (glucose, insulin) = await (g, i)
         guard let cur = glucose?.current else { return nil }
 
-        let sixHoursAgo = Date().addingTimeInterval(-6 * 3600)
+        let fourHoursAgo = Date().addingTimeInterval(-4 * 3600)
         let hist = (glucose?.history ?? [])
             .map { Glance.HistPoint(value: $0.value, date: Date(timeIntervalSince1970: $0.epoch / 1000)) }
-            .filter { $0.date >= sixHoursAgo }
+            .filter { $0.date >= fourHoursAgo }
 
         let iso = ISO8601DateFormatter()
         return Glance(
