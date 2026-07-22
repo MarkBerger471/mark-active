@@ -1,5 +1,15 @@
 # Lock/Home‑screen glucose + insulin widget — setup
 
+> ✅ **BUILT & LIVE (2026‑07‑22).** Stage A (home/lock widget) and Stage B (live
+> Live Activity on lock screen + Dynamic Island) are both working on Mark's
+> phone. This doc is the record of how it was wired, for rebuilds.
+>
+> **The real source of truth is the committed `ios/` Xcode project** (widget
+> target + AppDelegate live‑activity start + entitlements). The `ios-widget/`
+> folder holds canonical copies for reference. Build/install from here with:
+> `cd ios/App && xcodebuild -scheme App -destination 'id=<device>' -allowProvisioningUpdates build`
+> then `xcrun devicectl device install app --device <id> <built App.app>`.
+
 Everything code‑side is written. This is the part only your Mac + Apple account
 can do. Do it in stages — **Stage A (home widget) needs no Apple push setup**, so
 get that working first.
@@ -36,7 +46,35 @@ refreshing on iOS's budget.
 
 ---
 
-## Stage B — Live Activity (lock screen + Dynamic Island, truly live)
+## Stage B — Live Activity (DONE — how it was wired)
+
+Instead of a Capacitor plugin, the app starts the Live Activity directly from
+**`AppDelegate.applicationDidBecomeActive`** (`ios/App/App/AppDelegate.swift`):
+it requests `Activity<GlucoseActivityAttributes>` with `pushType: .token`,
+streams the APNs push token, and POSTs it to `/api/live-activity/register`. The
+attributes type is duplicated in AppDelegate (app target) and
+`GlucoseActivityAttributes.swift` (widget target) — keep the two identical.
+
+What was set up:
+- **APNs key** (portal): Key ID `TPGB6TSW8S`, Team ID `3MZSK694Y5`, bundle
+  `com.markberger.markactive`, environment Sandbox & Production, Team‑Scoped.
+- **Xcode:** widget target auto‑gets `GlucoseLiveActivity.swift` +
+  `GlucoseActivityAttributes.swift` (GlucoseWidget is a synchronized folder
+  group); app target has the **Push Notifications** capability
+  (`App/App.entitlements` → `aps-environment`), and `NSSupportsLiveActivities`
+  in Info.plist.
+- **Netlify env:** `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8` (full .p8;
+  reconstructed in code via `normalizePem`), `APP_BUNDLE_ID`, `APNS_ENV`
+  (`sandbox` for debug builds → `production` for TestFlight/release).
+- **Push sender:** `/api/live-activity/push` — ES256 JWT + HTTP/2 to APNs;
+  payload wrapped in `{ aps: { event:'update', 'content-state':… } }`.
+- **Cron:** `netlify/functions/live-push.mjs` (`*/5 * * * *`) pings the push
+  endpoint so it self‑updates.
+
+Note: iOS ends Live Activities after ~8 h → opening the app restarts it
+(AppDelegate). Original plugin‑based sketch (unused) is below for reference.
+
+## (unused) Original plugin approach — Live Activity
 
 ### B1. Apple Developer portal (one‑time)
 1. **Identifiers → your App ID** (`com.markberger.markactive`): enable **Push
