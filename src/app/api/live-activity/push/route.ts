@@ -23,11 +23,22 @@ function base64url(b: Buffer | string): string {
   return Buffer.from(b).toString('base64url');
 }
 
+// Reconstruct a clean PKCS#8 PEM from however the .p8 got pasted into the env
+// (single line, literal \n, spaces instead of newlines, \r\n, …). We strip to
+// the base64 body and re-chunk to 64-char lines — robust against UI mangling.
+function normalizePem(raw: string): string {
+  let k = (raw || '').trim().replace(/\\n/g, '\n');
+  const m = k.match(/-----BEGIN [^-]+-----([\s\S]*?)-----END [^-]+-----/);
+  const body = (m ? m[1] : k).replace(/[^A-Za-z0-9+/=]/g, '');
+  const lines = body.match(/.{1,64}/g) || [];
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`;
+}
+
 // ES256 JWT for APNs provider auth (valid ~1h; we mint per-call).
 function apnsJwt(): string {
   const kid = process.env.APNS_KEY_ID!;
   const iss = process.env.APNS_TEAM_ID!;
-  const key = (process.env.APNS_P8 || '').replace(/\\n/g, '\n');
+  const key = normalizePem(process.env.APNS_P8 || '');
   const header = base64url(JSON.stringify({ alg: 'ES256', kid }));
   const payload = base64url(JSON.stringify({ iss, iat: Math.floor(Date.now() / 1000) }));
   const signer = createSign('SHA256');
