@@ -3,16 +3,15 @@ import SwiftUI
 import Charts
 import AppIntents
 
-// Home + lock-screen WidgetKit widget. Fetches /api/glucose + /api/insulin-summary
-// on iOS's refresh budget (~10–20 min) and offers a manual Refresh button (home
-// families; on the lock screen a tap opens the app).
+// Home + lock-screen widget. Dark "glass" look, compressed, with a scaled 6h
+// graph, IOB time-left, last-meal carbs, and a minute-only age.
 
-// MARK: - Refresh button (iOS 17+ interactive widget)
+// MARK: - Refresh button (iOS 17+)
 
 struct RefreshGlanceIntent: AppIntent {
     static var title: LocalizedStringResource = "Refresh glucose"
     func perform() async throws -> some IntentResult {
-        WidgetCenter.shared.reloadAllTimelines()   // re-runs the timeline → fresh fetch
+        WidgetCenter.shared.reloadAllTimelines()
         return .result()
     }
 }
@@ -23,108 +22,124 @@ struct GlanceEntry: TimelineEntry { let date: Date; let glance: Glance? }
 
 struct GlanceProvider: TimelineProvider {
     func placeholder(in context: Context) -> GlanceEntry { .init(date: Date(), glance: .placeholder) }
-
     func getSnapshot(in context: Context, completion: @escaping (GlanceEntry) -> Void) {
         Task { completion(.init(date: Date(), glance: await GlanceLoader.fetch() ?? .placeholder)) }
     }
-
     func getTimeline(in context: Context, completion: @escaping (Timeline<GlanceEntry>) -> Void) {
         Task {
             let g = await GlanceLoader.fetch()
-            let next = Date().addingTimeInterval(10 * 60)   // ask again in ~10 min (iOS budgets it)
-            completion(Timeline(entries: [GlanceEntry(date: Date(), glance: g)], policy: .after(next)))
+            completion(Timeline(entries: [GlanceEntry(date: Date(), glance: g)],
+                                policy: .after(Date().addingTimeInterval(10 * 60))))
         }
     }
 }
 
-// MARK: - Shared pieces
+// MARK: - Dark glass background
 
-struct AgeLabel: View {
-    let date: Date
-    let stale: Bool
-    var body: some View {
-        // Auto-ticking relative time ("3 min") — updates without a widget reload.
-        (Text(date, style: .relative) + Text(" old"))
-            .font(.caption2)
-            .foregroundStyle(stale ? .red : .secondary)
-    }
-}
+private let glassGradient = LinearGradient(
+    colors: [Color(red: 0.055, green: 0.055, blue: 0.10),
+             Color(red: 0.07, green: 0.10, blue: 0.19)],
+    startPoint: .topLeading, endPoint: .bottomTrailing)
 
-struct MiniChart: View {
+// MARK: - Scaled 6h chart (Y = mg/dL, X = time, target band)
+
+struct ScaledChart: View {
     let history: [Glance.HistPoint]
     let tint: Color
     var body: some View {
-        Chart(history) { p in
-            AreaMark(x: .value("t", p.date), y: .value("mg/dL", p.value))
-                .foregroundStyle(.linearGradient(colors: [tint.opacity(0.35), .clear],
-                                                 startPoint: .top, endPoint: .bottom))
-            LineMark(x: .value("t", p.date), y: .value("mg/dL", p.value))
-                .foregroundStyle(tint)
-                .interpolationMethod(.catmullRom)
+        Chart {
+            RectangleMark(yStart: .value("lo", 80.0), yEnd: .value("hi", 120.0))
+                .foregroundStyle(.green.opacity(0.10))
+            ForEach(history) { p in
+                AreaMark(x: .value("t", p.date), y: .value("g", p.value))
+                    .foregroundStyle(.linearGradient(colors: [tint.opacity(0.30), .clear],
+                                                     startPoint: .top, endPoint: .bottom))
+                LineMark(x: .value("t", p.date), y: .value("g", p.value))
+                    .foregroundStyle(tint).lineStyle(.init(lineWidth: 2))
+                    .interpolationMethod(.catmullRom)
+            }
         }
-        .chartYScale(domain: 40...300)
-        .chartYAxis { AxisMarks(values: [80, 160]) { AxisGridLine().foregroundStyle(.secondary.opacity(0.3)) } }
-        .chartXAxis(.hidden)
+        .chartYScale(domain: 40.0...280.0)
+        .chartYAxis {
+            AxisMarks(position: .trailing, values: [80.0, 160.0, 240.0]) {
+                AxisGridLine().foregroundStyle(.white.opacity(0.12))
+                AxisValueLabel().foregroundStyle(.white.opacity(0.45)).font(.system(size: 8))
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .hour, count: 2)) {
+                AxisGridLine().foregroundStyle(.white.opacity(0.06))
+                AxisValueLabel(format: .dateTime.hour(), anchor: .top)
+                    .foregroundStyle(.white.opacity(0.35)).font(.system(size: 8))
+            }
+        }
+    }
+}
+
+// MARK: - Info column (shared by small + medium)
+
+struct GlanceInfo: View {
+    let g: Glance
+    var showButton: Bool = true
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text("\(Int(g.value))").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(g.color)
+                Text(g.trend).font(.headline).foregroundStyle(g.color)
+                Spacer(minLength: 2)
+                Text(g.ageText).font(.system(size: 10, weight: .semibold)).foregroundStyle(g.isStale ? .red : .white.opacity(0.5))
+                if showButton {
+                    Button(intent: RefreshGlanceIntent()) { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.plain).foregroundStyle(.white.opacity(0.5)).font(.system(size: 10))
+                }
+            }
+            if g.iob > 0 {
+                Text(g.iobLine)
+                    .font(.system(size: 10)).foregroundStyle(.cyan.opacity(0.85)).lineLimit(1)
+            }
+            if let meal = g.lastDoseMeal {
+                Text(meal).font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                Text(g.lastDoseDetail).font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+            }
+        }
     }
 }
 
 // MARK: - Family views
 
-struct GlanceMediumView: View {   // home screen — the main view (6h graph)
+struct GlanceMediumView: View {
     let g: Glance
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(Int(g.value))").font(.system(size: 40, weight: .heavy, design: .rounded))
-                        .foregroundStyle(g.color)
-                    Text(g.trend).font(.title2).foregroundStyle(g.color)
-                }
-                AgeLabel(date: g.readingDate, stale: g.isStale)
-                Spacer(minLength: 0)
-                if g.iob > 0 { Text("IOB \(g.iob, specifier: "%.1f")u").font(.caption).foregroundStyle(.secondary) }
-                if let u = g.lastDoseUnits, let d = g.lastDoseDate {
-                    Text("last \(Int(u))u · \(d, style: .relative)").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 92, alignment: .leading)
-
-            MiniChart(history: g.history, tint: g.color)
-
-            Button(intent: RefreshGlanceIntent()) { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            GlanceInfo(g: g).frame(width: 120, alignment: .leading)
+            ScaledChart(history: g.history, tint: g.color)
         }
-        .padding(12)
+        .padding(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 8))
     }
 }
 
-struct GlanceSmallView: View {    // home small — number + trend + age + IOB
+struct GlanceSmallView: View {
     let g: Glance
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("\(Int(g.value))").font(.system(size: 34, weight: .heavy, design: .rounded)).foregroundStyle(g.color)
-                Text(g.trend).font(.title3).foregroundStyle(g.color)
-                Spacer()
-                Button(intent: RefreshGlanceIntent()) { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).font(.caption)
-            }
-            AgeLabel(date: g.readingDate, stale: g.isStale)
-            MiniChart(history: g.history, tint: g.color).frame(height: 46)
-            if g.iob > 0 { Text("IOB \(g.iob, specifier: "%.1f")u").font(.caption2).foregroundStyle(.secondary) }
+        VStack(alignment: .leading, spacing: 3) {
+            GlanceInfo(g: g)
+            ScaledChart(history: g.history, tint: g.color).frame(minHeight: 40)
         }
-        .padding(12)
+        .padding(9)
     }
 }
 
-struct GlanceLockView: View {     // lock screen (accessoryRectangular) — number + age, tap opens app
+struct GlanceLockView: View {   // accessoryRectangular — tap opens app
     let g: Glance
     var body: some View {
         HStack(spacing: 6) {
             Text("\(Int(g.value))").font(.system(size: 22, weight: .bold, design: .rounded))
             Text(g.trend)
+            if g.iob > 0 { Text("· \(g.iob, specifier: "%.1f")u").font(.caption2) }
             Spacer()
-            Text(g.readingDate, style: .relative).font(.caption2)
+            Text(g.ageText).font(.caption2)
         }
         .widgetAccentable()
     }
@@ -136,20 +151,21 @@ struct GlanceWidgetEntryView: View {
     @Environment(\.widgetFamily) var family
     var entry: GlanceEntry
     var body: some View {
-        let g = entry.glance
         Group {
-            if let g {
+            if let g = entry.glance {
                 switch family {
                 case .systemMedium: GlanceMediumView(g: g)
                 case .accessoryRectangular: GlanceLockView(g: g)
                 default: GlanceSmallView(g: g)
                 }
             } else {
-                VStack { Image(systemName: "drop.slash"); Text("No data").font(.caption) }
-                    .foregroundStyle(.secondary)
+                VStack(spacing: 2) { Image(systemName: "drop.slash"); Text("No data").font(.caption2) }
+                    .foregroundStyle(.white.opacity(0.5))
             }
         }
-        .containerBackground(.fill.tertiary, for: .widget)
+        .containerBackground(for: .widget) {
+            if family == .accessoryRectangular { Color.clear } else { glassGradient }
+        }
     }
 }
 
@@ -159,8 +175,9 @@ struct GlucoseWidget: Widget {
             GlanceWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("Glucose")
-        .description("Glucose, 6h trend, and IOB.")
+        .description("Glucose, 6h trend, IOB.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
+        .contentMarginsDisabled()
     }
 }
 
@@ -169,6 +186,8 @@ struct GlucoseWidget: Widget {
 struct GlanceBundle: WidgetBundle {
     var body: some Widget {
         GlucoseWidget()
-        GlucoseLiveActivity()
+        // Stage B: uncomment after adding GlucoseLiveActivity.swift +
+        // GlucoseActivityAttributes.swift to this target.
+        // GlucoseLiveActivity()
     }
 }

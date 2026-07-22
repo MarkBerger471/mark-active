@@ -48,7 +48,7 @@ export async function GET(req: Request) {
     {
       iob,
       lastDose: last
-        ? { units: last.actualUnits, meal: last.mealName, timestamp: last.timestamp, glucoseBefore: last.glucoseBefore }
+        ? { units: last.actualUnits, meal: last.mealName, carbs: last.mealCarbs, timestamp: last.timestamp, glucoseBefore: last.glucoseBefore }
         : null,
       diaHours: settings.diaHours,
       updatedAt: now.toISOString(),
