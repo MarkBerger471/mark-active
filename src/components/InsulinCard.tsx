@@ -556,7 +556,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
               {/* Reference: last time you dosed this meal + how it landed after
                   the insulin had acted (glucose at the 3h check). */}
               {lastForMeal && (
-                <div className="mt-2 pt-2 border-t border-white/[0.06] text-[10px] text-white/45 flex items-center justify-between gap-2">
+                <div className="mt-2 pt-2 border-t border-white/[0.06] text-xs text-white/45 flex items-center justify-between gap-2">
                   <span>
                     Last {meal?.correction ? 'correction' : 'time'}: <strong className="text-white/70">{lastForMeal.actualUnits}u</strong>
                     <span className="text-white/30"> @{lastForMeal.glucoseBefore} · {new Date(lastForMeal.timestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
@@ -574,7 +574,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
             {proposal.warnings.length > 0 && (
               <div className="mb-2 mt-2 space-y-1">
                 {proposal.warnings.map((w, i) => (
-                  <div key={i} className={`text-[10px] flex items-start gap-1 ${locked && i === 0 ? 'text-red-300' : 'text-amber-300/80'}`}><span>⚠</span><span>{w}</span></div>
+                  <div key={i} className={`text-xs flex items-start gap-1 ${locked && i === 0 ? 'text-red-300' : 'text-amber-300/80'}`}><span>⚠</span><span>{w}</span></div>
                 ))}
               </div>
             )}
