@@ -117,7 +117,8 @@ export async function GET(req: Request) {
     trend: cur.trend,
     epoch: cur.epoch,              // reading time (ms) → the widget shows its age
     iob: ins?.iob ?? 0,
-    lastDose: ins?.lastDose ?? null,
+    diaHours: ins?.diaHours ?? 4,  // for IOB time-left
+    lastDose: ins?.lastDose ?? null, // {units, meal, carbs, glucoseBefore, timestamp}
     history: downsample(recent, 24), // compact 6h graph, ~24 pts
   };
 
