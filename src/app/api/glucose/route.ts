@@ -130,6 +130,8 @@ function formatResponse(graphData: any) {
     trend: TREND_ARROWS[(glucoseMeasurement.TrendArrow as number) ?? 3] || '→',
     trendRaw: glucoseMeasurement.TrendArrow as number,
     timestamp: glucoseMeasurement.Timestamp as string,
+    // Unambiguous epoch (ms) for native clients — Libre's timestamp isn't ISO.
+    epoch: Date.parse(glucoseMeasurement.Timestamp as string) || Date.now(),
     isHigh: (glucoseMeasurement.ValueInMgPerDl as number) > 160,
     isLow: (glucoseMeasurement.ValueInMgPerDl as number) < 80,
   } : null;
@@ -139,6 +141,7 @@ function formatResponse(graphData: any) {
     value: p.ValueInMgPerDl as number,
     valueMmol: Math.round((p.ValueInMgPerDl as number) * 0.0555 * 10) / 10,
     timestamp: p.Timestamp as string,
+    epoch: Date.parse(p.Timestamp as string) || 0,
   }));
 
   // Stats

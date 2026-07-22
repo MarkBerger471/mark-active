@@ -5,6 +5,7 @@ import BackgroundEffects from "@/components/BackgroundEffects";
 import PWAProvider from "@/components/PWAProvider";
 import PageTransition from "@/components/PageTransition";
 import ViewportZoomReset from "@/components/ViewportZoomReset";
+import LiveActivityStarter from "@/components/LiveActivityStarter";
 import "./globals.css";
 
 const inter = Inter({
@@ -54,6 +55,7 @@ export default function RootLayout({
         <BackgroundEffects />
         <PWAProvider />
         <ViewportZoomReset />
+        <LiveActivityStarter />
         <AuthProvider><PageTransition>{children}</PageTransition></AuthProvider>
       </body>
     </html>
