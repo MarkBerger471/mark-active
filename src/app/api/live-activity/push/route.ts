@@ -82,7 +82,8 @@ function sendApns(token: string, aps: object): Promise<{ status: number; body: s
     req.on('data', c => { data += c; });
     req.on('end', () => { client.close(); resolve({ status, body: data }); });
     req.on('error', e => { client.close(); reject(e); });
-    req.end(JSON.stringify(aps));
+    // APNs requires the Live Activity fields nested under an "aps" object.
+    req.end(JSON.stringify({ aps }));
   });
 }
 
