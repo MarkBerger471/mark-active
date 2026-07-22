@@ -480,12 +480,25 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
               )}
             </div>
 
-            {/* Learning mode (opt-in) — nudges the suggested ICR from verified
-                outcomes. Suggestion only; never auto-doses. */}
-            <label className="flex items-start gap-2 rounded-xl border border-white/8 bg-black/20 p-3 text-[10px] cursor-pointer">
-              <input type="checkbox" checked={settings.learningMode} onChange={e => updateSetting({ learningMode: e.target.checked })} className="mt-0.5 accent-cyan-500" />
-              <span className="text-white/45"><strong className="text-white/70">Learning mode</strong> — nudges the suggested ICR &amp; ISF from your verified 3-hour outcomes (bounded ±30 % from your seed; you still set your own units). ISF learns from correction-only events.</span>
-            </label>
+            {/* Fast learning — single-outcome, direction-gated. Suggestion only. */}
+            <div className="rounded-xl border border-white/8 bg-black/20 p-3 text-[10px] space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={settings.learningMode} onChange={e => updateSetting({ learningMode: e.target.checked })} className="mt-0.5 accent-cyan-500" />
+                <span className="text-white/45"><strong className="text-white/70">Fast learning</strong> — each verified 3-hour outcome corrects the suggested ICR &amp; ISF toward what would have hit target, so a miss today is mostly fixed by tomorrow. A single off-direction reading is damped; a consistent miss corrects hard. You still set your own units.</span>
+              </label>
+              {settings.learningMode && (
+                <div className="flex items-center gap-2 pl-6">
+                  <span className="text-white/40 shrink-0">Speed</span>
+                  <input type="range" min={0.3} max={1} step={0.05}
+                    value={settings.learnSpeed ?? 0.7}
+                    onChange={e => updateSetting({ learnSpeed: parseFloat(e.target.value) })}
+                    className="flex-1 accent-cyan-500" />
+                  <span className="text-white/60 tabular-nums w-16 text-right">
+                    {(() => { const s = settings.learnSpeed ?? 0.7; return s >= 0.85 ? `${s.toFixed(2)} full` : s >= 0.6 ? `${s.toFixed(2)} fast` : `${s.toFixed(2)} calm`; })()}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

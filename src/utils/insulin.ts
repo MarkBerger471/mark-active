@@ -36,9 +36,10 @@ export interface InsulinSettings {
   typicalBolus: number; // typical total bolus units/day for the TDD check.
                         // 0 = derive from the logged doses (needs ~2 weeks of
                         // complete logging to be accurate). CONTEXT ONLY.
-  learningMode: boolean; // opt-in: apply the bounded shrinkage-learned ICR to
-                         // the SUGGESTED dose. Never auto-doses — you still log
-                         // your own units. Off by default.
+  learningMode: boolean; // opt-in: apply the learned ICR/ISF to the SUGGESTED
+                         // dose. Never auto-doses — you still set your own units.
+  learnSpeed: number;    // fast-learner adaptation speed 0..1 (default 0.7).
+                         // Higher = yesterday's miss corrects more of tomorrow.
 }
 
 // Seeded conservatively (biased toward under-dosing) from the user's ISF via
@@ -58,6 +59,7 @@ export const DEFAULT_INSULIN_SETTINGS: InsulinSettings = {
   basalDose: 0,
   typicalBolus: 0,
   learningMode: false,
+  learnSpeed: 0.7,
 };
 
 // Rough plausibility cross-check on ICR/ISF from the classic total-daily-dose
@@ -332,35 +334,74 @@ function medianOf(arr: number[]): number | undefined {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-// Shrink a data estimate toward the seed by data weight, then hard-bound near
-// the seed. Shared by ICR + ISF learning.
-//   learned = seed + (dataMedian − seed)·n/(n+K),  clamped to seed·[1±maxDev]
-function shrinkToward(seed: number, dataMedian: number, n: number, K: number, maxDev: number): number {
-  const shrunk = seed + (dataMedian - seed) * (n / (n + K));
-  return Math.round(Math.min(seed * (1 + maxDev), Math.max(seed * (1 - maxDev), shrunk)) * 10) / 10;
+// ── FAST LEARNER ────────────────────────────────────────────────────────────
+// Single-outcome, direction-gated EWMA. Instead of a slow bounded average, each
+// clean verified outcome corrects the running estimate toward what that outcome
+// implies, at `learnSpeed` (default 0.7 → yesterday's miss is mostly fixed by
+// tomorrow). No cap. The seed's influence fades in ~3-4 outcomes at speed 0.7,
+// so the estimate is dominated by RECENT outcomes — right for a drifting system.
+//
+// Safety is unchanged and lives elsewhere: 15u max-dose cap, low-glucose
+// lockout, and the user approving every dose. This only moves the SUGGESTION.
+
+const LEARN_WINDOW_DAYS = 14;   // outcomes older than this are stale → ignored
+const DEFAULT_LEARN_SPEED = 0.7;
+
+interface RatioOutcome { implied: number; dir: -1 | 0 | 1; ts: number }
+
+// Replay clean outcomes oldest→newest with EWMA. Direction gating: a consistent
+// miss (this outcome agrees in direction with the previous) corrects at full
+// speed; a contradictory/first outcome corrects at half speed (noise damping).
+function replayFast(seed: number, outs: RatioOutcome[], speed: number): { value: number; n: number } {
+  const cutoff = Date.now() - LEARN_WINDOW_DAYS * 86400000;
+  const recent = outs.filter(o => o.ts >= cutoff).sort((a, b) => a.ts - b.ts);
+  let est = seed;
+  let prevDir: -1 | 0 | 1 = 0;
+  for (const o of recent) {
+    // Full speed by default (one clean miss corrects most of tomorrow). Damp
+    // ONLY when this outcome contradicts the previous direction (high→low or
+    // vice versa) — that's noise/overshoot, not a regime change.
+    const contradicts = prevDir !== 0 && o.dir !== 0 && o.dir !== prevDir;
+    const step = contradicts ? speed * 0.5 : speed;
+    est = (1 - step) * est + step * o.implied;
+    if (est < 1) est = 1;               // ratio must stay positive
+    if (o.dir !== 0) prevDir = o.dir;
+  }
+  return { value: Math.round(est * 10) / 10, n: recent.length };
 }
 
-/**
- * Bayesian-shrinkage ICR per block for the SUGGESTED dose. Blends the seed with
- * the clean verified outcomes (from estimateEmpiricalICR), weighted by how many
- * there are, hard-bounded near the seed. Barely moves on thin data; shifts toward
- * the data as clean outcomes accumulate. Suggestion only — never auto-doses, and
- * never touches the safety guards.
- */
+// Per-outcome implied ICR (what carb ratio would have hit target) + miss
+// direction, for clean near-range-start meal doses.
+function icrOutcomes(doses: InsulinDose[], settings: InsulinSettings): Record<TimeBlock, RatioOutcome[]> {
+  const per: Record<TimeBlock, RatioOutcome[]> = { morning: [], evening: [] };
+  for (const d of doses) {
+    if (!d.verify || d.verify.confounded) continue;
+    if (d.actualUnits <= 0 || d.mealCarbs <= 0) continue;
+    if (d.glucoseBefore > settings.targetHigh + 20 || d.glucoseBefore < settings.targetLow) continue;
+    const isf = d.block === 'morning' ? settings.isfMorning : settings.isfEvening;
+    const after = d.verify.glucoseAfter;
+    const idealUnits = d.actualUnits + (after - settings.targetMid) / isf;
+    if (idealUnits <= 0) continue;
+    const implied = d.mealCarbs / idealUnits;
+    if (!(implied > 0 && implied < 60)) continue;
+    const dir: -1 | 0 | 1 = after > settings.targetHigh ? 1 : after < settings.targetLow ? -1 : 0;
+    per[d.block].push({ implied, dir, ts: new Date(d.timestamp).getTime() });
+  }
+  return per;
+}
+
 export function learnedICRs(
   doses: InsulinDose[],
   settings: InsulinSettings,
-  opts?: { priorK?: number; maxDev?: number },
 ): { morning?: LearnedICR; evening?: LearnedICR } {
-  const K = opts?.priorK ?? 6;          // prior strength (pseudo-count of the seed)
-  const maxDev = opts?.maxDev ?? 0.30;  // never move more than ±30 % from the seed
-  const emp = estimateEmpiricalICR(doses, settings);
+  const speed = settings.learnSpeed ?? DEFAULT_LEARN_SPEED;
+  const outs = icrOutcomes(doses, settings);
   const out: { morning?: LearnedICR; evening?: LearnedICR } = {};
   (['morning', 'evening'] as TimeBlock[]).forEach(block => {
     const seed = block === 'morning' ? settings.icrMorning : settings.icrEvening;
-    const e = emp[block];
-    if (!e || e.n <= 0 || seed <= 0) return;
-    out[block] = { icr: shrinkToward(seed, e.icr, e.n, K, maxDev), seed, n: e.n };
+    if (seed <= 0) return;
+    const r = replayFast(seed, outs[block], speed);
+    if (r.n > 0) out[block] = { icr: r.value, seed, n: r.n };
   });
   return out;
 }
@@ -390,22 +431,36 @@ export function estimateEmpiricalISF(
   return out;
 }
 
-/** Bayesian-shrinkage ISF per block for the SUGGESTED dose (see
- *  estimateEmpiricalISF). Same bounded shrinkage as learnedICRs. Suggestion only. */
+// Per-outcome implied ISF (what correction factor would have hit target) + miss
+// direction, for clean correction-only events (high start, no carbs).
+function isfOutcomes(doses: InsulinDose[], settings: InsulinSettings): Record<TimeBlock, RatioOutcome[]> {
+  const per: Record<TimeBlock, RatioOutcome[]> = { morning: [], evening: [] };
+  for (const d of doses) {
+    if (!d.verify || d.verify.confounded) continue;
+    if (d.actualUnits <= 0 || d.mealCarbs > 0) continue;
+    if (d.glucoseBefore <= settings.targetHigh) continue;
+    const after = d.verify.glucoseAfter;
+    const implied = (d.glucoseBefore - after) / d.actualUnits;
+    if (!(implied > 0 && implied < 200)) continue;
+    const dir: -1 | 0 | 1 = after > settings.targetHigh ? 1 : after < settings.targetLow ? -1 : 0;
+    per[d.block].push({ implied, dir, ts: new Date(d.timestamp).getTime() });
+  }
+  return per;
+}
+
+/** Fast single-outcome ISF learner (see learnedICRs). Suggestion only. */
 export function learnedISFs(
   doses: InsulinDose[],
   settings: InsulinSettings,
-  opts?: { priorK?: number; maxDev?: number },
 ): { morning?: LearnedISF; evening?: LearnedISF } {
-  const K = opts?.priorK ?? 6;
-  const maxDev = opts?.maxDev ?? 0.30;
-  const emp = estimateEmpiricalISF(doses, settings);
+  const speed = settings.learnSpeed ?? DEFAULT_LEARN_SPEED;
+  const outs = isfOutcomes(doses, settings);
   const out: { morning?: LearnedISF; evening?: LearnedISF } = {};
   (['morning', 'evening'] as TimeBlock[]).forEach(block => {
     const seed = block === 'morning' ? settings.isfMorning : settings.isfEvening;
-    const e = emp[block];
-    if (!e || e.n <= 0 || seed <= 0) return;
-    out[block] = { isf: shrinkToward(seed, e.isf, e.n, K, maxDev), seed, n: e.n };
+    if (seed <= 0) return;
+    const r = replayFast(seed, outs[block], speed);
+    if (r.n > 0) out[block] = { isf: r.value, seed, n: r.n };
   });
   return out;
 }
