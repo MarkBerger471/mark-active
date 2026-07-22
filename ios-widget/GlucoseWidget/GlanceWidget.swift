@@ -70,6 +70,14 @@ struct Chip<Content: View>: View {
 
 // MARK: - Scaled 6h chart
 
+// Colour a glucose value by zone (same thresholds as the app).
+func glucoseZone(_ v: Double) -> Color {
+    if v < 80 { return .red }
+    if v <= 120 { return .green }
+    if v <= 160 { return .orange }
+    return .red
+}
+
 struct ScaledChart: View {
     let history: [Glance.HistPoint]
     let tint: Color
@@ -77,16 +85,26 @@ struct ScaledChart: View {
         Chart {
             RectangleMark(yStart: .value("lo", 80.0), yEnd: .value("hi", 120.0))
                 .foregroundStyle(.green.opacity(0.10))
+            // subtle single area fill for depth
             ForEach(history) { p in
                 AreaMark(x: .value("t", p.date), y: .value("g", p.value))
-                    .foregroundStyle(.linearGradient(colors: [tint.opacity(0.28), .clear],
+                    .foregroundStyle(.linearGradient(colors: [tint.opacity(0.16), .clear],
                                                      startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.catmullRom)
-                LineMark(x: .value("t", p.date), y: .value("g", p.value))
-                    .foregroundStyle(tint).lineStyle(.init(lineWidth: 2))
-                    .interpolationMethod(.catmullRom)
+            }
+            // line drawn as per-segment pieces, each coloured by its zone
+            ForEach(Array(history.enumerated()), id: \.offset) { idx, p in
+                if idx > 0 {
+                    let prev = history[idx - 1]
+                    let c = glucoseZone((prev.value + p.value) / 2)
+                    LineMark(x: .value("t", prev.date), y: .value("g", prev.value), series: .value("s", idx))
+                        .foregroundStyle(c).lineStyle(.init(lineWidth: 2, lineCap: .round))
+                    LineMark(x: .value("t", p.date), y: .value("g", p.value), series: .value("s", idx))
+                        .foregroundStyle(c).lineStyle(.init(lineWidth: 2, lineCap: .round))
+                }
             }
         }
+        .chartLegend(.hidden)
         .chartYScale(domain: 40.0...280.0)
         .chartYAxis {
             AxisMarks(position: .trailing, values: [80.0, 160.0, 240.0]) {
@@ -182,14 +200,24 @@ struct GlanceSmallView: View {   // square: compact header + footer, graph fills
 
 struct GlanceLockView: View {   // accessoryRectangular — tap opens app
     let g: Glance
+    // Big, centred, glanceable: number + trend on top, IOB + age below.
+    // No graph (per request). Monochrome — iOS tints lock-screen widgets.
     var body: some View {
-        HStack(spacing: 6) {
-            Text("\(Int(g.value))").font(.system(size: 22, weight: .bold, design: .rounded))
-            Text(g.trend)
-            if g.iob > 0 { Text("· \(g.iob, specifier: "%.1f")u").font(.caption2) }
-            Spacer()
-            Text(g.ageText).font(.caption2)
+        VStack(spacing: 1) {
+            Spacer(minLength: 0)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Spacer(minLength: 0)
+                Text("\(Int(g.value))").font(.system(size: 36, weight: .bold, design: .rounded))
+                Text(g.trend).font(.title2.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+            Text(g.iob > 0 ? "IOB \(String(format: "%.1f", g.iob))u · \(g.ageText)" : g.ageText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .widgetAccentable()
     }
 }
