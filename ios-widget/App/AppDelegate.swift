@@ -10,7 +10,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // Phase 2: register for remote notifications so the server can send a
+        // silent background push that wakes us to refresh widgets.
+        application.registerForRemoteNotifications()
         return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { await registerDeviceToken(token) }
+    }
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {}
+
+    // Silent (content-available) push → refresh the shared cache + reload widgets.
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        refreshSharedGlucose { completionHandler($0) }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {}
@@ -90,7 +105,7 @@ extension AppDelegate {
         return (try? await URLSession.shared.data(from: url))?.0
     }
 
-    private func refreshSharedGlucose() {
+    private func refreshSharedGlucose(completion: ((UIBackgroundFetchResult) -> Void)? = nil) {
         let base = "https://mark-active.netlify.app"
         Task {
             async let g = fetchData("\(base)/api/glucose")
@@ -102,7 +117,17 @@ extension AppDelegate {
                 store.set(Date().timeIntervalSince1970, forKey: "cachedAt")
             }
             WidgetCenter.shared.reloadAllTimelines()
+            completion?(gData != nil ? .newData : .noData)
         }
+    }
+
+    private func registerDeviceToken(_ token: String) async {
+        guard let url = URL(string: "https://mark-active.netlify.app/api/device/register") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token])
+        _ = try? await URLSession.shared.data(for: req)
     }
 }
 

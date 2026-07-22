@@ -58,11 +58,14 @@ function downsample(history: HistPoint[], target: number): { v: number; t: numbe
   return out;
 }
 
-function sendApns(token: string, aps: object): Promise<{ status: number; body: string }> {
+// kind 'liveactivity' → updates the Live Activity; 'background' → silent push
+// that wakes the app to refresh the shared cache + reload widgets (Phase 2).
+function sendApns(token: string, body: object, kind: 'liveactivity' | 'background' = 'liveactivity'): Promise<{ status: number; body: string }> {
   const host = process.env.APNS_ENV === 'production'
     ? 'https://api.push.apple.com' : 'https://api.sandbox.push.apple.com';
   const bundle = process.env.APP_BUNDLE_ID!;
   const jwt = apnsJwt();
+  const isLA = kind === 'liveactivity';
   return new Promise((resolve, reject) => {
     const client = http2.connect(host);
     client.on('error', reject);
@@ -70,9 +73,9 @@ function sendApns(token: string, aps: object): Promise<{ status: number; body: s
       ':method': 'POST',
       ':path': `/3/device/${token}`,
       authorization: `bearer ${jwt}`,
-      'apns-topic': `${bundle}.push-type.liveactivity`,
-      'apns-push-type': 'liveactivity',
-      'apns-priority': '10',
+      'apns-topic': isLA ? `${bundle}.push-type.liveactivity` : bundle,
+      'apns-push-type': isLA ? 'liveactivity' : 'background',
+      'apns-priority': isLA ? '10' : '5',
       'content-type': 'application/json',
     });
     let status = 0;
@@ -82,8 +85,7 @@ function sendApns(token: string, aps: object): Promise<{ status: number; body: s
     req.on('data', c => { data += c; });
     req.on('end', () => { client.close(); resolve({ status, body: data }); });
     req.on('error', e => { client.close(); reject(e); });
-    // APNs requires the Live Activity fields nested under an "aps" object.
-    req.end(JSON.stringify({ aps }));
+    req.end(JSON.stringify(body));
   });
 }
 
@@ -95,11 +97,19 @@ export async function GET(req: Request) {
   const origin = new URL(req.url).origin;
   const keyQ = process.env.WIDGET_KEY ? `?key=${process.env.WIDGET_KEY}` : '';
 
-  const [g, ins, tokSnap] = await Promise.all([
+  const [g, ins, tokSnap, devSnap] = await Promise.all([
     fetch(`${origin}/api/glucose`).then(r => r.json()).catch(() => null),
     fetch(`${origin}/api/insulin-summary${keyQ}`).then(r => r.json()).catch(() => null),
     getDoc(doc(db, 'settings', 'live_activity_tokens')),
+    getDoc(doc(db, 'settings', 'device_token')),
   ]);
+
+  // Phase 2: silent background push to wake the app → refresh shared cache +
+  // reload widgets. Fire-and-forget; iOS throttles these, so best-effort.
+  const deviceToken = devSnap.exists() ? (devSnap.data().token as string | undefined) : undefined;
+  if (deviceToken) {
+    sendApns(deviceToken, { aps: { 'content-available': 1 } }, 'background').catch(() => {});
+  }
 
   const token = tokSnap.exists() ? (tokSnap.data().updateToken as string | undefined) : undefined;
   if (!token) return NextResponse.json({ error: 'no live-activity token registered' }, { status: 404 });
@@ -130,7 +140,7 @@ export async function GET(req: Request) {
   };
 
   try {
-    const res = await sendApns(token, aps);
+    const res = await sendApns(token, { aps });
     return NextResponse.json({ sent: res.status === 200, apnsStatus: res.status, apnsBody: res.body });
   } catch (e) {
     return NextResponse.json({ error: 'apns send failed', detail: String(e) }, { status: 502 });
