@@ -15,5 +15,7 @@ export default async () => {
   }
 };
 
-// Every 5 minutes.
-export const config = { schedule: '*/5 * * * *' };
+// Every minute — matches the sensor's publish cadence. Anything slower was the
+// dominant source of staleness in the Live Activity (a 5-min cron meant the
+// Dynamic Island could trail the sensor by 5 min even when our data was fresh).
+export const config = { schedule: '* * * * *' };

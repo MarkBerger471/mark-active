@@ -159,7 +159,11 @@ function formatResponse(graphData: any) {
     history,
     stats: { timeInRange, avgGlucose, avgMmol, estimatedA1c, readings: values.length },
   }, {
-    // Near-real-time: 60s fresh + 60s stale. Single-user → edge cache is safe.
-    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=60' },
+    // LibreLinkUp publishes a new current value roughly every 1-2 min, so the
+    // edge cache is what decides how stale we can be. No stale-while-revalidate:
+    // it let us serve a value up to 120s old, which dominated the total lag.
+    // 30s caps our added lag at 30s while collapsing client+cron+widget traffic
+    // into <=2 upstream calls/min (Abbott rate-limits aggressive pollers).
+    headers: { 'Cache-Control': 'public, max-age=0, s-maxage=30' },
   });
 }

@@ -98,7 +98,9 @@ export async function GET(req: Request) {
   const keyQ = process.env.WIDGET_KEY ? `?key=${process.env.WIDGET_KEY}` : '';
 
   const [g, ins, tokSnap, devSnap] = await Promise.all([
-    fetch(`${origin}/api/glucose`).then(r => r.json()).catch(() => null),
+    // no-store: this runs once a minute from cron, so it should read the origin
+    // rather than inherit up to 30s of edge-cache age on top of the push delay.
+    fetch(`${origin}/api/glucose`, { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     fetch(`${origin}/api/insulin-summary${keyQ}`).then(r => r.json()).catch(() => null),
     getDoc(doc(db, 'settings', 'live_activity_tokens')),
     getDoc(doc(db, 'settings', 'device_token')),

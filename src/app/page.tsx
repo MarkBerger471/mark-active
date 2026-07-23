@@ -287,12 +287,18 @@ export default function Dashboard() {
     };
 
     refreshAll();
-    // Glucose auto-refresh: 2min — near-real-time, edge cache absorbs repeats from multiple windows
-    const glucoseInterval = setInterval(() => refreshGlucose(true), 2 * 60 * 1000);
+    // Glucose auto-refresh: 30s. The upstream publishes every 60s, but polling
+    // at exactly 60s leaves the phase uncontrolled — we could sit a full minute
+    // behind a value that was already there. 30s halves the detection delay;
+    // the 30s edge cache keeps upstream calls at <=2/min regardless.
+    const glucoseInterval = setInterval(() => refreshGlucose(true), 30 * 1000);
 
-    // PWA resume: TTL-gated, so rapid open/close doesn't burn function invocations
-    const onFocus = () => refreshAll();
-    const onVisibility = () => { if (document.visibilityState === 'visible') refreshAll(); };
+    // PWA resume: everything else stays TTL-gated so rapid open/close doesn't
+    // burn invocations, but glucose is forced — resume is exactly when you're
+    // looking at it, and the 30s edge cache absorbs the repeats.
+    const onResume = () => { refreshAll(); refreshGlucose(true); };
+    const onFocus = () => onResume();
+    const onVisibility = () => { if (document.visibilityState === 'visible') onResume(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', onFocus);
     return () => {
