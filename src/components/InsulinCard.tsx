@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { NutritionPlan, NutritionMeal } from '@/types';
 import {
-  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, estimateEmpiricalISF, learnedICRs, learnedISFs, tddSanityCheck,
+  calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, estimateEmpiricalISF, learnedICRs, learnedISFs, learnedMealICRs, timeBlock, tddSanityCheck,
   type InsulinSettings, type InsulinDose, type RescueEvent, type InsulinEvent,
 } from '@/utils/insulin';
 import { getInsulinSettings, saveInsulinSettings, getInsulinLog, saveInsulinLog } from '@/utils/storage';
@@ -244,6 +244,11 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     () => (settings?.learningMode ? learnedISFs(doses, settings) : {}),
     [settings, doses],
   );
+  // Per-meal learned ICR — keeps lunch's ratio off breakfast's (both "morning").
+  const mealLearned = useMemo(
+    () => (settings?.learningMode ? learnedMealICRs(doses, settings) : {}),
+    [settings, doses],
+  );
   const effectiveSettings = useMemo(() => {
     if (!settings || !settings.learningMode) return settings;
     return {
@@ -260,9 +265,16 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
     const gc = glucose.current;
     const ageMin = (nowTs - new Date(gc.timestamp).getTime()) / 60000;
     const rescueInLastHour = rescues.some(r => nowTs - new Date(r.timestamp).getTime() < 3600000);
-    return calcBolus({ glucose: gc.value, glucoseAgeMin: ageMin, trendRaw: gc.trendRaw, mealCarbs: meal.carbs, now, recentDoses: doses, rescueInLastHour, settings: effectiveSettings });
+    // Per-meal learned ICR overrides the pooled block ICR for THIS meal.
+    let s = effectiveSettings;
+    const ml = mealLearned[meal.name];
+    if (ml) {
+      const blk = timeBlock(now, s.cutoverHour);
+      s = blk === 'morning' ? { ...s, icrMorning: ml.icr } : { ...s, icrEvening: ml.icr };
+    }
+    return calcBolus({ glucose: gc.value, glucoseAgeMin: ageMin, trendRaw: gc.trendRaw, mealCarbs: meal.carbs, now, recentDoses: doses, rescueInLastHour, settings: s });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveSettings, glucose, meal, doses, rescues, nowTs, refreshTick]);
+  }, [effectiveSettings, glucose, meal, doses, rescues, nowTs, refreshTick, mealLearned]);
 
   useEffect(() => { if (proposal) setActualUnits(proposal.proposed); }, [proposal?.proposed, selectedMeal]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -560,6 +572,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                   {proposal.block}
                   {proposal.breakdown.carbBolus > 0 ? ` · carb ${Math.round(proposal.breakdown.carbBolus)}u` : ''}
                   {proposal.breakdown.correctionBolus > 0 ? ` + corr ${Math.round(proposal.breakdown.correctionBolus)}u` : ''}
+                  {proposal.breakdown.correctionBolus < 0 ? ` − low ${Math.abs(Math.round(proposal.breakdown.correctionBolus))}u` : ''}
                   {proposal.breakdown.carbBolus === 0 && proposal.breakdown.correctionBolus === 0 ? ' · nothing to dose' : ''}
                   {proposal.breakdown.trendAdjPct !== 0 ? ` · trend ${proposal.breakdown.trendAdjPct > 0 ? '+' : ''}${proposal.breakdown.trendAdjPct}%` : ''}
                   {proposal.breakdown.iob > 0 ? ` · −${Math.round(proposal.breakdown.iob)}u IOB` : ''}
@@ -637,10 +650,18 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
           if (!str) return null;
           return (
             <div className={`mt-1.5 text-[9px] leading-relaxed ${lm ? 'text-cyan-300/70' : 'text-cyan-300/40'}`}>
-              {lm ? 'Learning ON · ' : 'Learning · '}{str}{lm ? ' — applied to the suggestion (bounded ±30 %).' : ` — turn on Learning mode in setup to apply this.`}
+              {lm ? 'Learning ON · ' : 'Learning · '}{str}{lm ? ' — applied to the suggestion.' : ` — turn on Learning mode in setup to apply this.`}
             </div>
           );
         })()}
+
+        {/* Per-meal learned ICR — this meal is dosed off its OWN history, not the
+            pooled block ICR, so e.g. lunch no longer inherits breakfast's ratio. */}
+        {settings.learningMode && meal && !meal.correction && mealLearned[meal.name] && (
+          <div className="mt-1 text-[9px] leading-relaxed text-cyan-300/70">
+            {meal.name}: ICR {mealLearned[meal.name].seed}→{mealLearned[meal.name].icr} ({mealLearned[meal.name].n} outcome{mealLearned[meal.name].n === 1 ? '' : 's'}) — learned from this meal alone.
+          </div>
+        )}
 
         {/* History — last 7 (≈ one day) always shown; older behind a toggle */}
         {log.length > 0 && (

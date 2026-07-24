@@ -218,13 +218,24 @@ export function calcBolus(opts: {
   const low = glucose < settings.targetLow || (glucose < settings.targetMid && fallingFast);
 
   const carbBolus = mealCarbs > 0 ? mealCarbs / icr : 0;
-  // Correct only when clearly above range (and never into a low); toward mid.
-  const correctionBolus = (!low && glucose > settings.targetHigh) ? (glucose - settings.targetMid) / isf : 0;
+  // Signed correction toward target-mid: POSITIVE above range (bring a high
+  // down), NEGATIVE below targetLow (hold back insulin so the meal you're about
+  // to eat lifts you out of the low). In-range → no correction. The final
+  // proposal is floored at 0, so a negative correction can only ever REDUCE the
+  // dose — it never injects "negative" insulin.
+  const correctionBolus =
+    glucose > settings.targetHigh ? (glucose - settings.targetMid) / isf :
+    glucose < settings.targetLow  ? (glucose - settings.targetMid) / isf :
+    0;
 
   if (low) {
-    warnings.unshift(carbBolus > 0
-      ? `Glucose ${glucose} is low — correction skipped; only the meal's carb dose is shown. Treat the low too.`
-      : `Glucose ${glucose} is low — nothing to dose. Treat the low.`);
+    if (carbBolus <= 0) {
+      warnings.unshift(`Glucose ${glucose} is low — nothing to dose. Treat the low.`);
+    } else if (correctionBolus < 0) {
+      warnings.unshift(`Glucose ${glucose} is low — meal dose cut by ${Math.abs(correctionBolus).toFixed(1)}u so the food lifts you. Keep fast carbs handy if the meal is slow.`);
+    } else {
+      warnings.unshift(`Glucose ${glucose} is low — dosing only the meal's carbs. Keep fast carbs handy.`);
+    }
   }
 
   const { pct: trendPct, warn: trendWarn } = trendAdjustment(trendRaw);
@@ -371,21 +382,29 @@ function replayFast(seed: number, outs: RatioOutcome[], speed: number): { value:
 }
 
 // Per-outcome implied ICR (what carb ratio would have hit target) + miss
-// direction, for clean near-range-start meal doses.
+// direction, for ONE clean near-range-start meal dose. Returns null when the
+// dose doesn't qualify (unverified, confounded, correction-only, started out of
+// the learnable range, or an implausible implied ratio).
+function icrOutcomeOf(d: InsulinDose, settings: InsulinSettings): RatioOutcome | null {
+  if (!d.verify || d.verify.confounded) return null;
+  if (d.actualUnits <= 0 || d.mealCarbs <= 0) return null;
+  if (d.glucoseBefore > settings.targetHigh + 20 || d.glucoseBefore < settings.targetLow) return null;
+  const isf = d.block === 'morning' ? settings.isfMorning : settings.isfEvening;
+  const after = d.verify.glucoseAfter;
+  const idealUnits = d.actualUnits + (after - settings.targetMid) / isf;
+  if (idealUnits <= 0) return null;
+  const implied = d.mealCarbs / idealUnits;
+  if (!(implied > 0 && implied < 60)) return null;
+  const dir: -1 | 0 | 1 = after > settings.targetHigh ? 1 : after < settings.targetLow ? -1 : 0;
+  return { implied, dir, ts: new Date(d.timestamp).getTime() };
+}
+
+// Per-outcome implied ICR + miss direction, grouped by time block.
 function icrOutcomes(doses: InsulinDose[], settings: InsulinSettings): Record<TimeBlock, RatioOutcome[]> {
   const per: Record<TimeBlock, RatioOutcome[]> = { morning: [], evening: [] };
   for (const d of doses) {
-    if (!d.verify || d.verify.confounded) continue;
-    if (d.actualUnits <= 0 || d.mealCarbs <= 0) continue;
-    if (d.glucoseBefore > settings.targetHigh + 20 || d.glucoseBefore < settings.targetLow) continue;
-    const isf = d.block === 'morning' ? settings.isfMorning : settings.isfEvening;
-    const after = d.verify.glucoseAfter;
-    const idealUnits = d.actualUnits + (after - settings.targetMid) / isf;
-    if (idealUnits <= 0) continue;
-    const implied = d.mealCarbs / idealUnits;
-    if (!(implied > 0 && implied < 60)) continue;
-    const dir: -1 | 0 | 1 = after > settings.targetHigh ? 1 : after < settings.targetLow ? -1 : 0;
-    per[d.block].push({ implied, dir, ts: new Date(d.timestamp).getTime() });
+    const o = icrOutcomeOf(d, settings);
+    if (o) per[d.block].push(o);
   }
   return per;
 }
@@ -403,6 +422,39 @@ export function learnedICRs(
     const r = replayFast(seed, outs[block], speed);
     if (r.n > 0) out[block] = { icr: r.value, seed, n: r.n };
   });
+  return out;
+}
+
+/**
+ * Per-MEAL learned ICR. The pooled morning/evening ICR mixes very different
+ * meals — a 62 g breakfast and a 28 g lunch both live in the "morning" block —
+ * so the fast learner ends up applying whichever meal you dosed most recently to
+ * the next one (breakfast's ratio leaks onto lunch). Learning each meal from its
+ * OWN verified outcomes keeps them apart. Suggestion only; same safety as
+ * learnedICRs (single-outcome EWMA, floored ≥1, user approves every dose).
+ */
+export function learnedMealICRs(
+  doses: InsulinDose[],
+  settings: InsulinSettings,
+): Record<string, LearnedICR> {
+  const speed = settings.learnSpeed ?? DEFAULT_LEARN_SPEED;
+  const byMeal: Record<string, RatioOutcome[]> = {};
+  const seedFor: Record<string, number> = {};
+  for (const d of doses) {
+    const o = icrOutcomeOf(d, settings);
+    if (!o) continue;
+    if (!byMeal[d.mealName]) byMeal[d.mealName] = [];
+    byMeal[d.mealName].push(o);
+    // A given meal is always the same block, so its seed is stable.
+    seedFor[d.mealName] = d.block === 'morning' ? settings.icrMorning : settings.icrEvening;
+  }
+  const out: Record<string, LearnedICR> = {};
+  for (const name of Object.keys(byMeal)) {
+    const seed = seedFor[name];
+    if (!seed || seed <= 0) continue;
+    const r = replayFast(seed, byMeal[name], speed);
+    if (r.n > 0) out[name] = { icr: r.value, seed, n: r.n };
+  }
   return out;
 }
 
