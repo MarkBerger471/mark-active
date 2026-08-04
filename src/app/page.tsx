@@ -86,11 +86,14 @@ export default function Dashboard() {
   // -1 = auto-select most recent day with data in the last-7-day strip;
   // 0..6 = explicit user selection (index into the rendered last-7 strip).
   const [sleepIdx, setSleepIdx] = useState(-1);
-  // A single "now" timestamp captured once per mount. Used by the dashboard's
-  // freshness calcs (4-week window, hours-since-workout) instead of calling
-  // Date.now() during render, which is impure. The dashboard is short-lived /
-  // frequently reloaded, so a per-mount stamp is accurate enough.
-  const [nowTs] = useState(() => Date.now());
+  // A live "now" timestamp. Read during render instead of Date.now() (keeps
+  // render pure), but TICKED every 30s + on resume by the effect below. This is
+  // CRITICAL for the insulin card: IOB decays with wall-clock time, so a frozen
+  // stamp left IOB (and the dose proposal, glucose-age warning, 3h auto-verify
+  // and meal auto-advance) stuck at their mount values until the app was
+  // force-restarted. A standalone/Capacitor app stays open for hours — a
+  // per-mount stamp is NOT accurate enough.
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   // Subjective readiness — stored per day, synced to Firestore
   const todayStr = new Date().toISOString().split('T')[0];
@@ -287,23 +290,29 @@ export default function Dashboard() {
     };
 
     refreshAll();
-    // Glucose auto-refresh: 30s. The upstream publishes every 60s, but polling
-    // at exactly 60s leaves the phase uncontrolled — we could sit a full minute
-    // behind a value that was already there. 30s halves the detection delay;
-    // the 30s edge cache keeps upstream calls at <=2/min regardless.
-    const glucoseInterval = setInterval(() => refreshGlucose(true), 30 * 1000);
+    // Glucose auto-refresh + clock tick: 30s. The upstream publishes every 60s,
+    // but polling at exactly 60s leaves the phase uncontrolled — we could sit a
+    // full minute behind a value that was already there. 30s halves the
+    // detection delay; the 30s edge cache keeps upstream calls at <=2/min.
+    // Ticking nowTs in the SAME beat keeps IOB decay and the glucose-age warning
+    // in step with the reading.
+    const glucoseInterval = setInterval(() => { setNowTs(Date.now()); refreshGlucose(true); }, 30 * 1000);
 
-    // PWA resume: everything else stays TTL-gated so rapid open/close doesn't
-    // burn invocations, but glucose is forced — resume is exactly when you're
-    // looking at it, and the 30s edge cache absorbs the repeats.
-    const onResume = () => { refreshAll(); refreshGlucose(true); };
+    // PWA/native resume: JS timers are suspended while the app is backgrounded,
+    // so on return we must both advance the clock (IOB is otherwise stuck at the
+    // pre-background value) AND force-refresh glucose. This is the path that was
+    // failing — the user had to force-quit to un-stick stale IOB/glucose.
+    const onResume = () => { setNowTs(Date.now()); refreshAll(); refreshGlucose(true); };
     const onFocus = () => onResume();
     const onVisibility = () => { if (document.visibilityState === 'visible') onResume(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', onFocus);
+    // pageshow fires on bfcache restore where focus/visibilitychange may not.
+    window.addEventListener('pageshow', onFocus);
     return () => {
       clearInterval(glucoseInterval);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [isAuthenticated]);
