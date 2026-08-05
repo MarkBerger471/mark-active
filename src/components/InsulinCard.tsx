@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { NutritionPlan, NutritionMeal } from '@/types';
 import {
   calcBolus, calcIOB, verifyDose, estimateEmpiricalICR, estimateEmpiricalISF, learnedICRs, learnedISFs, learnedMealICRs, timeBlock, tddSanityCheck,
+  sleepSensitivityFactor, predictNightLow,
   type InsulinSettings, type InsulinDose, type RescueEvent, type InsulinEvent,
 } from '@/utils/insulin';
 import { getInsulinSettings, saveInsulinSettings, getInsulinLog, saveInsulinLog } from '@/utils/storage';
@@ -113,7 +114,7 @@ function UnitScroller({ value, max, onChange }: { value: number; max: number; on
   );
 }
 
-export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose: GlucoseState | null; nutritionPlan: NutritionPlan | null; nowTs: number }) {
+export default function InsulinCard({ glucose, nutritionPlan, nowTs, lastSleepScore }: { glucose: GlucoseState | null; nutritionPlan: NutritionPlan | null; nowTs: number; lastSleepScore?: number }) {
   const [settings, setSettings] = useState<InsulinSettings | null>(null);
   const [log, setLog] = useState<InsulinEvent[]>([]);
   const [selectedMeal, setSelectedMeal] = useState<string>('');
@@ -128,6 +129,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
   const [editUnits, setEditUnits] = useState(0);
   const [editTime, setEditTime] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [nightHist, setNightHist] = useState<{ nights: number; lows: number } | null>(null);
 
   // Refresh with optical feedback: spin the icon + flash for ~700ms.
   const doRefresh = useCallback(() => {
@@ -272,13 +274,40 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
       const blk = timeBlock(now, s.cutoverHour);
       s = blk === 'morning' ? { ...s, icrMorning: ml.icr } : { ...s, icrEvening: ml.icr };
     }
-    return calcBolus({ glucose: gc.value, glucoseAgeMin: ageMin, trendRaw: gc.trendRaw, mealCarbs: meal.carbs, now, recentDoses: doses, rescueInLastHour, settings: s });
+    // Same-day sleep sensitivity: poor sleep last night → tighten ICR/ISF today.
+    const sf = s.sleepModifier ? sleepSensitivityFactor(lastSleepScore) : 1;
+    return calcBolus({ glucose: gc.value, glucoseAgeMin: ageMin, trendRaw: gc.trendRaw, mealCarbs: meal.carbs, now, recentDoses: doses, rescueInLastHour, settings: s, sensitivityFactor: sf });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveSettings, glucose, meal, doses, rescues, nowTs, refreshTick, mealLearned]);
+  }, [effectiveSettings, glucose, meal, doses, rescues, nowTs, refreshTick, mealLearned, lastSleepScore]);
 
   useEffect(() => { if (proposal) setActualUnits(proposal.proposed); }, [proposal?.proposed, selectedMeal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const iob = settings ? calcIOB(doses, now, settings.diaHours) : 0;
+
+  // Bedtime nocturnal-low forecast (evening only). Pull a recent base rate once:
+  // fraction of the last ~8 nights (00:00–06:00 local) that saw a sub-70 reading.
+  const isEvening = new Date(nowTs).getHours() >= 20;
+  useEffect(() => {
+    if (!isEvening || nightHist) return;
+    let cancelled = false;
+    fetch('/api/glucose-history?days=8').then(r => r.json()).then(j => {
+      const rs: { t: number; v: number }[] = Array.isArray(j.readings) ? j.readings : [];
+      const byNight: Record<string, number[]> = {};
+      for (const r of rs) {
+        const dt = new Date(r.t);
+        if (dt.getHours() < 6) { const k = `${dt.getFullYear()}-${dt.getMonth()}-${dt.getDate()}`; if (!byNight[k]) byNight[k] = []; byNight[k].push(r.v); }
+      }
+      const nights = Object.values(byNight);
+      if (!cancelled) setNightHist({ nights: nights.length, lows: nights.filter(vs => vs.some(v => v < 70)).length });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [isEvening, nightHist]);
+
+  const nightRisk = useMemo(() => {
+    if (!effectiveSettings || !glucose?.current || !isEvening) return null;
+    return predictNightLow({ glucose: glucose.current.value, trendRaw: glucose.current.trendRaw, iob, settings: effectiveSettings, histNights: nightHist?.nights, histLows: nightHist?.lows });
+  }, [effectiveSettings, glucose, isEvening, iob, nightHist]);
+
   const empirical = useMemo(() => settings ? estimateEmpiricalICR(doses, settings) : {}, [doses, settings]);
   const empiricalIsf = useMemo(() => settings ? estimateEmpiricalISF(doses, settings) : {}, [doses, settings]);
 
@@ -511,6 +540,18 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                 </div>
               )}
             </div>
+
+            {/* Sleep sensitivity — poor night → dose stronger today. Suggestion only. */}
+            <div className="rounded-xl border border-white/8 bg-black/20 p-3 text-[10px]">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={settings.sleepModifier} onChange={e => updateSetting({ sleepModifier: e.target.checked })} className="mt-0.5 accent-cyan-500" />
+                <span className="text-white/45"><strong className="text-white/70">Sleep sensitivity</strong> — a poor night raises insulin resistance ~11–20% the next day, so the suggested ICR/ISF tightens (dose a little stronger) after low sleep and returns to normal after a good night. Capped at 15%; shown as “sleep −N%”. You still set your own units.
+                  {settings.sleepModifier && lastSleepScore != null && (
+                    <span className="text-cyan-300/60"> Last night {lastSleepScore} → {(() => { const f = sleepSensitivityFactor(lastSleepScore); return f < 1 ? `−${Math.round((1 - f) * 100)}% today` : 'no change'; })()}.</span>
+                  )}
+                </span>
+              </label>
+            </div>
           </div>
         )}
 
@@ -576,6 +617,7 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                   {proposal.breakdown.carbBolus === 0 && proposal.breakdown.correctionBolus === 0 ? ' · nothing to dose' : ''}
                   {proposal.breakdown.trendAdjPct !== 0 ? ` · trend ${proposal.breakdown.trendAdjPct > 0 ? '+' : ''}${proposal.breakdown.trendAdjPct}%` : ''}
                   {proposal.breakdown.iob > 0 ? ` · −${Math.round(proposal.breakdown.iob)}u IOB` : ''}
+                  {proposal.breakdown.sensitivityFactor < 1 ? ` · sleep −${Math.round((1 - proposal.breakdown.sensitivityFactor) * 100)}%` : ''}
                   {` · ICR ${proposal.breakdown.icr} · ISF ${proposal.breakdown.isf}`}
                 </div>
               )}
@@ -604,6 +646,29 @@ export default function InsulinCard({ glucose, nutritionPlan, nowTs }: { glucose
                 ))}
               </div>
             )}
+
+            {/* Bedtime nocturnal-low forecast (evening only) — uses IOB, which a
+                pure CGM app can't. Advisory, no dosing change. */}
+            {nightRisk && (() => {
+              const col = nightRisk.level === 'high' ? '#f87171' : nightRisk.level === 'elevated' ? '#fb923c' : nightRisk.level === 'moderate' ? '#fbbf24' : '#34d399';
+              return (
+                <div className="mt-2 rounded-2xl p-3" style={{ border: `1px solid ${col}30`, background: `${col}10` }}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white/80">🌙 Tonight&apos;s low risk</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: col }}>{nightRisk.level}</span>
+                  </div>
+                  <div className="text-[11px] text-white/55 mt-1 leading-relaxed">
+                    {nightRisk.note}
+                    {nightHist && nightHist.nights > 0 ? ` Lows on ${nightHist.lows}/${nightHist.nights} recent nights.` : ''}
+                  </div>
+                  {nightRisk.snackCarbs > 0 && (
+                    <div className="text-[11px] mt-1.5 font-medium" style={{ color: col }}>
+                      Consider ~{nightRisk.snackCarbs}g slow carb before bed to hold above {settings.targetLow}.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ACTUAL — big scroller */}
             <div className="mt-3 rounded-2xl border border-white/[0.06] bg-black/20 pt-2 pb-1">

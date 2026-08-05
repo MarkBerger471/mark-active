@@ -40,6 +40,8 @@ export interface InsulinSettings {
                          // dose. Never auto-doses — you still set your own units.
   learnSpeed: number;    // fast-learner adaptation speed 0..1 (default 0.7).
                          // Higher = yesterday's miss corrects more of tomorrow.
+  sleepModifier: boolean; // opt-in: nudge today's ICR/ISF from last night's
+                         // sleep (poor sleep → dose stronger). Suggestion only.
 }
 
 // Seeded conservatively (biased toward under-dosing) from the user's ISF via
@@ -60,6 +62,7 @@ export const DEFAULT_INSULIN_SETTINGS: InsulinSettings = {
   typicalBolus: 0,
   learningMode: false,
   learnSpeed: 0.7,
+  sleepModifier: false,
 };
 
 // Rough plausibility cross-check on ICR/ISF from the classic total-daily-dose
@@ -139,6 +142,7 @@ export interface DoseBreakdown {
   iob: number;
   icr: number;
   isf: number;
+  sensitivityFactor: number; // same-day ICR/ISF multiplier (1 = none)
 }
 
 export interface BolusProposal {
@@ -202,11 +206,17 @@ export function calcBolus(opts: {
   recentDoses: InsulinDose[];
   rescueInLastHour: boolean;
   settings: InsulinSettings;
+  // Same-day insulin-sensitivity multiplier (e.g. from last night's sleep).
+  // <1 tightens ICR/ISF (dose stronger); 1 = no change. Bounded for safety.
+  sensitivityFactor?: number;
 }): BolusProposal {
   const { glucose, glucoseAgeMin, trendRaw, mealCarbs, now, recentDoses, rescueInLastHour, settings } = opts;
   const block = timeBlock(now, settings.cutoverHour);
-  const icr = block === 'morning' ? settings.icrMorning : settings.icrEvening;
-  const isf = block === 'morning' ? settings.isfMorning : settings.isfEvening;
+  // Poor sleep → insulin resistance → lower ICR/ISF (more insulin per carb, more
+  // per correction). Bounded to ±20% so a bad signal can't dominate the dose.
+  const sf = Math.max(0.8, Math.min(1.2, opts.sensitivityFactor ?? 1));
+  const icr = (block === 'morning' ? settings.icrMorning : settings.icrEvening) * sf;
+  const isf = (block === 'morning' ? settings.isfMorning : settings.isfEvening) * sf;
   const warnings: string[] = [];
 
   const stale = glucoseAgeMin > 15;
@@ -265,7 +275,9 @@ export function calcBolus(opts: {
       correctionBolus: Math.round(correctionBolus * 10) / 10,
       trendAdjPct: trendPct,
       iob,
-      icr, isf,
+      icr: Math.round(icr * 10) / 10,
+      isf: Math.round(isf * 10) / 10,
+      sensitivityFactor: sf,
     },
     warnings,
   };
@@ -515,4 +527,57 @@ export function learnedISFs(
     if (r.n > 0) out[block] = { isf: r.value, seed, n: r.n };
   });
   return out;
+}
+
+// ── SLEEP → SAME-DAY SENSITIVITY ────────────────────────────────────────────
+/**
+ * Insulin-sensitivity multiplier for TODAY from last night's Oura sleep score.
+ * Short/poor sleep raises next-day insulin resistance ~11–20% (well documented),
+ * so we tighten ICR/ISF (factor < 1 = dose stronger). We only ever TIGHTEN for a
+ * bad night — never loosen for a great one — so an uncertain signal can't cause
+ * under-dosing. Capped at `maxAdj`. Suggestion only; the user approves every dose.
+ */
+export function sleepSensitivityFactor(sleepScore: number | undefined, maxAdj = 0.15): number {
+  if (sleepScore == null || !isFinite(sleepScore)) return 1;
+  const good = 80, poor = 50;
+  if (sleepScore >= good) return 1;
+  const frac = Math.min(1, (good - sleepScore) / (good - poor));
+  return Math.round((1 - maxAdj * frac) * 100) / 100;
+}
+
+// ── BEDTIME NOCTURNAL-LOW FORECAST ──────────────────────────────────────────
+export interface NightLowRisk {
+  level: 'low' | 'moderate' | 'elevated' | 'high';
+  projectedNadir: number;   // mg/dL the still-active insulin (+trend) could reach
+  snackCarbs: number;       // slow carbs suggested to hold above target overnight
+  note: string;
+}
+/**
+ * Forecast overnight-low risk at bedtime — the thing a pure CGM app can't do,
+ * because it needs your INSULIN context. Standard, hand-checkable math:
+ * still-active insulin can drop you ~ IOB × ISF; a falling trend adds a nudge.
+ * An optional recent base rate (lows on N of the last M nights) bumps the level.
+ */
+export function predictNightLow(opts: {
+  glucose: number; trendRaw?: number; iob: number; settings: InsulinSettings;
+  histNights?: number; histLows?: number;
+}): NightLowRisk {
+  const { glucose, trendRaw, iob, settings } = opts;
+  const isf = settings.isfEvening;
+  const trendDrop = trendRaw === 1 ? 25 : trendRaw === 2 ? 12 : 0;
+  const projectedNadir = Math.round(glucose - iob * isf - trendDrop);
+  const margin = projectedNadir - settings.targetLow;
+  const order: NightLowRisk['level'][] = ['low', 'moderate', 'elevated', 'high'];
+  let level: NightLowRisk['level'] = margin < 0 ? 'high' : margin < 12 ? 'elevated' : margin < 30 ? 'moderate' : 'low';
+  if (opts.histNights && opts.histLows != null && opts.histLows / opts.histNights >= 0.4) {
+    level = order[Math.min(order.length - 1, order.indexOf(level) + 1)];
+  }
+  const target = settings.targetLow + 15;
+  const rise = Math.max(0, target - projectedNadir);
+  const snackCarbs = rise > 0 && settings.isfEvening > 0 ? Math.ceil((rise * settings.icrEvening / isf) / 2) * 2 : 0;
+  const note = (level === 'high' || level === 'elevated')
+    ? `${iob}u active could pull you toward ~${projectedNadir} overnight.`
+    : level === 'moderate' ? `Thin margin — ~${projectedNadir} projected before dawn.`
+    : `Projected ~${projectedNadir} overnight — comfortable.`;
+  return { level, projectedNadir, snackCarbs, note };
 }

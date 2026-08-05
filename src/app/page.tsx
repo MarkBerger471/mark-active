@@ -1149,7 +1149,15 @@ export default function Dashboard() {
           })()}
 
           {/* Insulin bolus calculator — sits directly below glucose */}
-          <InsulinCard glucose={glucose} nutritionPlan={nutritionPlan} nowTs={nowTs} />
+          <InsulinCard glucose={glucose} nutritionPlan={nutritionPlan} nowTs={nowTs}
+            lastSleepScore={(() => {
+              // Most recent night's score, only if it's last night (≤~1.5 days old),
+              // so the sleep sensitivity modifier reflects TODAY, not a stale night.
+              const s = sleepData[0];
+              if (!s) return undefined;
+              const ageMs = nowTs - new Date(s.day + 'T00:00').getTime();
+              return ageMs >= 0 && ageMs < 36 * 3600000 ? s.score : undefined;
+            })()} />
 
           {/* Recovery — compact card that unfolds into the full sleep × CGM report */}
           {sleepData.length > 0 && (
