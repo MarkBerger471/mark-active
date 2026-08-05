@@ -25,6 +25,7 @@ const RecoveryCard = dynamic(() => import('@/components/RecoveryCard'), {
   ssr: false,
   loading: () => <div className="glass-card mb-6 h-24 animate-pulse opacity-40" />,
 });
+const GlucoseAGPCard = dynamic(() => import('@/components/GlucoseAGPCard'), { ssr: false });
 
 type Phase = 'bulking' | 'cutting';
 
@@ -1154,6 +1155,9 @@ export default function Dashboard() {
           {sleepData.length > 0 && (
             <RecoveryCard sleep={sleepData} glucose={glucose?.history || []} nowTs={nowTs} />
           )}
+
+          {/* Glucose AGP — 14-day ambulatory glucose profile from the CGM archive */}
+          <GlucoseAGPCard days={14} />
 
           {/* Workout Readiness Score */}
           {(() => {
