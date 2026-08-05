@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 // Sleep night from Oura (via /api/oura). Mirrors the dashboard SleepDay plus the
 // two fields the recovery composite needs (readiness, respiration) which the API
@@ -50,6 +50,7 @@ function band(vals: number[], fallback: [number, number]): [number, number] {
   return hi > lo ? [lo, hi] : fallback;
 }
 const pct = (v: number, lo: number, hi: number) => clamp(((v - lo) / (hi - lo)) * 100, 0, 100);
+const shiftDay = (day: string, n: number) => { const dt = new Date(day + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + n); return dt.toISOString().slice(0, 10); };
 
 // Realistic hypnogram from real stage TOTALS (ordering illustrative until the
 // sleep_phase_5_min field is wired). Each stage's total time is exact.
@@ -77,6 +78,10 @@ export default function RecoveryCard({ sleep, glucose, nowTs }:
   { sleep: SleepDay[]; glucose: GluPoint[]; nowTs: number }) {
   const [open, setOpen] = useState(false);
   const [pick, setPick] = useState(-1); // index into last7; -1 = default
+  // Archived CGM fetched per selected night (keyed by that night's day). The
+  // `glucose` prop only holds the last ~12h; for any other night we pull the
+  // stored series so the overlay + KPIs still work.
+  const [archive, setArchive] = useState<Record<string, { e: number; v: number }[]>>({});
 
   // last 7 calendar days, newest last
   const last7 = useMemo(() => {
@@ -97,7 +102,11 @@ export default function RecoveryCard({ sleep, glucose, nowTs }:
     if (!d?.bedtimeStart || !d?.bedtimeEnd) return null;
     const bs = Date.parse(d.bedtimeStart), be = Date.parse(d.bedtimeEnd);
     if (!(be > bs)) return null;
-    const pts = glucose.map(p => ({ e: epochOf(p), v: p.value })).filter(p => p.e >= bs && p.e <= be && p.v > 0).sort((a, b) => a.e - b.e);
+    // Pool the archived night with the live 12h prop, dedup by timestamp.
+    const pool = [...(archive[d.day] || []), ...glucose.map(p => ({ e: epochOf(p), v: p.value }))];
+    const m = new Map<number, number>();
+    for (const p of pool) if (p.v > 0 && p.e >= bs && p.e <= be) m.set(p.e, p.v);
+    const pts = [...m.entries()].map(([e, v]) => ({ e, v })).sort((a, b) => a.e - b.e);
     if (pts.length < 4) return null;
     const vals = pts.map(p => p.v);
     const nadir = Math.min(...vals);
@@ -111,7 +120,21 @@ export default function RecoveryCard({ sleep, glucose, nowTs }:
       bs, be, pts, nadir, tir: Math.round((inR / vals.length) * 100),
       pctLow, lowMin: Math.round((winMin * pctLow) / 100), cv: Math.round((sd / mean) * 100),
     };
-  }, [d, glucose]);
+  }, [d, glucose, archive]);
+
+  // When a night is opened, pull its archived CGM (±1 UTC day around its date to
+  // cover the in-bed window regardless of timezone). Fetched once per night; an
+  // empty result is cached so we don't refetch nights with no stored data.
+  useEffect(() => {
+    const day = d?.day;
+    if (!open || !day || !d?.bedtimeStart || archive[day] !== undefined) return;
+    let cancelled = false;
+    fetch(`/api/glucose-history?start=${shiftDay(day, -1)}&end=${shiftDay(day, 1)}`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setArchive(a => ({ ...a, [day]: Array.isArray(j.readings) ? j.readings.map((r: { t: number; v: number }) => ({ e: r.t, v: r.v })) : [] })); })
+      .catch(() => { if (!cancelled) setArchive(a => ({ ...a, [day]: [] })); });
+    return () => { cancelled = true; };
+  }, [open, d?.day, d?.bedtimeStart, archive]);
 
   // recovery composite (transparent, personalized bands)
   const rec = useMemo(() => {
@@ -352,9 +375,10 @@ function FusedChart({ d, overnight }: { d: SleepDay; overnight: { bs: number; be
   const iw = overnight?.pts ?? [];
   const dp = iw.map((p, i) => `${i ? 'L' : 'M'}${X(p.e).toFixed(1)} ${gY(p.v).toFixed(1)}`).join(' ');
 
-  let acc = 0;
+  // cumulative start offset per segment — pure, no render-time mutation (n≤24)
+  const starts = segs.map((_, i) => segs.slice(0, i).reduce((s, x) => s + x.m, 0));
   const bars = segs.map((seg, i) => {
-    const x0 = padL + plotW * (acc / sumM), w = plotW * (seg.m / sumM); acc += seg.m;
+    const x0 = padL + plotW * (starts[i] / sumM), w = plotW * (seg.m / sumM);
     return <rect key={i} x={x0 + 0.5} y={laneY(seg.s)} width={Math.max(0.6, w - 1)} height={laneH} rx="4" fill={STAGE[seg.s]} fillOpacity={0.9} />;
   });
 
