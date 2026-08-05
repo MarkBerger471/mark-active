@@ -2,7 +2,7 @@
 // deletes any cache whose name != CACHE_NAME, so bumping is what forces
 // returning clients off the previously-cached (stale) shell. Deploys that
 // don't bump it leave repeat visitors on the old version until manual cache-bust.
-const CACHE_NAME = 'bb-shell-v53';
+const CACHE_NAME = 'bb-shell-v54';
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 // Precache the app-shell HTML + the PWA manifest so a repeat/standalone launch
 // paints from cache with zero network wait (stale-while-revalidate below keeps

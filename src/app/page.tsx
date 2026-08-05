@@ -21,6 +21,10 @@ const InsulinCard = dynamic(() => import('@/components/InsulinCard'), {
   loading: () => <div className="glass-card mb-6 h-40 animate-pulse opacity-40" />,
 });
 const BeforeAfterSlider = dynamic(() => import('@/components/BeforeAfterSlider'), { ssr: false });
+const RecoveryCard = dynamic(() => import('@/components/RecoveryCard'), {
+  ssr: false,
+  loading: () => <div className="glass-card mb-6 h-24 animate-pulse opacity-40" />,
+});
 
 type Phase = 'bulking' | 'cutting';
 
@@ -51,20 +55,14 @@ interface SleepDay {
   avgHr?: number;
   avgHrv?: number;
   lowestHr?: number;
+  avgBreath?: number;
+  readinessScore?: number | null;
   bedtimeStart?: string;
   bedtimeEnd?: string;
   steps?: number;
   activeCalories?: number;
   totalCalories?: number;
 }
-
-function formatDuration(seconds?: number): string {
-  if (!seconds) return '—';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-
 
 export default function Dashboard() {
   const { isAuthenticated, isLoading, logout } = useAuth();
@@ -83,9 +81,6 @@ export default function Dashboard() {
   const [showTargetInput, setShowTargetInput] = useState(false);
   const [targetInput, setTargetInput] = useState('');
   const [sleepData, setSleepData] = useState<SleepDay[]>([]);
-  // -1 = auto-select most recent day with data in the last-7-day strip;
-  // 0..6 = explicit user selection (index into the rendered last-7 strip).
-  const [sleepIdx, setSleepIdx] = useState(-1);
   // A live "now" timestamp. Read during render instead of Date.now() (keeps
   // render pure), but TICKED every 30s + on resume by the effect below. This is
   // CRITICAL for the insulin card: IOB decays with wall-clock time, so a frozen
@@ -161,7 +156,7 @@ export default function Dashboard() {
   const [dailyActivity, setDailyActivity] = useState<Record<string, { activeCalories: number; source?: string }>>({});
   const [glucose, setGlucose] = useState<{
     current: { value: number; valueMmol: number; trend: string; trendRaw?: number; timestamp: string; isHigh: boolean; isLow: boolean } | null;
-    history: { value: number; valueMmol: number; timestamp: string }[];
+    history: { value: number; valueMmol: number; timestamp: string; epoch?: number }[];
     stats: { timeInRange: number; avgGlucose: number; avgMmol: number; estimatedA1c: number; readings: number };
   } | null>(null);
 
@@ -1155,169 +1150,10 @@ export default function Dashboard() {
           {/* Insulin bolus calculator — sits directly below glucose */}
           <InsulinCard glucose={glucose} nutritionPlan={nutritionPlan} nowTs={nowTs} />
 
-          {/* Sleep — Concept 1B: Timeline + Day Strip */}
-            {sleepData.length > 0 && (() => {
-              // Always render the last 7 calendar days in the strip, regardless
-              // of what's cached. With the ring inactive the cache may be days
-              // or weeks behind — without this, the strip just shows whatever
-              // is stored (April dates etc.) rather than the actual recent week.
-              const todayLocal = new Date();
-              const localDateStr = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-              const byDay = new Map(sleepData.map(s => [s.day, s]));
-              // last7[0] = 6 days ago, last7[6] = today
-              const last7: { day: string; data: SleepDay | null }[] = [];
-              for (let i = 6; i >= 0; i--) {
-                const dt = new Date(todayLocal);
-                dt.setDate(todayLocal.getDate() - i);
-                const ds = localDateStr(dt);
-                last7.push({ day: ds, data: byDay.get(ds) || null });
-              }
-              // Default selection: most recent day in the strip that has data.
-              // If none of the last 7 days have data (ring inactive), fall back
-              // to the most recent overall so the lower panel still has data.
-              const defaultIdx = (() => {
-                for (let i = last7.length - 1; i >= 0; i--) if (last7[i].data) return i;
-                return -1; // no data in last 7 days
-              })();
-              // `sleepIdx` is now an index into `last7`. -1 means "fall back to
-              // most recent overall" (older than 7 days).
-              const activeIdx = sleepIdx >= 0 && sleepIdx < last7.length ? sleepIdx : defaultIdx;
-              const d = (activeIdx >= 0 ? last7[activeIdx].data : null) || sleepData[0];
-              const scoreColor = d.score >= 85 ? '#22c55e' : d.score >= 70 ? '#f59e0b' : '#ef4444';
-
-              // Build timeline segments from phase durations
-              const total = d.totalSleep || 1;
-              const deepPct = Math.round(((d.deepSleep || 0) / total) * 100);
-              const remPct = Math.round(((d.remSleep || 0) / total) * 100);
-              const awakePct = Math.round(((d.awakeTime || 0) / total) * 100);
-              const lightPct = Math.max(0, 100 - deepPct - remPct - awakePct);
-
-              // Generate realistic-looking segments by splitting phases
-              const segments: { type: string; pct: number }[] = [];
-              const splitPhase = (type: string, totalPct: number, chunks: number) => {
-                if (totalPct <= 0) return;
-                const base = Math.floor(totalPct / chunks);
-                for (let i = 0; i < chunks; i++) {
-                  const extra = i === 0 ? totalPct - base * chunks : 0;
-                  segments.push({ type, pct: base + extra });
-                }
-              };
-              // Interleave: light-deep-light-rem-light-deep-awake-rem-light
-              const deepChunks = deepPct > 15 ? 2 : 1;
-              const remChunks = remPct > 20 ? 2 : 1;
-              const lightChunks = 3 + deepChunks + remChunks - 2;
-              const lightBase = lightPct > 0 ? Math.floor(lightPct / lightChunks) : 0;
-              let lightRemaining = lightPct;
-              const addLight = (forceMin?: number) => {
-                const amt = Math.min(lightRemaining, Math.max(forceMin || lightBase, 3));
-                if (amt > 0) { segments.push({ type: 'light', pct: amt }); lightRemaining -= amt; }
-              };
-              addLight(8);
-              splitPhase('deep', Math.floor(deepPct / deepChunks) + (deepPct % deepChunks), 1);
-              addLight();
-              splitPhase('rem', Math.floor(remPct / remChunks) + (remPct % remChunks), 1);
-              addLight();
-              if (deepChunks > 1) splitPhase('deep', Math.floor(deepPct / deepChunks), 1);
-              if (awakePct > 0) segments.push({ type: 'awake', pct: awakePct });
-              if (remChunks > 1) splitPhase('rem', Math.floor(remPct / remChunks), 1);
-              if (lightRemaining > 0) segments.push({ type: 'light', pct: lightRemaining });
-
-              const segColors: Record<string, string> = {
-                deep: 'bg-gradient-to-b from-indigo-500 to-indigo-700',
-                rem: 'bg-gradient-to-b from-cyan-500 to-cyan-600',
-                light: 'bg-gradient-to-b from-slate-600 to-slate-800',
-                awake: 'bg-gradient-to-b from-amber-500 to-amber-600',
-              };
-
-              // Bedtime formatting
-              const fmtTime = (iso?: string) => {
-                if (!iso) return '—';
-                try { return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); } catch { return '—'; }
-              };
-
-              return (
-                <div className="glass-card p-5 mb-6 fade-up overflow-hidden">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                      <span className="text-lg">&#9790;</span> Sleep
-                    </h2>
-                  </div>
-
-                  {/* Day strip — last 7 calendar days. Slots without data
-                      render dimmed and are non-clickable. */}
-                  <div className="flex gap-1 mb-3">
-                    {last7.map((slot, i) => {
-                      const isActive = i === activeIdx;
-                      const hasData = !!slot.data;
-                      const sc = slot.data
-                        ? (slot.data.score >= 85 ? '#22c55e' : slot.data.score >= 70 ? '#f59e0b' : '#ef4444')
-                        : 'rgba(255,255,255,0.25)';
-                      const dateObj = new Date(slot.day + 'T00:00:00');
-                      const dayName = dateObj.toLocaleDateString('en-GB', { weekday: 'short' });
-                      const dayNum = dateObj.getDate();
-                      return (
-                        <button key={slot.day} onClick={() => hasData && setSleepIdx(i)}
-                          disabled={!hasData}
-                          className="flex-1 py-1.5 rounded-lg text-center transition-all"
-                          style={{
-                            border: isActive ? `1px solid ${sc}50` : '1px solid rgba(255,255,255,0.06)',
-                            background: isActive ? `${sc}18` : 'rgba(255,255,255,0.03)',
-                            opacity: hasData ? 1 : 0.35,
-                            cursor: hasData ? 'pointer' : 'default',
-                          }}>
-                          <div className="text-[9px] uppercase" style={{ color: isActive ? `${sc}bb` : 'rgba(255,255,255,0.3)', fontWeight: isActive ? 600 : 400 }}>{dayName}</div>
-                          <div className="text-[13px] mt-0.5" style={{ color: isActive ? sc : 'rgba(255,255,255,0.4)', fontWeight: isActive ? 800 : 700 }}>{dayNum}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Time range */}
-                  <div className="flex justify-between items-center text-[11px] text-white/40 mb-1">
-                    <span>{fmtTime(d.bedtimeStart)}</span>
-                    <span className="text-xl font-extrabold text-white">{formatDuration(d.totalSleep)}</span>
-                    <span>{fmtTime(d.bedtimeEnd)}</span>
-                  </div>
-
-                  {/* Timeline bar */}
-                  <div className="flex h-12 rounded-xl overflow-hidden mb-3">
-                    {segments.filter(s => s.pct > 0).map((seg, i) => (
-                      <div key={i} className={`${segColors[seg.type]} flex items-center justify-center text-[9px] font-semibold text-white/80`}
-                        style={{ width: `${seg.pct}%` }}>
-                        {seg.pct >= 12 && seg.type === 'deep' ? 'Deep' : seg.pct >= 12 && seg.type === 'rem' ? 'REM' : ''}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Metrics row */}
-                  <div className="grid grid-cols-4 gap-2">
-                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
-                      <div className="text-[9px] text-white/30 uppercase tracking-wider">Score</div>
-                      <div className="text-base font-bold mt-0.5" style={{ color: scoreColor }}>{d.score}</div>
-                    </div>
-                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
-                      <div className="text-[9px] text-white/30 uppercase tracking-wider">Deep</div>
-                      <div className="text-base font-bold text-indigo-400 mt-0.5">{formatDuration(d.deepSleep)}</div>
-                    </div>
-                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
-                      <div className="text-[9px] text-white/30 uppercase tracking-wider">REM</div>
-                      <div className="text-base font-bold text-cyan-400 mt-0.5">{formatDuration(d.remSleep)}</div>
-                    </div>
-                    <div className="text-center py-2 bg-white/[0.03] rounded-lg">
-                      <div className="text-[9px] text-white/30 uppercase tracking-wider">Efficiency</div>
-                      <div className="text-base font-bold gradient-text mt-0.5">{d.efficiency ? `${d.efficiency}%` : '—'}</div>
-                    </div>
-                  </div>
-
-                  {/* Vitals strip */}
-                  <div className="flex justify-center gap-6 mt-3 pt-3 border-t border-white/5">
-                    <span className="text-xs text-white/30">❤ <strong className="text-red-400">{d.avgHr ? Math.round(d.avgHr) : '—'}</strong> bpm</span>
-                    <span className="text-xs text-white/30">⚡ <strong className="text-green-400">{d.avgHrv || '—'}</strong> ms</span>
-                    {d.lowestHr && <span className="text-xs text-white/30">↓ <strong className="text-red-300">{Math.round(d.lowestHr)}</strong> bpm</span>}
-                  </div>
-                </div>
-              );
-            })()}
+          {/* Recovery — compact card that unfolds into the full sleep × CGM report */}
+          {sleepData.length > 0 && (
+            <RecoveryCard sleep={sleepData} glucose={glucose?.history || []} nowTs={nowTs} />
+          )}
 
           {/* Workout Readiness Score */}
           {(() => {
