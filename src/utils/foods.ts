@@ -8,7 +8,9 @@
  * Macros for foods that Mark actually eats reflect his real-world product
  * labels — notably:
  *   - whey: 69 % concentrate (matches his scoop labelling 25 g P / 36 g)
- *   - whole rye bread: home-made, values confirmed by Mark 2026-04-26
+ *   - whole rye bread: recipe-derived 2026-08-06 from the Magdeburger
+ *     Roggenvollkornmehl spec (BLS 3.02: 326/9.5/60.73/1.7, fiber 13.4 per 100g),
+ *     recipe 450 g rye + 25 g wheat-starter flour → 1 kg loaf; carbs are net
  *
  * Custom foods saved per user in localStorage / Firestore override these
  * via the same shape (see CustomFood in eaa.ts).
@@ -149,7 +151,7 @@ export const FOODS: Record<string, Food> = {
   'rice cakes': { kcal: 387, protein: 8, carbs: 82, fat: 3 },
   'rice dry': { kcal: 360, protein: 7, carbs: 79, fat: 0.6, eaa: { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 } },
   'ricotta': { kcal: 174, protein: 11, carbs: 3, fat: 13, eaa: { leu: 95, ile: 52, val: 63, lys: 80, phe: 50, thr: 43, met: 26, trp: 13, his: 29 } },
-  'rye bread': { kcal: 170, protein: 5.6, carbs: 25, fat: 1.2, eaa: { leu: 66, ile: 35, val: 46, lys: 31, phe: 47, thr: 30, met: 15, trp: 10, his: 22 } },
+  'rye bread': { kcal: 155, protein: 4.6, carbs: 29, fat: 0.8, eaa: { leu: 66, ile: 35, val: 46, lys: 31, phe: 47, thr: 30, met: 15, trp: 10, his: 22 } },
   'salmon': { kcal: 208, protein: 20, carbs: 0, fat: 13, eaa: { leu: 81, ile: 46, val: 52, lys: 92, phe: 39, thr: 44, met: 30, trp: 11, his: 29 } },
   'sardines': { kcal: 208, protein: 25, carbs: 0, fat: 11, eaa: { leu: 82, ile: 50, val: 54, lys: 89, phe: 42, thr: 46, met: 31, trp: 12, his: 32 } },
   'scallops': { kcal: 69, protein: 15, carbs: 2.4, fat: 0.5, eaa: { leu: 78, ile: 46, val: 46, lys: 82, phe: 40, thr: 43, met: 28, trp: 11, his: 20 } },
@@ -186,7 +188,7 @@ export const FOODS: Record<string, Food> = {
   'whey protein': { kcal: 389, protein: 69, carbs: 11, fat: 5.6, eaa: { leu: 148, ile: 90, val: 73, lys: 132, phe: 47, thr: 89, met: 28, trp: 24, his: 28 } },
   'white rice': { kcal: 130, protein: 2.7, carbs: 28, fat: 0.3, eaa: { leu: 75, ile: 41, val: 58, lys: 36, phe: 50, thr: 34, met: 23, trp: 11, his: 23 } },
   'whole milk': { kcal: 61, protein: 3.2, carbs: 4.8, fat: 3.3, eaa: { leu: 98, ile: 56, val: 65, lys: 82, phe: 50, thr: 44, met: 26, trp: 14, his: 28 } },
-  'whole rye bread': { kcal: 170, protein: 5.6, carbs: 25, fat: 1.2, eaa: { leu: 66, ile: 35, val: 46, lys: 31, phe: 47, thr: 30, met: 15, trp: 10, his: 22 } },
+  'whole rye bread': { kcal: 155, protein: 4.6, carbs: 29, fat: 0.8, eaa: { leu: 66, ile: 35, val: 46, lys: 31, phe: 47, thr: 30, met: 15, trp: 10, his: 22 } },
   'yogurt': { kcal: 59, protein: 10, carbs: 3.6, fat: 0.4, eaa: { leu: 98, ile: 56, val: 65, lys: 82, phe: 50, thr: 44, met: 26, trp: 14, his: 28 } },
 };
 

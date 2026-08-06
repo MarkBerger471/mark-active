@@ -9,6 +9,15 @@ import Navigation from '@/components/Navigation';
 // change ships (formula change, food DB correction, UX change, etc).
 const CHANGELOG: Array<{ date: string; title: string; items: string[] }> = [
   {
+    date: '2026-08-06',
+    title: 'Whole rye bread recipe-derived from flour spec',
+    items: [
+      'Whole rye bread: 170/5.6/25/1.2 → 155/4.6/29/0.8 per 100g. Recipe-derived from the Magdeburger Roggenvollkornmehl spec (BLS 3.02: 326/9.5/60.73/1.7, fiber 13.4 per 100g) — 450g rye flour + 25g wheat-starter flour, water + salt, baked to a 1kg loaf. Carbs are net (fiber excluded).',
+      'Net carbs up 25 → 29 (+15%), so bread boluses rise a little; kcal/protein/fat came down because the old homemade values were overestimates (the recipe only accounts for ~1550 kcal/loaf, not 1700).',
+      'Updated: food DB (rye bread, whole rye bread) + the live nutrition plan’s bread items (portions unchanged, macros recomputed on the new per-100g basis).',
+    ],
+  },
+  {
     date: '2026-07-19',
     title: 'Vitals: marker canonicalization, unit conversion, comparison deltas',
     items: [
