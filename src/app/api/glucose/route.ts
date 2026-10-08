@@ -50,16 +50,39 @@ async function authenticate(): Promise<{ token: string; patientId: string; base:
     loginData = await loginRes.json();
   }
 
-  if (!loginData.data?.authTicket?.token) {
+  // Abbott periodically forces re-acceptance of the Terms of Use / Privacy
+  // Policy. When it does, login returns status 4 with a `step` and only a
+  // limited "task" token that can't read data (this is what silently broke the
+  // feed). Accept each step via /auth/continue/{type} — which returns a real
+  // auth ticket — until no step remains. Self-heals on future re-prompts too.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let data: any = loginData.data;
+  for (let i = 0; data?.step?.type && i < 5; i++) {
+    const type = data.step.type as string;
+    const ep = type === 'tou' ? '/auth/continue/tou'
+      : type === 'pp' ? '/auth/continue/pp'
+      : null;
+    const stepToken = data.authTicket?.token as string | undefined;
+    if (!ep || !stepToken) {
+      throw new Error(`Libre login needs an unhandled step: ${type}`);
+    }
+    const contRes = await fetch(`${base}${ep}`, {
+      method: 'POST',
+      headers: { ...HEADERS, 'Authorization': `Bearer ${stepToken}` },
+    });
+    data = (await contRes.json()).data;
+  }
+
+  if (!data?.authTicket?.token) {
     throw new Error(`Login failed: status=${loginData.status}`);
   }
 
-  cachedToken = loginData.data.authTicket.token;
+  cachedToken = data.authTicket.token;
   cachedBase = base;
   tokenExpiry = Date.now() + 2 * 60 * 60 * 1000;
 
   // Hash the user ID for account-id header
-  const userId = loginData.data.user?.id || '';
+  const userId = data.user?.id || '';
   cachedAccountIdHash = createHash('sha256').update(userId).digest('hex');
 
   // Step 2: Get connections
